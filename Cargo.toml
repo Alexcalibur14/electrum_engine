@@ -15,6 +15,7 @@ tobj = { version = "4.0.0", features = ["log"] }
 tracing = "0.1.40"
 raw-window-handle = "0.5"
 winit = "0.28.7"
+image = "0.24.9"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
