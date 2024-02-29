@@ -1,3 +1,4 @@
+use command::{create_command_buffers, create_command_pool};
 use texture::Image;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_2::*;
@@ -19,10 +20,10 @@ use std::ptr::copy_nonoverlapping as memcpy;
 use std::time::Instant;
 use std::env;
 
-
 mod present;
 mod texture;
 mod buffer;
+mod command;
 
 use present::*;
 
@@ -128,6 +129,7 @@ impl App {
             },
         ];
 
+        data.subpass_number = subpass_datas.len();
         data.render_pass = generate_render_pass(&mut subpass_datas, &attachments, &device)?;
 
         let image_data = attachments.iter().map(|a| {
@@ -145,7 +147,8 @@ impl App {
         data.images = generate_render_pass_images(image_data, &data, &instance, &device);
         data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
-        
+        data.command_pool = unsafe { create_command_pool(&instance, &device, &data) }.unwrap();
+        data.command_buffers = unsafe { create_command_buffers(&device, &data) }.unwrap();
 
         Ok(App {
             _entry: entry,
@@ -177,7 +180,7 @@ impl App {
         unsafe {
             self.destroy_swapchain();
 
-
+            self.device.destroy_command_pool(self.data.command_pool, None);
 
             self.device.destroy_device(None);
             self.instance.destroy_surface_khr(self.data.surface, None);
@@ -214,6 +217,7 @@ struct AppData {
 
     // Pipeline
     render_pass: vk::RenderPass,
+    subpass_number: usize,
 
     // Framebuffers
     images: Vec<Image>,
@@ -221,9 +225,9 @@ struct AppData {
 
     // Command Buffers
     command_pool: vk::CommandPool,
-    command_pools: Vec<vk::CommandPool>,
+    // command_pools: Vec<vk::CommandPool>,
     command_buffers: Vec<vk::CommandBuffer>,
-    secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
+    // secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     // Semaphores
     image_available_semaphores: Vec<vk::Semaphore>,
