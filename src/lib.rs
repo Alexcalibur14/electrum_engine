@@ -1,4 +1,3 @@
-use glam::vec3;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::window as vk_window;
@@ -10,12 +9,13 @@ use anyhow::{anyhow, Result};
 use tracing::*;
 use thiserror::Error;
 use winit::window::Window;
+use glam::vec3;
 
 use std::collections::HashSet;
 use std::f32::consts::PI;
 use std::ffi::CStr;
 use std::os::raw::c_void;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::env;
 
 mod present;
@@ -175,7 +175,7 @@ impl App {
         let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
 
         let projection = Projection::new(PI/4.0, aspect, 0.1, 10.0);
-        let camera = SimpleCamera::new(vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), projection);
+        let camera = SimpleCamera::new(&instance, &device, &data, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), projection);
 
         data.cameras.push(Box::new(camera));
 
@@ -216,7 +216,10 @@ impl App {
         self.data.images_in_flight[image_index] = in_flight_fence;
 
         self.update_command_buffer(image_index)?;
-        // self.update_uniform_buffer(image_index)?;
+        
+        
+        self.update(image_index);
+
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
         let wait_stages = &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -303,6 +306,12 @@ impl App {
         Ok(())
     } 
 
+    fn update(&mut self, image_index: usize) {
+        self.data.cameras.iter_mut().for_each(|c| c.calculate_view(&self.device));
+
+        // self.data.objects.iter_mut().for_each(|o|);
+    }
+
     unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
@@ -338,7 +347,7 @@ impl App {
         let aspect = self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
 
         self.data.cameras.iter_mut().for_each(|c| c.set_aspect(aspect));
-        self.data.cameras.iter_mut().for_each(|c| c.calculate_proj());
+        self.data.cameras.iter_mut().for_each(|c| c.calculate_proj(&self.device));
 
         self.data.command_buffers = create_command_buffers(&self.device, &mut self.data)?;
         self.data.images_in_flight.resize(self.data.swapchain_images.len(), vk::Fence::null());
@@ -365,6 +374,8 @@ impl App {
         self.device.destroy_command_pool(self.data.command_pool, None);
 
         self.data.objects.iter().for_each(|o| o.destroy(&self.device));
+
+        self.data.cameras.iter().for_each(|c| c.destroy(&self.device));
 
         self.data.in_flight_fences.iter().for_each(|f| self.device.destroy_fence(*f, None));
         self.data.render_finished_semaphores.iter().for_each(|s| self.device.destroy_semaphore(*s, None));

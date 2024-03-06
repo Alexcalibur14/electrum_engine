@@ -16,6 +16,7 @@ use crate::AppData;
 
 pub trait Renderable {
     unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize);
+    // fn update(&mut self, );
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &AppData);
     fn destroy(&self, device: &Device);

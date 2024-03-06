@@ -52,7 +52,7 @@ pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &
                 AttachmentType::ColorAttachment => color_attachments.push(attachment_ref),
                 AttachmentType::ResolveAttachment => resolve_attachments.push(attachment_ref),
                 AttachmentType::DepthStencilAttachment => depth_stencil_attachment = attachment_ref,
-                AttachmentType::PreserveAttachment => panic!(),
+                AttachmentType::PreserveAttachment => panic!("This should not happen"),
             }
         }
 
