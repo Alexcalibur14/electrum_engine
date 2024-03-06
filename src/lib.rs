@@ -1,3 +1,4 @@
+use glam::vec3;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::window as vk_window;
@@ -11,6 +12,7 @@ use thiserror::Error;
 use winit::window::Window;
 
 use std::collections::HashSet;
+use std::f32::consts::PI;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::time::Instant;
@@ -22,10 +24,14 @@ mod buffer;
 mod command;
 mod model;
 mod shader;
+mod camera;
 
 use present::*;
 use texture::*;
 use command::*;
+use model::*;
+use shader::*;
+use camera::*;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -38,12 +44,12 @@ const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.na
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-#[derive(Clone, Debug)]
+// #[derive(Clone, Debug)]
 pub struct App {
     _entry: Entry,
     instance: Instance,
     data: AppData,
-    device: Device,
+    pub device: Device,
     frame: usize,
     pub resized: bool,
     start: Instant,
@@ -151,9 +157,27 @@ impl App {
 
         data.command_pool = unsafe { create_command_pool(&instance, &device, &data) }.unwrap();
         data.command_buffers = unsafe { create_command_buffers(&device, &data) }.unwrap();
-
         
         unsafe { create_sync_objects(&device, &mut data) }?;
+
+        let shader = VFShader::default()
+            .compile_vertex(&device, "res\\shaders\\vert.glsl")
+            .compile_fragment(&device, "res\\shaders\\frag.glsl")
+            .to_owned();
+
+        let mut object = ObjectPrototype::load("res\\models\\MONKEY.obj", &device, &data, shader);
+        unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
+        unsafe { object.generate_index_buffer(&instance, &device, &data) };
+
+        data.objects.push(Box::new(object));
+
+
+        let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
+
+        let projection = Projection::new(PI/4.0, aspect, 0.1, 10.0);
+        let camera = SimpleCamera::new(vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), projection);
+
+        data.cameras.push(Box::new(camera));
 
         Ok(App {
             _entry: entry,
@@ -191,7 +215,7 @@ impl App {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
-        // self.update_command_buffer(image_index)?;
+        self.update_command_buffer(image_index)?;
         // self.update_uniform_buffer(image_index)?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -230,6 +254,55 @@ impl App {
         Ok(())
     }
 
+    unsafe fn update_command_buffer(&mut self, image_index: usize) -> Result<()> {
+        // let command_pool = self.data.command_pools[image_index];
+        // self.device.reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
+
+        let command_buffer = self.data.command_buffers[image_index];
+    
+        let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
+            .render_pass(self.data.render_pass)
+            .subpass(0)
+            .framebuffer(self.data.framebuffers[image_index]);
+
+        let info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+            .inheritance_info(&inheritance_info);
+
+        self.device.begin_command_buffer(command_buffer, &info)?;
+    
+        let render_area = vk::Rect2D::builder()
+            .offset(vk::Offset2D::default())
+            .extent(self.data.swapchain_extent);
+    
+        let color_clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        };
+    
+        let depth_clear_value = vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
+        };
+    
+        let clear_values = &[color_clear_value, depth_clear_value];
+        let info = vk::RenderPassBeginInfo::builder()
+            .render_pass(self.data.render_pass)
+            .framebuffer(self.data.framebuffers[image_index])
+            .render_area(render_area)
+            .clear_values(clear_values);
+
+        self.device.cmd_begin_render_pass(command_buffer, &info, vk::SubpassContents::INLINE);
+
+        self.data.objects[0].draw(&self.device, command_buffer, image_index);
+
+        self.device.cmd_end_render_pass(command_buffer);
+    
+        self.device.end_command_buffer(command_buffer)?;
+    
+        Ok(())
+    } 
+
     unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
@@ -239,7 +312,33 @@ impl App {
 
         self.data.render_pass = generate_render_pass(&mut self.data.subpass_data, &self.data.attachments, &self.device)?;
 
+        let image_data = self.data.attachments.iter().map(|a| {
+            let (usage, aspect) = match a.final_layout {
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
+                vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL => (vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
+                vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL => (vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::STENCIL),
+                _ => (vk::ImageUsageFlags::COLOR_ATTACHMENT, vk ::ImageAspectFlags::COLOR),
+            };
+
+            (*a, usage, aspect)
+        }).collect::<Vec<_>>();
+
+        self.data.images = generate_render_pass_images(image_data, &self.data, &self.instance, &self.device);
+
         self.data.framebuffers = create_framebuffers(&self.data, &self.device)?;
+
+
+        let mut objects = self.data.objects.clone();
+
+        objects.iter_mut().for_each(|o| o.recreate_swapchain(&self.device, &self.data));
+
+        self.data.objects = objects;
+
+        let aspect = self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
+
+        self.data.cameras.iter_mut().for_each(|c| c.set_aspect(aspect));
+        self.data.cameras.iter_mut().for_each(|c| c.calculate_proj());
 
         self.data.command_buffers = create_command_buffers(&self.device, &mut self.data)?;
         self.data.images_in_flight.resize(self.data.swapchain_images.len(), vk::Fence::null());
@@ -252,6 +351,8 @@ impl App {
 
         self.data.images.iter().for_each(|i| i.destroy(&self.device));
 
+        self.data.objects.iter().for_each(|o| o.destroy_swapchain(&self.device));
+
         self.device.destroy_render_pass(self.data.render_pass, None);
 
         self.data.swapchain_image_views.iter().for_each(|v| self.device.destroy_image_view(*v, None));
@@ -263,6 +364,7 @@ impl App {
 
         self.device.destroy_command_pool(self.data.command_pool, None);
 
+        self.data.objects.iter().for_each(|o| o.destroy(&self.device));
 
         self.data.in_flight_fences.iter().for_each(|f| self.device.destroy_fence(*f, None));
         self.data.render_finished_semaphores.iter().for_each(|s| self.device.destroy_semaphore(*s, None));
@@ -281,8 +383,8 @@ impl App {
 }
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
-#[derive(Clone, Debug, Default)]
-struct AppData {
+#[derive(Default)]
+pub struct AppData {
     // Debug
     messenger: vk::DebugUtilsMessengerEXT,
 
@@ -316,6 +418,9 @@ struct AppData {
     // command_pools: Vec<vk::CommandPool>,
     command_buffers: Vec<vk::CommandBuffer>,
     // secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
+
+    objects: Vec<Box<dyn Renderable>>,
+    cameras: Vec<Box<dyn Camera>>,
 
     // Semaphores
     image_available_semaphores: Vec<vk::Semaphore>,

@@ -42,7 +42,7 @@ pub unsafe fn create_buffer(
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
-) -> Result<(vk::Buffer, vk::DeviceMemory)> {
+) -> Result<BufferWrapper> {
     let buffer_info = vk::BufferCreateInfo::builder()
         .size(size)
         .usage(usage)
@@ -65,7 +65,9 @@ pub unsafe fn create_buffer(
 
     device.bind_buffer_memory(buffer, buffer_memory, 0)?;
 
-    Ok((buffer, buffer_memory))
+    let wrapper = BufferWrapper { buffer, memory: buffer_memory };
+
+    Ok(wrapper)
 }
 
 pub unsafe fn get_memory_type_index(instance: &Instance, data: &AppData, properties: vk::MemoryPropertyFlags, requirements: vk::MemoryRequirements) -> Result<u32> {
@@ -80,4 +82,37 @@ pub unsafe fn get_memory_type_index(instance: &Instance, data: &AppData, propert
 
         }).ok_or_else(|| anyhow!("Failed to find suitable memory type."))
 
+}
+
+pub unsafe fn copy_buffer(
+    device: &Device,
+    source: vk::Buffer,
+    destination: vk::Buffer,
+    size: vk::DeviceSize,
+    data: &AppData,
+) -> Result<()> {
+    let command_buffer = begin_single_time_commands(device, data)?;
+
+    let regions = vk::BufferCopy::builder().size(size);
+    device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
+
+    end_single_time_commands(device, data, command_buffer)?;
+
+    Ok(())
+}
+
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BufferWrapper {
+    pub buffer: vk::Buffer,
+    pub memory: vk::DeviceMemory,
+}
+
+impl BufferWrapper {
+    pub fn destroy(&self, device: &Device) {
+        unsafe {
+            device.destroy_buffer(self.buffer, None);
+            device.free_memory(self.memory, None);
+        }
+    }
 }

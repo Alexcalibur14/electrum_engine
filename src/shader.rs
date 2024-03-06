@@ -7,11 +7,12 @@ use anyhow::Result;
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::bytecode::Bytecode;
 
-use crate::model::Vertex;
 use crate::AppData;
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
+    unsafe fn destroy(&self, device: &Device);
+    fn clone_dyn(&self) -> Box<dyn Shader>;
 }
 
 
@@ -23,18 +24,15 @@ pub struct VFShader {
 
 impl VFShader {
     /// Compiles the vertex shader at the location from `path`
-    fn compile_vertex(&mut self, device: &Device, path: &str) {
+    pub fn compile_vertex(&mut self, device: &Device, path: &str) -> &mut Self {
         self.vertex = unsafe { compile_shader_module(&device, path, "main", ShaderKind::Vertex) }.unwrap();
+        self
     }
 
     /// Compiles the fragment shader at the location from `path`
-    fn compile_fragment(&mut self, device: &Device, path: &str) {
+    pub fn compile_fragment(&mut self, device: &Device, path: &str) -> &mut Self {
         self.fragment = unsafe { compile_shader_module(&device, path, "main", ShaderKind::Fragment) }.unwrap();
-    }
-
-    unsafe fn destroy(&self, device: &Device) {
-        device.destroy_shader_module(self.vertex, None);
-        device.destroy_shader_module(self.fragment, None);
+        self
     }
 }
 
@@ -53,6 +51,21 @@ impl Shader for VFShader {
                 .name(b"main\0")
                 .build(),
         ]
+    }
+
+    unsafe fn destroy(&self, device: &Device) {
+        device.destroy_shader_module(self.vertex, None);
+        device.destroy_shader_module(self.fragment, None);
+    }
+    
+    fn clone_dyn(&self) -> Box<dyn Shader> {
+        Box::new(*self)
+    }
+}
+
+impl Clone for Box<dyn Shader> {
+    fn clone(&self) -> Self {
+        self.clone_dyn()
     }
 }
 
@@ -80,7 +93,7 @@ pub unsafe fn compile_shader_module(device: &Device, path: &str, entry_point_nam
 }
 
 
-#[derive(Debug, Default, Clone)]
+#[derive(Clone)]
 pub struct Material {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
@@ -90,6 +103,9 @@ pub struct Material {
     pub descriptor_pool: vk::DescriptorPool,
 
     pub push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
+
+    shader: Box<dyn Shader>,
+    mesh_settings: PipelineMeshSettings,
 }
 
 impl Material {
@@ -98,10 +114,9 @@ impl Material {
         data: &AppData,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
-        shader: &impl Shader,
-        vertex: &impl Vertex,
+        shader: VFShader,
+        mesh_settings: PipelineMeshSettings,
     ) -> Self {
-        
         
         let info = vk::DescriptorSetLayoutCreateInfo::builder()
             .bindings(bindings.as_slice())
@@ -111,7 +126,7 @@ impl Material {
 
         let descriptor_pool = unsafe { create_descriptor_pool(device, data, &bindings) }.unwrap();
 
-        let (pipeline, pipeline_layout) = unsafe { create_pipeline(device, data, shader, push_constant_sizes.clone(), descriptor_set_layout, vertex) }.unwrap();
+        let (pipeline, pipeline_layout) = unsafe { create_pipeline(device, data, &shader, push_constant_sizes.clone(), descriptor_set_layout, mesh_settings.clone()) }.unwrap();
 
         Material {
             pipeline,
@@ -122,23 +137,48 @@ impl Material {
             descriptor_set_layout,
 
             push_constant_sizes,
+
+            shader: Box::new(shader),
+            mesh_settings,
         }
+    }
+
+    pub fn destroy_swapchain(&self, device: &Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+        }
+    }
+
+    pub fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
+
+        let descriptor_pool = unsafe { create_descriptor_pool(device, data, &self.bindings) }.unwrap();
+
+        (self.pipeline, self.pipeline_layout) = unsafe { create_pipeline(device, data, self.shader.as_ref(), self.push_constant_sizes.clone(), self.descriptor_set_layout, self.mesh_settings.clone()) }.unwrap();
+
+        self.descriptor_pool = descriptor_pool;
+    }
+
+    pub fn destroy(&self, device: &Device) {
+        unsafe { device.destroy_descriptor_set_layout(self.descriptor_set_layout, None) };
+        unsafe { self.shader.destroy(device) };
     }
 }
 
-unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &impl Shader, push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>, descriptor_set_layout:vk::DescriptorSetLayout, vertex: &impl Vertex) -> Result<(vk::Pipeline, vk::PipelineLayout)> {
+unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &dyn Shader, push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>, descriptor_set_layout:vk::DescriptorSetLayout, mesh_settings: PipelineMeshSettings) -> Result<(vk::Pipeline, vk::PipelineLayout)> {
     // Vertex Input State
     
-    let binding_descriptions = &[vertex.binding_description()];
-    let attribute_descriptions = vertex.attribute_descriptions();
+    let binding_descriptions = mesh_settings.binding_descriptions;
+    let attribute_descriptions = mesh_settings.attribute_descriptions;
     let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-        .vertex_binding_descriptions(binding_descriptions)
+        .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
 
     // Input Assembly State
 
     let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+        .topology(mesh_settings.topology)
         .primitive_restart_enable(false);
 
     // Viewport State
@@ -166,10 +206,10 @@ unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &impl Shader,
     let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
         .depth_clamp_enable(false)
         .rasterizer_discard_enable(false)
-        .polygon_mode(vk::PolygonMode::FILL)
-        .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::CLOCKWISE)
+        .polygon_mode(mesh_settings.polygon_mode)
+        .line_width(mesh_settings.line_width)
+        .cull_mode(mesh_settings.cull_mode)
+        .front_face(mesh_settings.front_face)
         .depth_bias_enable(false);
 
     // Multisample State
@@ -224,7 +264,7 @@ unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &impl Shader,
     let set_layouts = &[descriptor_set_layout];
     let layout_info = vk::PipelineLayoutCreateInfo::builder()
         .set_layouts(set_layouts)
-        .push_constant_ranges(push_constant_ranges.as_slice());
+        .push_constant_ranges(&push_constant_ranges);
 
     let pipeline_layout = device.create_pipeline_layout(&layout_info, None)?;
 
@@ -251,6 +291,36 @@ unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &impl Shader,
 
     Ok((pipeline, pipeline_layout))
 }
+
+#[derive(Debug, Clone)]
+pub struct PipelineMeshSettings {
+    pub binding_descriptions: Vec<vk::VertexInputBindingDescription>,
+    pub attribute_descriptions: Vec<vk::VertexInputAttributeDescription>,
+
+    pub topology: vk::PrimitiveTopology,
+
+    pub polygon_mode: vk::PolygonMode,
+    pub line_width: f32,
+    pub cull_mode: vk::CullModeFlags,
+    pub front_face: vk::FrontFace,
+}
+
+impl Default for PipelineMeshSettings {
+    fn default() -> Self {
+        PipelineMeshSettings {
+            binding_descriptions: vec![],
+            attribute_descriptions: vec![],
+
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+
+            polygon_mode: vk::PolygonMode::FILL,
+            line_width: 1.0,
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+        }
+    }
+}
+
 
 unsafe fn create_descriptor_pool(device: &Device, data: &AppData, bindings: &Vec<vk::DescriptorSetLayoutBinding>) -> Result<vk::DescriptorPool> {
     let images = data.swapchain_images.len() as u32;

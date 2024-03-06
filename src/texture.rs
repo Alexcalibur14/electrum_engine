@@ -127,7 +127,7 @@ pub unsafe fn create_texture_image(
     format: vk::Format,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
 
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
+    let staging_buffer = create_buffer(
         instance,
         device,
         data,
@@ -138,11 +138,11 @@ pub unsafe fn create_texture_image(
 
     // Copy (staging)
 
-    let memory = device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+    let memory = device.map_memory(staging_buffer.memory, 0, size, vk::MemoryMapFlags::empty())?;
 
     memcpy(pixels.as_ptr(), memory.cast(), pixels.len());
 
-    device.unmap_memory(staging_buffer_memory);
+    device.unmap_memory(staging_buffer.memory);
 
     // Create (image)
 
@@ -174,12 +174,11 @@ pub unsafe fn create_texture_image(
         mip_levels,
     )?;
 
-    copy_buffer_to_image(device, data, staging_buffer, texture_image, width, height)?;
+    copy_buffer_to_image(device, data, staging_buffer.buffer, texture_image, width, height)?;
 
     // Cleanup
 
-    device.destroy_buffer(staging_buffer, None);
-    device.free_memory(staging_buffer_memory, None);
+    staging_buffer.destroy(device);
 
     // Mipmaps
 
