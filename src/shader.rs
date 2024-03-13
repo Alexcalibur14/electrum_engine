@@ -7,7 +7,7 @@ use anyhow::Result;
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::bytecode::Bytecode;
 
-use crate::AppData;
+use crate::{AppData, Descriptors};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
@@ -98,11 +98,9 @@ pub struct Material {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
-    pub bindings: Vec<vk::DescriptorSetLayoutBinding>,
-    pub descriptor_set_layout: vk::DescriptorSetLayout,
-    pub descriptor_pool: vk::DescriptorPool,
+    pub descriptor: Descriptors,
 
-    pub push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
+    pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
     shader: Box<dyn Shader>,
     mesh_settings: PipelineMeshSettings,
@@ -117,26 +115,38 @@ impl Material {
         shader: VFShader,
         mesh_settings: PipelineMeshSettings,
     ) -> Self {
-        
-        let info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(bindings.as_slice())
+        let descriptor = Descriptors::new(device, data, bindings);
+
+        let mut push_constant_ranges = vec![];
+        let mut offset = 0u32;
+        for (size, stage_flag) in &push_constant_sizes {
+            let range = vk::PushConstantRange::builder()
+                .stage_flags(*stage_flag)
+                .offset(offset)
+                .size(*size)
+                .build();
+
+            offset += size;
+            push_constant_ranges.push(range);
+        }
+
+        let binding = [descriptor.descriptor_set_layout];
+        let layout_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&binding)
+            .push_constant_ranges(&push_constant_ranges)
             .build();
 
-        let descriptor_set_layout = unsafe { device.create_descriptor_set_layout(&info, None) }.unwrap();
+        let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
-        let descriptor_pool = unsafe { create_descriptor_pool(device, data, &bindings) }.unwrap();
-
-        let (pipeline, pipeline_layout) = unsafe { create_pipeline(device, data, &shader, push_constant_sizes.clone(), descriptor_set_layout, mesh_settings.clone()) }.unwrap();
+        let pipeline = unsafe { create_pipeline(device, data, &shader, mesh_settings.clone(), pipeline_layout) }.unwrap();
 
         Material {
             pipeline,
             pipeline_layout,
-            descriptor_pool,
 
-            bindings,
-            descriptor_set_layout,
+            descriptor,
 
-            push_constant_sizes,
+            push_constant_ranges,
 
             shader: Box::new(shader),
             mesh_settings,
@@ -147,26 +157,36 @@ impl Material {
         unsafe {
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
-            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            self.descriptor.destroy_swapchain(device);
         }
     }
 
     pub fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
 
-        let descriptor_pool = unsafe { create_descriptor_pool(device, data, &self.bindings) }.unwrap();
+        self.descriptor.recreate_swapchain(device, data);
 
-        (self.pipeline, self.pipeline_layout) = unsafe { create_pipeline(device, data, self.shader.as_ref(), self.push_constant_sizes.clone(), self.descriptor_set_layout, self.mesh_settings.clone()) }.unwrap();
+        
+        let binding = [self.descriptor.descriptor_set_layout];
+        let layout_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&binding)
+            .push_constant_ranges(&self.push_constant_ranges)
+            .build();
 
-        self.descriptor_pool = descriptor_pool;
+        let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
+
+        
+        self.pipeline = unsafe { create_pipeline(device, data, self.shader.as_ref(), self.mesh_settings.clone(), pipeline_layout) }.unwrap();
+
+        self.pipeline_layout = pipeline_layout;
     }
 
     pub fn destroy(&self, device: &Device) {
-        unsafe { device.destroy_descriptor_set_layout(self.descriptor_set_layout, None) };
         unsafe { self.shader.destroy(device) };
+        self.descriptor.destroy(device);
     }
 }
 
-unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &dyn Shader, push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>, descriptor_set_layout:vk::DescriptorSetLayout, mesh_settings: PipelineMeshSettings) -> Result<(vk::Pipeline, vk::PipelineLayout)> {
+unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &dyn Shader, mesh_settings: PipelineMeshSettings, pipeline_layout: vk::PipelineLayout) -> Result<vk::Pipeline> {
     // Vertex Input State
     
     let binding_descriptions = mesh_settings.binding_descriptions;
@@ -247,28 +267,6 @@ unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &dyn Shader, 
         .depth_bounds_test_enable(false)
         .stencil_test_enable(false);    
 
-    // Layout
-
-    let mut push_constant_ranges = vec![];
-    let mut offset = 0u32;
-    for (size, stage_flag) in &push_constant_sizes {
-        let range = vk::PushConstantRange::builder()
-            .stage_flags(*stage_flag)
-            .offset(offset)
-            .size(*size);
-
-        offset += size;
-        push_constant_ranges.push(range);
-    }
-
-    let set_layouts = &[descriptor_set_layout];
-    let layout_info = vk::PipelineLayoutCreateInfo::builder()
-        .set_layouts(set_layouts)
-        .push_constant_ranges(&push_constant_ranges);
-
-    let pipeline_layout = device.create_pipeline_layout(&layout_info, None)?;
-
-
     // Create
 
     let shader_stages = shader.stages();
@@ -289,7 +287,7 @@ unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &dyn Shader, 
 
     let pipeline = device.create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?.0[0];
 
-    Ok((pipeline, pipeline_layout))
+    Ok(pipeline)
 }
 
 #[derive(Debug, Clone)]
@@ -320,28 +318,3 @@ impl Default for PipelineMeshSettings {
         }
     }
 }
-
-
-unsafe fn create_descriptor_pool(device: &Device, data: &AppData, bindings: &Vec<vk::DescriptorSetLayoutBinding>) -> Result<vk::DescriptorPool> {
-    let images = data.swapchain_images.len() as u32;
-
-    let mut sizes = vec![];
-
-    for binding in bindings {
-        let size = vk::DescriptorPoolSize::builder()
-            .type_(binding.descriptor_type)
-            .descriptor_count(binding.descriptor_count * images)
-            .build();
-
-        sizes.push(size);
-    }
-
-    let info = vk::DescriptorPoolCreateInfo::builder()
-        .pool_sizes(sizes.as_slice())
-        .max_sets(data.swapchain_images.len() as u32);
-    
-    let descriptor_pool = device.create_descriptor_pool(&info, None)?;
-
-    Ok(descriptor_pool)
-}
-

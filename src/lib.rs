@@ -9,14 +9,13 @@ use anyhow::{anyhow, Result};
 use tracing::*;
 use thiserror::Error;
 use winit::window::Window;
-use glam::vec3;
+use glam::{vec3, Mat4, Quat, Vec3};
 
 use std::collections::HashSet;
 use std::f32::consts::PI;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::time::{Duration, Instant};
-use std::env;
 
 mod present;
 mod texture;
@@ -44,7 +43,7 @@ const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.na
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-// #[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct App {
     _entry: Entry,
     instance: Instance,
@@ -52,7 +51,7 @@ pub struct App {
     pub device: Device,
     frame: usize,
     pub resized: bool,
-    start: Instant,
+    stats: AppStats,
 }
 
 impl App {
@@ -60,9 +59,12 @@ impl App {
     pub fn create(window: &Window) -> Result<Self> {
         let loader = unsafe { LibloadingLoader::new(LIBRARY)? };
         let entry = unsafe { Entry::new(loader) }.map_err(|b| anyhow!("{}", b))?;
+
         let mut data = AppData::default();
+
         let instance = unsafe { create_instance(window, &entry, &mut data)? };
         data.surface = unsafe { vk_window::create_surface(&instance, &window, &window)? };
+
         unsafe { pick_physical_device(&instance, &mut data)? };
         let device = unsafe { create_logical_device(&instance, &mut data)? };
 
@@ -160,24 +162,39 @@ impl App {
         
         unsafe { create_sync_objects(&device, &mut data) }?;
 
+
+        let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
+
+        let projection = Projection::new(PI/4.0, aspect, 0.1, 100.0);
+        let mut camera = SimpleCamera::new(vec3(0.0, 10.0, 10.0), vec3(0.0, 0.0, 0.0), projection);
+        camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
+
+        data.cameras.push(Box::new(camera));
+
+
         let shader = VFShader::default()
             .compile_vertex(&device, "res\\shaders\\vert.glsl")
             .compile_fragment(&device, "res\\shaders\\frag.glsl")
             .to_owned();
 
-        let mut object = ObjectPrototype::load("res\\models\\MONKEY.obj", &device, &data, shader);
+        let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
+
+        let view = data.cameras[0].view();
+        let proj = data.cameras[0].proj();
+        
+        let mut object = ObjectPrototype::load(&instance, &device, &data, "res\\models\\MONKEY.obj", shader, position, view, proj);
         unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
         unsafe { object.generate_index_buffer(&instance, &device, &data) };
 
         data.objects.push(Box::new(object));
 
+        data.recreated = false;
 
-        let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
-
-        let projection = Projection::new(PI/4.0, aspect, 0.1, 10.0);
-        let camera = SimpleCamera::new(&instance, &device, &data, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), projection);
-
-        data.cameras.push(Box::new(camera));
+        let stats = AppStats {
+            start: Instant::now(),
+            delta: Duration::ZERO,
+            frame: 0,
+        };
 
         Ok(App {
             _entry: entry,
@@ -186,7 +203,7 @@ impl App {
             device,
             frame: 0,
             resized: false,
-            start: Instant::now(),
+            stats,
         })
     }
 
@@ -215,10 +232,9 @@ impl App {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
-        self.update_command_buffer(image_index)?;
-        
-        
+
         self.update(image_index);
+        self.update_command_buffer(image_index)?;
 
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -233,8 +249,7 @@ impl App {
 
         self.device.reset_fences(&[in_flight_fence])?;
 
-        self.device
-            .queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
+        self.device.queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
 
         let swapchains = &[self.data.swapchain];
         let image_indices = &[image_index as u32];
@@ -251,8 +266,12 @@ impl App {
         } else if let Err(e) = result {
             return Err(anyhow!(e));
         }
+        else {
+            self.data.recreated = false;
+        }
 
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        self.stats.frame += 1;
 
         Ok(())
     }
@@ -307,12 +326,18 @@ impl App {
     } 
 
     fn update(&mut self, image_index: usize) {
-        self.data.cameras.iter_mut().for_each(|c| c.calculate_view(&self.device));
+        self.data.cameras.iter_mut().for_each(|c| c.calculate_view(&self.device, image_index));
 
-        // self.data.objects.iter_mut().for_each(|o|);
+        let mut objects = self.data.objects.clone();
+
+        objects.iter_mut().for_each(|o| o.update(&self.device, &self.data, self.stats, image_index));
+
+        self.data.objects = objects;
     }
 
     unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
+        self.data.recreated = true;
+
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
 
@@ -394,7 +419,7 @@ impl App {
 }
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AppData {
     // Debug
     messenger: vk::DebugUtilsMessengerEXT,
@@ -443,21 +468,29 @@ pub struct AppData {
 
     // MSAA
     msaa_samples: vk::SampleCountFlags,
+
+    recreated: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AppStats {
+    start: Instant,
+
+    #[allow(dead_code)]
+    delta: Duration,
+
+    frame: u64,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
     // Application Info
 
-    let major: u32 = env::var("CARGO_PKG_VERSION_MAJOR").unwrap().parse().unwrap();
-    let minor: u32 = env::var("CARGO_PKG_VERSION_MINOR").unwrap().parse().unwrap();
-    let patch: u32 = env::var("CARGO_PKG_VERSION_PATCH").unwrap().parse().unwrap();
-
     let application_info = vk::ApplicationInfo::builder()
         .application_name(b"Electrum Engine\0")
         .application_version(vk::make_version(0, 1, 0))
         .engine_name(b"Electrum Engine\0")
-        .engine_version(vk::make_version(major, minor, patch))
-        .api_version(vk::make_version(1, 0, 0));
+        .engine_version(vk::make_version(1, 0, 0))
+        .api_version(vk::make_version(1, 3, 0));
 
     // Layers
 

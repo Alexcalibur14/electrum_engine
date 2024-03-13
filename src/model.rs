@@ -5,18 +5,18 @@ use std::ptr::copy_nonoverlapping as memcpy;
 use std::{hash::Hasher, mem::size_of};
 use std::hash::Hash;
 
-use glam::{vec2, vec3, Vec2, Vec3};
+use glam::{vec2, vec3, Mat4, Vec2, Vec3};
 use anyhow::Result;
 use vulkanalia::prelude::v1_2::*;
 
 use crate::buffer::{copy_buffer, create_buffer, BufferWrapper};
 use crate::shader::{Material, PipelineMeshSettings, VFShader};
-use crate::AppData;
+use crate::{AppData, AppStats};
 
 
 pub trait Renderable {
     unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize);
-    // fn update(&mut self, );
+    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize);
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &AppData);
     fn destroy(&self, device: &Device);
@@ -34,6 +34,70 @@ pub trait Vertex {
     fn attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription>;
 }
 
+
+#[derive(Debug, Clone, Default)]
+pub struct Descriptors {
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
+    pub descriptor_pool: vk::DescriptorPool,
+
+    pub bindings: Vec<vk::DescriptorSetLayoutBinding>,
+}
+
+impl Descriptors {
+    pub fn new(device: &Device, data: &AppData, bindings: Vec<vk::DescriptorSetLayoutBinding>) -> Self {
+        let info = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&bindings)
+            .build();
+
+        let descriptor_set_layout = unsafe { device.create_descriptor_set_layout(&info, None) }.unwrap();
+
+        let descriptor_pool = unsafe { Descriptors::create_descriptor_pool(device, data, &bindings) }.unwrap();
+
+        Descriptors {
+            descriptor_set_layout,
+            descriptor_pool,
+
+            bindings,
+        }
+    }
+
+    pub unsafe fn create_descriptor_pool(device: &Device, data: &AppData, bindings: &Vec<vk::DescriptorSetLayoutBinding>) -> Result<vk::DescriptorPool> {
+        let images = data.swapchain_images.len() as u32;
+    
+        let mut sizes = vec![];
+    
+        for binding in bindings {
+            let size = vk::DescriptorPoolSize::builder()
+                .type_(binding.descriptor_type)
+                .descriptor_count(binding.descriptor_count * images)
+                .build();
+    
+            sizes.push(size);
+        }
+    
+        let info = vk::DescriptorPoolCreateInfo::builder()
+            .pool_sizes(sizes.as_slice())
+            .max_sets(data.swapchain_images.len() as u32);
+        
+        let descriptor_pool = device.create_descriptor_pool(&info, None)?;
+    
+        Ok(descriptor_pool)
+    }
+
+    pub fn destroy_swapchain(&self, device: &Device) {
+        unsafe { device.destroy_descriptor_pool(self.descriptor_pool, None) };
+    }
+
+    pub fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
+        self.descriptor_pool = unsafe { Self::create_descriptor_pool(device, data, &self.bindings) }.unwrap();
+    }
+
+    pub fn destroy(&self, device: &Device) {
+        unsafe { device.destroy_descriptor_set_layout(self.descriptor_set_layout, None) };
+    }
+}
+
+
 #[derive(Clone)]
 pub struct ObjectPrototype {
     vertices: Vec<PCTVertex>,
@@ -43,11 +107,24 @@ pub struct ObjectPrototype {
     index_buffer: BufferWrapper,
 
     material: Material,
+
+    ubo: UniformBufferObject,
+    ubo_buffers: Vec<BufferWrapper>,
+
+    descriptor_sets: Vec<vk::DescriptorSet>,
 }
 
 impl Renderable for ObjectPrototype {
-    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, _image_index: usize) {
+    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize) {
         device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.material.pipeline);
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            self.material.pipeline_layout,
+            0,
+            &[self.descriptor_sets[image_index]],
+            &[]
+        );
         device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
         device.cmd_bind_index_buffer(command_buffer, self.index_buffer.buffer, 0, vk::IndexType::UINT32);
         device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
@@ -59,32 +136,153 @@ impl Renderable for ObjectPrototype {
 
     fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
         self.material.recreate_swapchain(device, data);
+
+        let layouts = vec![self.material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
+        let info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(self.material.descriptor.descriptor_pool)
+            .set_layouts(&layouts);
+
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
+
+        
+        for i in 0..data.swapchain_images.len() {
+            let info = vk::DescriptorBufferInfo::builder()
+                .buffer(self.ubo_buffers[i].buffer)
+                .offset(0)
+                .range(size_of::<UniformBufferObject>() as u64)
+                .build();
+            
+            let buffer_info = &[info];
+            let ubo_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(buffer_info)
+                .build();
+
+            unsafe { device.update_descriptor_sets(
+                &[ubo_write], 
+                &[] as &[vk::CopyDescriptorSet]
+            ) };
+        }
+        self.descriptor_sets = descriptor_sets;
     }
 
     fn destroy(&self, device: &Device) {
         self.material.destroy(device);
         self.vertex_buffer.destroy(device);
         self.index_buffer.destroy(device);
+        self.ubo_buffers.iter().for_each(|b| b.destroy(device));
     }
 
     fn clone_dyn(&self) -> Box<dyn Renderable> {
         Box::new(self.clone())
     }
+    
+    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize) {
+        self.ubo.view = data.cameras[0].view();
+
+        self.ubo.model = Mat4::from_translation(vec3(stats.start.elapsed().as_secs_f32().sin() * 0.5, 0.0, 0.0));
+
+        let ubo_data = (self.ubo.model, self.ubo.view);
+
+        let mem = unsafe { device.map_memory(self.ubo_buffers[index].memory, 0, 128, vk::MemoryMapFlags::empty()) }.unwrap();
+
+        unsafe { memcpy(&ubo_data, mem.cast(), 1) }
+
+        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };  
+
+        if data.recreated {
+            self.ubo.proj = data.cameras[0].proj();
+
+            for i in 0..data.swapchain_images.len() {
+                let proj_mem = unsafe { device.map_memory(self.ubo_buffers[i].memory, 128, 64, vk::MemoryMapFlags::empty()) }.unwrap();
+                
+                unsafe { memcpy(&self.ubo.proj, proj_mem.cast(), 1) }
+
+                unsafe { device.unmap_memory(self.ubo_buffers[i].memory) }
+            }
+        }
+    }
 }
 
 
 impl ObjectPrototype {
-    pub fn load(path: &str, device: &Device, data: &AppData, shader: VFShader) -> Self {
+    pub fn load(instance: &Instance, device: &Device, data: &AppData, path: &str, shader: VFShader, model: Mat4, view: Mat4, proj: Mat4) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
 
         let mesh_settings = PipelineMeshSettings {
             binding_descriptions: PCTVertex::binding_descriptions(),
             attribute_descriptions: PCTVertex::attribute_descriptions(),
             front_face: vk::FrontFace::CLOCKWISE,
+            polygon_mode: vk::PolygonMode::LINE,
             ..Default::default()
         };
 
-        let material = Material::new(device, data, vec![], vec![], shader, mesh_settings);
+        let bindings = vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .build()
+        ];
+
+        let material = Material::new(device, data, bindings, vec![], shader, mesh_settings);
+
+        let ubo = UniformBufferObject { model, view, proj };
+
+        let mut ubo_buffers = vec![];
+
+        for _ in 0..data.swapchain_images.len() {
+            let buffer = unsafe { create_buffer(
+                instance,
+                device,
+                data,
+                size_of::<UniformBufferObject>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE
+            ) }.unwrap();
+
+            let ubo_mem = unsafe { device.map_memory(buffer.memory, 0, 192, vk::MemoryMapFlags::empty()) }.unwrap();
+
+            unsafe { memcpy(&ubo, ubo_mem.cast(), 1) };
+
+            unsafe { device.unmap_memory(buffer.memory) };
+
+            ubo_buffers.push(buffer);
+        }
+
+        let layouts = vec![material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
+        let info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(material.descriptor.descriptor_pool)
+            .set_layouts(&layouts);
+
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
+
+        
+        for i in 0..data.swapchain_images.len() {
+            let info = vk::DescriptorBufferInfo::builder()
+                .buffer(ubo_buffers[i].buffer)
+                .offset(0)
+                .range(size_of::<UniformBufferObject>() as u64)
+                .build();
+            
+            let buffer_info = &[info];
+            let ubo_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(buffer_info)
+                .build();
+
+            unsafe { device.update_descriptor_sets(
+                &[ubo_write], 
+                &[] as &[vk::CopyDescriptorSet]
+            ) };
+        }
 
         ObjectPrototype {
             vertices,
@@ -94,6 +292,11 @@ impl ObjectPrototype {
             index_buffer: BufferWrapper::default(),
 
             material,
+
+            ubo,
+            ubo_buffers,
+
+            descriptor_sets,
         }
     }
 
@@ -203,7 +406,6 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
                     model.mesh.positions[pos_offset + 1],
                     model.mesh.positions[pos_offset + 2],
                 ),
-                color: vec3(1.0, 1.0, 1.0),
                 tex_coord: vec2(
                     model.mesh.texcoords[tex_coord_offset],
                     1.0 - model.mesh.texcoords[tex_coord_offset + 1],
@@ -229,7 +431,6 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
 #[derive(Copy, Clone, Debug)]
 pub struct PCTVertex {
     pub pos: Vec3,
-    pub color: Vec3,
     pub tex_coord: Vec2,
 }
 
@@ -256,15 +457,8 @@ impl Vertex for PCTVertex {
             vk::VertexInputAttributeDescription::builder()
                 .binding(0)
                 .location(1)
-                .format(vk::Format::R32G32B32_SFLOAT)
-                .offset(size_of::<Vec3>() as u32)
-                .build(),
-
-            vk::VertexInputAttributeDescription::builder()
-                .binding(0)
-                .location(2)
                 .format(vk::Format::R32G32_SFLOAT)
-                .offset((size_of::<Vec3>() + size_of::<Vec3>()) as u32)
+                .offset(size_of::<Vec3>() as u32)
                 .build(),
         ]
     }
@@ -273,7 +467,6 @@ impl Vertex for PCTVertex {
 impl PartialEq for PCTVertex {
     fn eq(&self, other: &Self) -> bool {
         self.pos == other.pos
-            && self.color == other.color
             && self.tex_coord == other.tex_coord
     }
 }
@@ -285,10 +478,16 @@ impl Hash for PCTVertex {
         self.pos[0].to_bits().hash(state);
         self.pos[1].to_bits().hash(state);
         self.pos[2].to_bits().hash(state);
-        self.color[0].to_bits().hash(state);
-        self.color[1].to_bits().hash(state);
-        self.color[2].to_bits().hash(state);
         self.tex_coord[0].to_bits().hash(state);
         self.tex_coord[1].to_bits().hash(state);
     }
+}
+
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+struct UniformBufferObject{
+    model: Mat4,
+    view: Mat4,
+    proj: Mat4,
 }

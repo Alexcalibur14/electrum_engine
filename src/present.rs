@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use vulkanalia::{prelude::v1_2::*, vk::KhrSwapchainExtension};
 
 use anyhow::{Ok, Result};
