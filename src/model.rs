@@ -16,7 +16,7 @@ use crate::{AppData, AppStats};
 
 pub trait Renderable {
     unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize);
-    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize);
+    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize, view_proj: Mat4);
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &AppData);
     fn destroy(&self, device: &Device);
@@ -149,7 +149,7 @@ impl Renderable for ObjectPrototype {
             let info = vk::DescriptorBufferInfo::builder()
                 .buffer(self.ubo_buffers[i].buffer)
                 .offset(0)
-                .range(size_of::<UniformBufferObject>() as u64)
+                .range(64)
                 .build();
             
             let buffer_info = &[info];
@@ -179,31 +179,17 @@ impl Renderable for ObjectPrototype {
     fn clone_dyn(&self) -> Box<dyn Renderable> {
         Box::new(self.clone())
     }
-    
-    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize) {
-        self.ubo.view = data.cameras[0].view();
 
+    fn update(&mut self, device: &Device, _data: &AppData, stats: AppStats, index: usize, view_proj: Mat4) {
         self.ubo.model = Mat4::from_translation(vec3(stats.start.elapsed().as_secs_f32().sin() * 0.5, 0.0, 0.0));
 
-        let ubo_data = (self.ubo.model, self.ubo.view);
+        let mvp = view_proj * self.ubo.model;
 
-        let mem = unsafe { device.map_memory(self.ubo_buffers[index].memory, 0, 128, vk::MemoryMapFlags::empty()) }.unwrap();
+        let mem = unsafe { device.map_memory(self.ubo_buffers[index].memory, 0, 64, vk::MemoryMapFlags::empty()) }.unwrap();
 
-        unsafe { memcpy(&ubo_data, mem.cast(), 1) }
+        unsafe { memcpy(&mvp, mem.cast(), 1) };
 
-        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };  
-
-        if data.recreated {
-            self.ubo.proj = data.cameras[0].proj();
-
-            for i in 0..data.swapchain_images.len() {
-                let proj_mem = unsafe { device.map_memory(self.ubo_buffers[i].memory, 128, 64, vk::MemoryMapFlags::empty()) }.unwrap();
-                
-                unsafe { memcpy(&self.ubo.proj, proj_mem.cast(), 1) }
-
-                unsafe { device.unmap_memory(self.ubo_buffers[i].memory) }
-            }
-        }
+        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
     }
 }
 
@@ -216,7 +202,6 @@ impl ObjectPrototype {
             binding_descriptions: PCTVertex::binding_descriptions(),
             attribute_descriptions: PCTVertex::attribute_descriptions(),
             front_face: vk::FrontFace::CLOCKWISE,
-            polygon_mode: vk::PolygonMode::LINE,
             ..Default::default()
         };
 
@@ -233,6 +218,8 @@ impl ObjectPrototype {
 
         let ubo = UniformBufferObject { model, view, proj };
 
+        let mvp = proj * view * model;
+
         let mut ubo_buffers = vec![];
 
         for _ in 0..data.swapchain_images.len() {
@@ -240,14 +227,14 @@ impl ObjectPrototype {
                 instance,
                 device,
                 data,
-                size_of::<UniformBufferObject>() as u64,
+                64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE
             ) }.unwrap();
 
-            let ubo_mem = unsafe { device.map_memory(buffer.memory, 0, 192, vk::MemoryMapFlags::empty()) }.unwrap();
+            let ubo_mem = unsafe { device.map_memory(buffer.memory, 0, 64, vk::MemoryMapFlags::empty()) }.unwrap();
 
-            unsafe { memcpy(&ubo, ubo_mem.cast(), 1) };
+            unsafe { memcpy(&mvp, ubo_mem.cast(), 1) };
 
             unsafe { device.unmap_memory(buffer.memory) };
 
@@ -266,7 +253,7 @@ impl ObjectPrototype {
             let info = vk::DescriptorBufferInfo::builder()
                 .buffer(ubo_buffers[i].buffer)
                 .offset(0)
-                .range(size_of::<UniformBufferObject>() as u64)
+                .range(64)
                 .build();
             
             let buffer_info = &[info];

@@ -166,7 +166,7 @@ impl App {
         let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
 
         let projection = Projection::new(PI/4.0, aspect, 0.1, 100.0);
-        let mut camera = SimpleCamera::new(vec3(0.0, 10.0, 10.0), vec3(0.0, 0.0, 0.0), projection);
+        let mut camera = SimpleCamera::new(vec3(0.0, 2.0, 4.0), vec3(0.0, 0.0, 0.0), projection);
         camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
         data.cameras.push(Box::new(camera));
@@ -328,9 +328,11 @@ impl App {
     fn update(&mut self, image_index: usize) {
         self.data.cameras.iter_mut().for_each(|c| c.calculate_view(&self.device, image_index));
 
+        let vp = self.data.cameras[0].proj() * self.data.cameras[0].view();
+
         let mut objects = self.data.objects.clone();
 
-        objects.iter_mut().for_each(|o| o.update(&self.device, &self.data, self.stats, image_index));
+        objects.iter_mut().for_each(|o| o.update(&self.device, &self.data, self.stats, image_index, vp));
 
         self.data.objects = objects;
     }
@@ -655,6 +657,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut AppData) -> Resu
 
     // Features
 
+    // change this for other features
     let features = vk::PhysicalDeviceFeatures::builder()
         .sampler_anisotropy(true);
 
