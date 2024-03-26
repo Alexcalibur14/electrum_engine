@@ -11,12 +11,12 @@ use vulkanalia::prelude::v1_2::*;
 
 use crate::buffer::{copy_buffer, create_buffer, BufferWrapper};
 use crate::shader::{Material, PipelineMeshSettings, VFShader};
-use crate::{AppData, AppStats};
+use crate::{AppData, AppStats, Image};
 
 
 pub trait Renderable {
     unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize);
-    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize, view_proj: Mat4);
+    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize, view_proj: Mat4, id: usize);
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &AppData);
     fn destroy(&self, device: &Device);
@@ -111,6 +111,8 @@ pub struct ObjectPrototype {
     ubo: UniformBufferObject,
     ubo_buffers: Vec<BufferWrapper>,
 
+    image: (Image, vk::Sampler),
+
     descriptor_sets: Vec<vk::DescriptorSet>,
 }
 
@@ -161,8 +163,23 @@ impl Renderable for ObjectPrototype {
                 .buffer_info(buffer_info)
                 .build();
 
+                let info = vk::DescriptorImageInfo::builder()
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image_view(self.image.0.view)
+                .sampler(self.image.1)
+                .build();
+            
+            let image_info = &[info];
+            let texture_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(image_info)
+                .build();
+
             unsafe { device.update_descriptor_sets(
-                &[ubo_write], 
+                &[ubo_write, texture_write], 
                 &[] as &[vk::CopyDescriptorSet]
             ) };
         }
@@ -174,14 +191,18 @@ impl Renderable for ObjectPrototype {
         self.vertex_buffer.destroy(device);
         self.index_buffer.destroy(device);
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
+        unsafe {
+            self.image.0.destroy(device);
+            device.destroy_sampler(self.image.1, None);
+        }
     }
 
     fn clone_dyn(&self) -> Box<dyn Renderable> {
         Box::new(self.clone())
     }
 
-    fn update(&mut self, device: &Device, _data: &AppData, stats: AppStats, index: usize, view_proj: Mat4) {
-        self.ubo.model = Mat4::from_translation(vec3(stats.start.elapsed().as_secs_f32().sin() * 0.5, 0.0, 0.0));
+    fn update(&mut self, device: &Device, _data: &AppData, stats: AppStats, index: usize, view_proj: Mat4, id: usize) {
+        self.ubo.model = Mat4::from_translation(vec3(stats.start.elapsed().as_secs_f32().sin() * 0.5, (id as f32 * 2.0) - 1.0, 0.0));
 
         let mvp = view_proj * self.ubo.model;
 
@@ -195,7 +216,7 @@ impl Renderable for ObjectPrototype {
 
 
 impl ObjectPrototype {
-    pub fn load(instance: &Instance, device: &Device, data: &AppData, path: &str, shader: VFShader, model: Mat4, view: Mat4, proj: Mat4) -> Self {
+    pub fn load(instance: &Instance, device: &Device, data: &AppData, path: &str, shader: VFShader, model: Mat4, view: Mat4, proj: Mat4, image: (Image, vk::Sampler)) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
 
         let mesh_settings = PipelineMeshSettings {
@@ -211,6 +232,13 @@ impl ObjectPrototype {
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .build(),
+
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build()
         ];
 
@@ -247,7 +275,6 @@ impl ObjectPrototype {
             .set_layouts(&layouts);
 
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
-
         
         for i in 0..data.swapchain_images.len() {
             let info = vk::DescriptorBufferInfo::builder()
@@ -265,8 +292,23 @@ impl ObjectPrototype {
                 .buffer_info(buffer_info)
                 .build();
 
+            let info = vk::DescriptorImageInfo::builder()
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image_view(image.0.view)
+                .sampler(image.1)
+                .build();
+            
+            let image_info = &[info];
+            let texture_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(image_info)
+                .build();
+
             unsafe { device.update_descriptor_sets(
-                &[ubo_write], 
+                &[ubo_write, texture_write], 
                 &[] as &[vk::CopyDescriptorSet]
             ) };
         }
@@ -284,6 +326,7 @@ impl ObjectPrototype {
             ubo_buffers,
 
             descriptor_sets,
+            image,
         }
     }
 

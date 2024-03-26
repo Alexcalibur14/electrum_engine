@@ -157,8 +157,8 @@ impl App {
         data.images = generate_render_pass_images(image_data, &data, &instance, &device);
         data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
-        data.command_pool = unsafe { create_command_pool(&instance, &device, &data) }.unwrap();
-        data.command_buffers = unsafe { create_command_buffers(&device, &data) }.unwrap();
+        unsafe { create_command_pools(&instance, &device, &mut data) }.unwrap();
+        unsafe { create_command_buffers(&device, &mut data) }.unwrap();
         
         unsafe { create_sync_objects(&device, &mut data) }?;
 
@@ -181,11 +181,28 @@ impl App {
 
         let view = data.cameras[0].view();
         let proj = data.cameras[0].proj();
+
+        let image = Image::from_path("res\\textures\\photomode.png", MipLevels::Maximum, &instance, &device, &data, vk::Format::R8G8B8A8_SRGB);
+        let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
         
-        let mut object = ObjectPrototype::load(&instance, &device, &data, "res\\models\\MONKEY.obj", shader, position, view, proj);
+        let mut object = ObjectPrototype::load(&instance, &device, &data, "res\\models\\MONKEY.obj", shader, position, view, proj, (image, sampler));
         unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
         unsafe { object.generate_index_buffer(&instance, &device, &data) };
 
+        data.objects.push(Box::new(object));
+
+        let shader = VFShader::default()
+            .compile_vertex(&device, "res\\shaders\\vert.glsl")
+            .compile_fragment(&device, "res\\shaders\\frag.glsl")
+            .to_owned();
+
+        let image = Image::from_path("res\\textures\\viking_room.png", MipLevels::Maximum, &instance, &device, &data, vk::Format::R8G8B8A8_SRGB);
+        let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
+        
+        let mut object = ObjectPrototype::load(&instance, &device, &data, "res\\models\\viking_room.obj", shader, position, view, proj, (image, sampler));
+        unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
+        unsafe { object.generate_index_buffer(&instance, &device, &data) };
+        
         data.objects.push(Box::new(object));
 
         data.recreated = false;
@@ -277,8 +294,8 @@ impl App {
     }
 
     unsafe fn update_command_buffer(&mut self, image_index: usize) -> Result<()> {
-        // let command_pool = self.data.command_pools[image_index];
-        // self.device.reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
+        let command_pool = self.data.command_pools[image_index];
+        self.device.reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
 
         let command_buffer = self.data.command_buffers[image_index];
     
@@ -314,9 +331,11 @@ impl App {
             .render_area(render_area)
             .clear_values(clear_values);
 
-        self.device.cmd_begin_render_pass(command_buffer, &info, vk::SubpassContents::INLINE);
+        self.device.cmd_begin_render_pass(command_buffer, &info, vk::SubpassContents::SECONDARY_COMMAND_BUFFERS);
 
-        self.data.objects[0].draw(&self.device, command_buffer, image_index);
+        let secondary_command_buffers = (0..self.data.objects.len()).map(|i| self.update_secondary_command_buffer(image_index, i)).collect::<Result<Vec<_>, _>>()?;
+
+        self.device.cmd_execute_commands(command_buffer, &secondary_command_buffers);
 
         self.device.cmd_end_render_pass(command_buffer);
     
@@ -325,6 +344,39 @@ impl App {
         Ok(())
     } 
 
+    unsafe fn update_secondary_command_buffer(&mut self, image_index: usize, model_index: usize) -> Result<vk::CommandBuffer> {
+        self.data.secondary_command_buffers.resize_with(image_index + 1, Vec::new);
+        let command_buffers = &mut self.data.secondary_command_buffers[image_index];
+        while model_index >= command_buffers.len() {
+            let allocate_info = vk::CommandBufferAllocateInfo::builder()
+                .command_pool(self.data.command_pools[image_index])
+                .level(vk::CommandBufferLevel::SECONDARY)
+                .command_buffer_count(1);
+    
+            let command_buffer = self.device.allocate_command_buffers(&allocate_info)?[0];
+            command_buffers.push(command_buffer);
+        }
+    
+        let command_buffer = command_buffers[model_index];
+    
+        let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
+            .render_pass(self.data.render_pass)
+            .subpass(0)
+            .framebuffer(self.data.framebuffers[image_index]);
+
+        let info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+            .inheritance_info(&inheritance_info);
+    
+        self.device.begin_command_buffer(command_buffer, &info)?;
+
+        self.data.objects[model_index].draw(&self.device, command_buffer, image_index);
+    
+        self.device.end_command_buffer(command_buffer)?;
+    
+        Ok(command_buffer)
+    }
+
     fn update(&mut self, image_index: usize) {
         self.data.cameras.iter_mut().for_each(|c| c.calculate_view(&self.device, image_index));
 
@@ -332,7 +384,7 @@ impl App {
 
         let mut objects = self.data.objects.clone();
 
-        objects.iter_mut().for_each(|o| o.update(&self.device, &self.data, self.stats, image_index, vp));
+        objects.iter_mut().enumerate().for_each(|(id, o)| o.update(&self.device, &self.data, self.stats, image_index, vp, id));
 
         self.data.objects = objects;
     }
@@ -376,7 +428,7 @@ impl App {
         self.data.cameras.iter_mut().for_each(|c| c.set_aspect(aspect));
         self.data.cameras.iter_mut().for_each(|c| c.calculate_proj(&self.device));
 
-        self.data.command_buffers = create_command_buffers(&self.device, &mut self.data)?;
+        create_command_buffers(&self.device, &mut self.data)?;
         self.data.images_in_flight.resize(self.data.swapchain_images.len(), vk::Fence::null());
 
         Ok(())
@@ -397,6 +449,7 @@ impl App {
 
     pub unsafe fn destroy(&mut self) {
         self.destroy_swapchain();
+        self.data.command_pools.iter().for_each(|p| self.device.destroy_command_pool(*p, None));
 
         self.device.destroy_command_pool(self.data.command_pool, None);
 
@@ -453,9 +506,9 @@ pub struct AppData {
 
     // Command Buffers
     command_pool: vk::CommandPool,
-    // command_pools: Vec<vk::CommandPool>,
+    command_pools: Vec<vk::CommandPool>,
     command_buffers: Vec<vk::CommandBuffer>,
-    // secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
+    secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     objects: Vec<Box<dyn Renderable>>,
     cameras: Vec<Box<dyn Camera>>,

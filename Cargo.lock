@@ -340,7 +340,6 @@ dependencies = [
  "anyhow",
  "glam",
  "image",
- "raw-window-handle",
  "shaderc",
  "thiserror",
  "tobj",
