@@ -2,10 +2,13 @@ use vulkanalia::prelude::v1_2::*;
 
 use anyhow::Result;
 
-use crate::{RendererData, QueueFamilyIndices};
+use crate::{QueueFamilyIndices, RendererData};
 
-
-pub unsafe fn create_command_pools(instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
+pub unsafe fn create_command_pools(
+    instance: &Instance,
+    device: &Device,
+    data: &mut RendererData,
+) -> Result<()> {
     data.command_pool = create_command_pool(instance, device, data)?;
 
     let num_images = data.swapchain_images.len();

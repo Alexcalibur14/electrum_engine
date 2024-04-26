@@ -4,7 +4,10 @@ use vulkanalia::{prelude::v1_2::*, vk::KhrSwapchainExtension};
 use anyhow::{Ok, Result};
 use winit::window::Window;
 
-use crate::{texture::{Image, MipLevels}, RendererData, QueueFamilyIndices, SwapchainSupport};
+use crate::{
+    texture::{Image, MipLevels},
+    QueueFamilyIndices, RendererData, SwapchainSupport,
+};
 
 use crate::texture::*;
 
@@ -24,7 +27,11 @@ pub enum AttachmentType {
     Preserve,
 }
 
-pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &[vk::AttachmentDescription], device: &Device) -> Result<vk::RenderPass> {
+pub fn generate_render_pass(
+    subpass_datas: &mut Vec<SubpassData>,
+    attachments: &[vk::AttachmentDescription],
+    device: &Device,
+) -> Result<vk::RenderPass> {
     let mut dependencies = vec![];
     let mut subpasses = vec![];
 
@@ -77,14 +84,22 @@ pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &
     Ok(unsafe { device.create_render_pass(&info, None) }?)
 }
 
-pub fn generate_render_pass_images(attachments: Vec<(vk::AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>, data: &RendererData, instance: &Instance, device: &Device) -> Vec<Image> {
+pub fn generate_render_pass_images(
+    attachments: Vec<(
+        vk::AttachmentDescription,
+        vk::ImageUsageFlags,
+        vk::ImageAspectFlags,
+    )>,
+    data: &RendererData,
+    instance: &Instance,
+    device: &Device,
+) -> Vec<Image> {
     let mut images = vec![];
-    
+
     let mut atta = attachments.clone();
     atta.pop();
 
     for attachment in atta {
-
         images.push(Image::new(
             data,
             instance,
@@ -104,8 +119,13 @@ pub fn generate_render_pass_images(attachments: Vec<(vk::AttachmentDescription, 
     images
 }
 
-pub unsafe fn create_framebuffers(data: &RendererData, device: &Device) -> Result<Vec<vk::Framebuffer>> {
-    let framebuffers = data.swapchain_image_views.iter()
+pub unsafe fn create_framebuffers(
+    data: &RendererData,
+    device: &Device,
+) -> Result<Vec<vk::Framebuffer>> {
+    let framebuffers = data
+        .swapchain_image_views
+        .iter()
         .map(|i| {
             let mut views = data.images.iter().map(|i| i.view).collect::<Vec<_>>();
             views.push(*i);
@@ -120,13 +140,18 @@ pub unsafe fn create_framebuffers(data: &RendererData, device: &Device) -> Resul
 
             device.create_framebuffer(&info, None)
         })
-        .collect::<Result<Vec<_>, _>>().unwrap();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
 
     Ok(framebuffers)
 }
 
-
-pub unsafe fn create_swapchain(window: &Window, instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
+pub unsafe fn create_swapchain(
+    window: &Window,
+    instance: &Instance,
+    device: &Device,
+    data: &mut RendererData,
+) -> Result<()> {
     // Image
 
     let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
@@ -140,7 +165,9 @@ pub unsafe fn create_swapchain(window: &Window, instance: &Instance, device: &De
     data.swapchain_extent = extent;
 
     let mut image_count = support.capabilities.min_image_count + 1;
-    if support.capabilities.max_image_count != 0 && image_count > support.capabilities.max_image_count {
+    if support.capabilities.max_image_count != 0
+        && image_count > support.capabilities.max_image_count
+    {
         image_count = support.capabilities.max_image_count;
     }
 
@@ -184,7 +211,10 @@ fn get_swapchain_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::Surface
     formats
         .iter()
         .cloned()
-        .find(|f| f.format == vk::Format::B8G8R8A8_SRGB && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+        .find(|f| {
+            f.format == vk::Format::B8G8R8A8_SRGB
+                && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+        })
         .unwrap_or_else(|| formats[0])
 }
 
@@ -221,9 +251,16 @@ pub unsafe fn create_swapchain_image_views(device: &Device, data: &mut RendererD
     data.swapchain_image_views = data
         .swapchain_images
         .iter()
-        .map(|i| create_image_view(device, *i, data.swapchain_format, vk::ImageAspectFlags::COLOR, 1,))
+        .map(|i| {
+            create_image_view(
+                device,
+                *i,
+                data.swapchain_format,
+                vk::ImageAspectFlags::COLOR,
+                1,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(())
 }
-

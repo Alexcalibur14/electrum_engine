@@ -45,7 +45,10 @@ pub struct SimpleCamera {
 
 impl SimpleCamera {
     pub fn new(position: Vec3, rotation: Vec3, projection: Projection) -> Self {
-        let view = Mat4::from_rotation_translation(Quat::from_euler(glam::EulerRot::XYZ, rotation.x, rotation.y, rotation.z), position);
+        let view = Mat4::from_rotation_translation(
+            Quat::from_euler(glam::EulerRot::XYZ, rotation.x, rotation.y, rotation.z),
+            position,
+        );
 
         SimpleCamera {
             position,
@@ -57,7 +60,12 @@ impl SimpleCamera {
 
     pub fn look_at(&mut self, target: Vec3, up: Vec3) {
         self.view = Mat4::look_at_rh(self.position, target, up);
-        self.rotation = self.view.to_scale_rotation_translation().1.to_euler(glam::EulerRot::XYZ).into();
+        self.rotation = self
+            .view
+            .to_scale_rotation_translation()
+            .1
+            .to_euler(glam::EulerRot::XYZ)
+            .into();
         self.position = self.view.to_scale_rotation_translation().2;
     }
 }
@@ -76,7 +84,15 @@ impl Camera for SimpleCamera {
     }
 
     fn calculate_view(&mut self, _device: &Device, _image_index: usize) {
-        self.view = Mat4::from_rotation_translation(Quat::from_euler(glam::EulerRot::XYZ, self.rotation.x, self.rotation.y, self.rotation.z), self.position);
+        self.view = Mat4::from_rotation_translation(
+            Quat::from_euler(
+                glam::EulerRot::XYZ,
+                self.rotation.x,
+                self.rotation.y,
+                self.rotation.z,
+            ),
+            self.position,
+        );
     }
 
     fn calculate_proj(&mut self, _device: &Device) {
@@ -86,23 +102,21 @@ impl Camera for SimpleCamera {
     fn set_aspect(&mut self, aspect_ratio: f32) {
         self.projection.aspect_ratio = aspect_ratio;
     }
-    
+
     fn view_buffer(&self, _image_index: usize) -> BufferWrapper {
         BufferWrapper::default()
     }
-    
+
     fn proj_buffer(&self, _image_index: usize) -> BufferWrapper {
         BufferWrapper::default()
     }
-    
-    fn destroy(&self, _device: &Device) {
-    }
-    
+
+    fn destroy(&self, _device: &Device) {}
+
     fn clone_dyn(&self) -> Box<dyn Camera> {
         Box::new(self.clone())
     }
 }
-
 
 #[derive(Debug, Clone, Default)]
 pub struct Projection {
@@ -125,7 +139,7 @@ impl Projection {
             z_near,
             z_far,
             proj,
-            inv_proj
+            inv_proj,
         }
     }
 

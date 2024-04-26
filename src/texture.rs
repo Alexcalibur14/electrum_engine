@@ -1,14 +1,19 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::ptr::copy_nonoverlapping as memcpy;
 use std::io::Read;
+use std::ptr::copy_nonoverlapping as memcpy;
 
 use vulkanalia::prelude::v1_2::*;
 
-use image::io::Reader;
 use anyhow::{anyhow, Result};
+use image::io::Reader;
 
-use crate::{buffer::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index}, RendererData};
+use crate::{
+    buffer::{
+        begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index,
+    },
+    RendererData,
+};
 
 #[allow(dead_code)]
 pub enum MipLevels {
@@ -26,24 +31,56 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new(data: &RendererData, instance: &Instance, device: &Device, width: u32, height: u32, mip_levels: MipLevels, samples: vk::SampleCountFlags, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags, properties: vk::MemoryPropertyFlags, aspects: vk::ImageAspectFlags) -> Self {
-        
+    pub fn new(
+        data: &RendererData,
+        instance: &Instance,
+        device: &Device,
+        width: u32,
+        height: u32,
+        mip_levels: MipLevels,
+        samples: vk::SampleCountFlags,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+        aspects: vk::ImageAspectFlags,
+    ) -> Self {
         let mips = match mip_levels {
-            MipLevels::One => {1},
-            MipLevels::Value(v) => {v},
-            MipLevels::Maximum => {(width.max(height) as f32).log2().floor() as u32 + 1},
+            MipLevels::One => 1,
+            MipLevels::Value(v) => v,
+            MipLevels::Maximum => (width.max(height) as f32).log2().floor() as u32 + 1,
         };
-        
-        let (image, image_memory) = unsafe { create_image(instance, device, data, width, height, mips, samples, format, tiling, usage, properties) }.unwrap();
+
+        let (image, image_memory) = unsafe {
+            create_image(
+                instance, device, data, width, height, mips, samples, format, tiling, usage,
+                properties,
+            )
+        }
+        .unwrap();
 
         let view = unsafe { create_image_view(device, image, format, aspects, mips) }.unwrap();
 
-        Image { image, image_memory, view, mip_level: mips }
+        Image {
+            image,
+            image_memory,
+            view,
+            mip_level: mips,
+        }
     }
 
-    pub fn from_path(path: &str, mip_levels: MipLevels, instance: &Instance, device: &Device, data: &RendererData, format: vk::Format) -> Self {
+    pub fn from_path(
+        path: &str,
+        mip_levels: MipLevels,
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        format: vk::Format,
+    ) -> Self {
         let img = Reader::open(path).unwrap().decode().unwrap();
-        let bytes = img.to_rgba8().bytes()
+        let bytes = img
+            .to_rgba8()
+            .bytes()
             .filter(|b| b.is_ok())
             .flatten()
             .collect::<Vec<u8>>();
@@ -53,16 +90,28 @@ impl Image {
         let size = (width * height * 8 * 4) as u64;
 
         let mips = match mip_levels {
-            MipLevels::One => {1},
-            MipLevels::Value(v) => {v},
-            MipLevels::Maximum => {(width.max(height) as f32).log2().floor() as u32 + 1},
+            MipLevels::One => 1,
+            MipLevels::Value(v) => v,
+            MipLevels::Maximum => (width.max(height) as f32).log2().floor() as u32 + 1,
         };
 
-        let (image, image_memory) = unsafe { create_texture_image(instance, device, data, size, bytes, width, height, mips, format)}.unwrap();
+        let (image, image_memory) = unsafe {
+            create_texture_image(
+                instance, device, data, size, bytes, width, height, mips, format,
+            )
+        }
+        .unwrap();
 
-        let view = unsafe { create_image_view(device, image, format, vk::ImageAspectFlags::COLOR, mips) }.unwrap();
+        let view =
+            unsafe { create_image_view(device, image, format, vk::ImageAspectFlags::COLOR, mips) }
+                .unwrap();
 
-        Image { image, image_memory, view, mip_level: mips }
+        Image {
+            image,
+            image_memory,
+            view,
+            mip_level: mips,
+        }
     }
 
     pub unsafe fn destroy(&self, device: &Device) {
@@ -71,7 +120,6 @@ impl Image {
         device.free_memory(self.image_memory, None);
     }
 }
-
 
 pub unsafe fn create_image(
     instance: &Instance,
@@ -88,7 +136,11 @@ pub unsafe fn create_image(
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
     let info = vk::ImageCreateInfo::builder()
         .image_type(vk::ImageType::_2D)
-        .extent(vk::Extent3D { width, height, depth: 1 })
+        .extent(vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        })
         .mip_levels(mip_levels)
         .array_layers(1)
         .format(format)
@@ -129,7 +181,6 @@ pub unsafe fn create_texture_image(
     mip_levels: u32,
     format: vk::Format,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
-
     let staging_buffer = create_buffer(
         instance,
         device,
@@ -159,7 +210,9 @@ pub unsafe fn create_texture_image(
         vk::SampleCountFlags::_1,
         format,
         vk::ImageTiling::OPTIMAL,
-        vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC,
+        vk::ImageUsageFlags::SAMPLED
+            | vk::ImageUsageFlags::TRANSFER_DST
+            | vk::ImageUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
@@ -174,7 +227,14 @@ pub unsafe fn create_texture_image(
         mip_levels,
     )?;
 
-    copy_buffer_to_image(device, data, staging_buffer.buffer, texture_image, width, height)?;
+    copy_buffer_to_image(
+        device,
+        data,
+        staging_buffer.buffer,
+        texture_image,
+        width,
+        height,
+    )?;
 
     // Cleanup
 
@@ -204,28 +264,23 @@ unsafe fn transition_image_layout(
     new_layout: vk::ImageLayout,
     mip_levels: u32,
 ) -> Result<()> {
-    let (
-        src_access_mask,
-        dst_access_mask,
-        src_stage_mask,
-        dst_stage_mask,
-    ) = match (old_layout, new_layout) {
-        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-        ),
-        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::SHADER_READ,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-        ),
-        _ => return Err(anyhow!("Unsupported image layout transition!")),
-    };
-    
-    
+    let (src_access_mask, dst_access_mask, src_stage_mask, dst_stage_mask) =
+        match (old_layout, new_layout) {
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+            ),
+            (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+            ),
+            _ => return Err(anyhow!("Unsupported image layout transition!")),
+        };
+
     let command_buffer = begin_single_time_commands(device, data)?;
 
     let subresource = vk::ImageSubresourceRange::builder()
@@ -244,7 +299,7 @@ unsafe fn transition_image_layout(
         .subresource_range(subresource)
         .src_access_mask(src_access_mask)
         .dst_access_mask(dst_access_mask);
-    
+
     device.cmd_pipeline_barrier(
         command_buffer,
         src_stage_mask,
@@ -254,7 +309,6 @@ unsafe fn transition_image_layout(
         &[] as &[vk::BufferMemoryBarrier],
         &[barrier],
     );
-    
 
     end_single_time_commands(device, data, command_buffer)?;
 
@@ -283,7 +337,11 @@ unsafe fn copy_buffer_to_image(
         .buffer_image_height(0)
         .image_subresource(subresource)
         .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-        .image_extent(vk::Extent3D { width, height, depth: 1 });
+        .image_extent(vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        });
 
     device.cmd_copy_buffer_to_image(
         command_buffer,
@@ -338,7 +396,7 @@ pub unsafe fn create_texture_sampler(device: &Device, mip_level: &u32) -> Result
         .min_lod(0.0)
         .max_lod(*mip_level as f32)
         .mip_lod_bias(0.0);
-                
+
     let texture_sampler = device.create_sampler(&info, None)?;
 
     Ok(texture_sampler)
@@ -361,7 +419,9 @@ unsafe fn generate_mipmaps(
         .optimal_tiling_features
         .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
     {
-        return Err(anyhow!("Texture image format does not support linear blitting!"));
+        return Err(anyhow!(
+            "Texture image format does not support linear blitting!"
+        ));
     }
 
     // Mipmaps

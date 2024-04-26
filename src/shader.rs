@@ -1,20 +1,19 @@
 use std::fs::File;
 use std::io::Read;
 
-use shaderc::{CompileOptions, Compiler, ShaderKind};
 use anyhow::Result;
+use shaderc::{CompileOptions, Compiler, ShaderKind};
 
-use vulkanalia::prelude::v1_2::*;
 use vulkanalia::bytecode::Bytecode;
+use vulkanalia::prelude::v1_2::*;
 
-use crate::{RendererData, Descriptors};
+use crate::{Descriptors, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
     unsafe fn destroy(&self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Shader>;
 }
-
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VFShader {
@@ -25,13 +24,15 @@ pub struct VFShader {
 impl VFShader {
     /// Compiles the vertex shader at the location from `path`
     pub fn compile_vertex(&mut self, device: &Device, path: &str) -> &mut Self {
-        self.vertex = unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
+        self.vertex =
+            unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
         self
     }
 
     /// Compiles the fragment shader at the location from `path`
     pub fn compile_fragment(&mut self, device: &Device, path: &str) -> &mut Self {
-        self.fragment = unsafe { compile_shader_module(device, path, "main", ShaderKind::Fragment) }.unwrap();
+        self.fragment =
+            unsafe { compile_shader_module(device, path, "main", ShaderKind::Fragment) }.unwrap();
         self
     }
 }
@@ -44,7 +45,6 @@ impl Shader for VFShader {
                 .module(self.vertex)
                 .name(b"main\0")
                 .build(),
-            
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(self.fragment)
@@ -57,7 +57,7 @@ impl Shader for VFShader {
         device.destroy_shader_module(self.vertex, None);
         device.destroy_shader_module(self.fragment, None);
     }
-    
+
     fn clone_dyn(&self) -> Box<dyn Shader> {
         Box::new(*self)
     }
@@ -70,17 +70,25 @@ impl Clone for Box<dyn Shader> {
 }
 
 /// Compiles a shader file
-pub unsafe fn compile_shader_module(device: &Device, path: &str, entry_point_name: &str, shader_kind: ShaderKind) -> Result<vk::ShaderModule> {
+pub unsafe fn compile_shader_module(
+    device: &Device,
+    path: &str,
+    entry_point_name: &str,
+    shader_kind: ShaderKind,
+) -> Result<vk::ShaderModule> {
     let mut f = File::open(path).unwrap_or_else(|_| panic!("Could not open file {}", path));
     let mut glsl = String::new();
 
-    f.read_to_string(&mut glsl).unwrap_or_else(|_| panic!("Could not read file {} to string", path));
+    f.read_to_string(&mut glsl)
+        .unwrap_or_else(|_| panic!("Could not read file {} to string", path));
 
     let compiler = Compiler::new().unwrap();
     let mut options = CompileOptions::new().unwrap();
     options.add_macro_definition("EP", Some(entry_point_name));
 
-    let binding = compiler.compile_into_spirv(&glsl, shader_kind, path, entry_point_name, Some(&options)).expect("Could not compile glsl shader to spriv");
+    let binding = compiler
+        .compile_into_spirv(&glsl, shader_kind, path, entry_point_name, Some(&options))
+        .expect("Could not compile glsl shader to spriv");
     let bytes = binding.as_binary_u8();
 
     let bytecode = Bytecode::new(bytes).unwrap();
@@ -91,7 +99,6 @@ pub unsafe fn compile_shader_module(device: &Device, path: &str, entry_point_nam
 
     Ok(device.create_shader_module(&info, None)?)
 }
-
 
 #[derive(Clone)]
 pub struct Material {
@@ -138,7 +145,16 @@ impl Material {
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
-        let pipeline = unsafe { create_pipeline(device, data, &shader, mesh_settings.clone(), pipeline_layout) }.unwrap();
+        let pipeline = unsafe {
+            create_pipeline(
+                device,
+                data,
+                &shader,
+                mesh_settings.clone(),
+                pipeline_layout,
+            )
+        }
+        .unwrap();
 
         Material {
             pipeline,
@@ -162,10 +178,8 @@ impl Material {
     }
 
     pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
-
         self.descriptor.recreate_swapchain(device, data);
 
-        
         let binding = [self.descriptor.descriptor_set_layout];
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&binding)
@@ -174,8 +188,16 @@ impl Material {
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
-        
-        self.pipeline = unsafe { create_pipeline(device, data, self.shader.as_ref(), self.mesh_settings.clone(), pipeline_layout) }.unwrap();
+        self.pipeline = unsafe {
+            create_pipeline(
+                device,
+                data,
+                self.shader.as_ref(),
+                self.mesh_settings.clone(),
+                pipeline_layout,
+            )
+        }
+        .unwrap();
 
         self.pipeline_layout = pipeline_layout;
     }
@@ -186,9 +208,15 @@ impl Material {
     }
 }
 
-unsafe fn create_pipeline(device: &Device, data: &RendererData, shader: &dyn Shader, mesh_settings: PipelineMeshSettings, pipeline_layout: vk::PipelineLayout) -> Result<vk::Pipeline> {
+unsafe fn create_pipeline(
+    device: &Device,
+    data: &RendererData,
+    shader: &dyn Shader,
+    mesh_settings: PipelineMeshSettings,
+    pipeline_layout: vk::PipelineLayout,
+) -> Result<vk::Pipeline> {
     // Vertex Input State
-    
+
     let binding_descriptions = mesh_settings.binding_descriptions;
     let attribute_descriptions = mesh_settings.attribute_descriptions;
     let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
@@ -238,7 +266,6 @@ unsafe fn create_pipeline(device: &Device, data: &RendererData, shader: &dyn Sha
         .sample_shading_enable(false)
         .rasterization_samples(data.msaa_samples);
 
-
     // Color Blend State
 
     let attachment = vk::PipelineColorBlendAttachmentState::builder()
@@ -265,7 +292,7 @@ unsafe fn create_pipeline(device: &Device, data: &RendererData, shader: &dyn Sha
         .depth_write_enable(true)
         .depth_compare_op(vk::CompareOp::LESS)
         .depth_bounds_test_enable(false)
-        .stencil_test_enable(false);    
+        .stencil_test_enable(false);
 
     // Create
 
@@ -285,7 +312,9 @@ unsafe fn create_pipeline(device: &Device, data: &RendererData, shader: &dyn Sha
         .render_pass(data.render_pass)
         .subpass(0);
 
-    let pipeline = device.create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?.0[0];
+    let pipeline = device
+        .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
+        .0[0];
 
     Ok(pipeline)
 }
