@@ -2,9 +2,9 @@ use vulkanalia::prelude::v1_2::*;
 
 use anyhow::{anyhow, Result};
 
-use crate::AppData;
+use crate::RendererData;
 
-pub unsafe fn begin_single_time_commands(device: &Device, data: &AppData) -> Result<vk::CommandBuffer> {
+pub unsafe fn begin_single_time_commands(device: &Device, data: &RendererData) -> Result<vk::CommandBuffer> {
     let info = vk::CommandBufferAllocateInfo::builder()
         .level(vk::CommandBufferLevel::PRIMARY)
         .command_pool(data.command_pool)
@@ -20,7 +20,7 @@ pub unsafe fn begin_single_time_commands(device: &Device, data: &AppData) -> Res
     Ok(command_buffer)
 }
 
-pub unsafe fn end_single_time_commands(device: &Device, data: &AppData, command_buffer: vk::CommandBuffer) -> Result<()> {
+pub unsafe fn end_single_time_commands(device: &Device, data: &RendererData, command_buffer: vk::CommandBuffer) -> Result<()> {
     device.end_command_buffer(command_buffer)?;
 
     let command_buffers = &[command_buffer];
@@ -38,7 +38,7 @@ pub unsafe fn end_single_time_commands(device: &Device, data: &AppData, command_
 pub unsafe fn create_buffer(
     instance: &Instance,
     device: &Device,
-    data: &AppData,
+    data: &RendererData,
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
@@ -70,7 +70,7 @@ pub unsafe fn create_buffer(
     Ok(wrapper)
 }
 
-pub unsafe fn get_memory_type_index(instance: &Instance, data: &AppData, properties: vk::MemoryPropertyFlags, requirements: vk::MemoryRequirements) -> Result<u32> {
+pub unsafe fn get_memory_type_index(instance: &Instance, data: &RendererData, properties: vk::MemoryPropertyFlags, requirements: vk::MemoryRequirements) -> Result<u32> {
     let memory = instance.get_physical_device_memory_properties(data.physical_device);
 
     (0..memory.memory_type_count).find(|i| 
@@ -89,7 +89,7 @@ pub unsafe fn copy_buffer(
     source: vk::Buffer,
     destination: vk::Buffer,
     size: vk::DeviceSize,
-    data: &AppData,
+    data: &RendererData,
 ) -> Result<()> {
     let command_buffer = begin_single_time_commands(device, data)?;
 

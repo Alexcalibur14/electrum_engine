@@ -7,7 +7,7 @@ use anyhow::Result;
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::bytecode::Bytecode;
 
-use crate::{AppData, Descriptors};
+use crate::{RendererData, Descriptors};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
@@ -25,13 +25,13 @@ pub struct VFShader {
 impl VFShader {
     /// Compiles the vertex shader at the location from `path`
     pub fn compile_vertex(&mut self, device: &Device, path: &str) -> &mut Self {
-        self.vertex = unsafe { compile_shader_module(&device, path, "main", ShaderKind::Vertex) }.unwrap();
+        self.vertex = unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
         self
     }
 
     /// Compiles the fragment shader at the location from `path`
     pub fn compile_fragment(&mut self, device: &Device, path: &str) -> &mut Self {
-        self.fragment = unsafe { compile_shader_module(&device, path, "main", ShaderKind::Fragment) }.unwrap();
+        self.fragment = unsafe { compile_shader_module(device, path, "main", ShaderKind::Fragment) }.unwrap();
         self
     }
 }
@@ -83,7 +83,7 @@ pub unsafe fn compile_shader_module(device: &Device, path: &str, entry_point_nam
     let binding = compiler.compile_into_spirv(&glsl, shader_kind, path, entry_point_name, Some(&options)).expect("Could not compile glsl shader to spriv");
     let bytes = binding.as_binary_u8();
 
-    let bytecode = Bytecode::new(&bytes[..]).unwrap();
+    let bytecode = Bytecode::new(bytes).unwrap();
 
     let info = vk::ShaderModuleCreateInfo::builder()
         .code_size(bytecode.code_size())
@@ -109,7 +109,7 @@ pub struct Material {
 impl Material {
     pub fn new(
         device: &Device,
-        data: &AppData,
+        data: &RendererData,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
         shader: VFShader,
@@ -161,7 +161,7 @@ impl Material {
         }
     }
 
-    pub fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
+    pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
 
         self.descriptor.recreate_swapchain(device, data);
 
@@ -186,7 +186,7 @@ impl Material {
     }
 }
 
-unsafe fn create_pipeline(device: &Device, data: &AppData, shader: &dyn Shader, mesh_settings: PipelineMeshSettings, pipeline_layout: vk::PipelineLayout) -> Result<vk::Pipeline> {
+unsafe fn create_pipeline(device: &Device, data: &RendererData, shader: &dyn Shader, mesh_settings: PipelineMeshSettings, pipeline_layout: vk::PipelineLayout) -> Result<vk::Pipeline> {
     // Vertex Input State
     
     let binding_descriptions = mesh_settings.binding_descriptions;

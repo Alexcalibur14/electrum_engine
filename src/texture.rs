@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::ptr::copy_nonoverlapping as memcpy;
 use std::io::Read;
 
@@ -6,8 +8,9 @@ use vulkanalia::prelude::v1_2::*;
 use image::io::Reader;
 use anyhow::{anyhow, Result};
 
-use crate::{buffer::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index}, AppData};
+use crate::{buffer::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index}, RendererData};
 
+#[allow(dead_code)]
 pub enum MipLevels {
     One,
     Value(u32),
@@ -23,7 +26,7 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new(data: &AppData, instance: &Instance, device: &Device, width: u32, height: u32, mip_levels: MipLevels, samples: vk::SampleCountFlags, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags, properties: vk::MemoryPropertyFlags, aspects: vk::ImageAspectFlags) -> Self {
+    pub fn new(data: &RendererData, instance: &Instance, device: &Device, width: u32, height: u32, mip_levels: MipLevels, samples: vk::SampleCountFlags, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags, properties: vk::MemoryPropertyFlags, aspects: vk::ImageAspectFlags) -> Self {
         
         let mips = match mip_levels {
             MipLevels::One => {1},
@@ -38,11 +41,11 @@ impl Image {
         Image { image, image_memory, view, mip_level: mips }
     }
 
-    pub fn from_path(path: &str, mip_levels: MipLevels, instance: &Instance, device: &Device, data: &AppData, format: vk::Format) -> Self {
+    pub fn from_path(path: &str, mip_levels: MipLevels, instance: &Instance, device: &Device, data: &RendererData, format: vk::Format) -> Self {
         let img = Reader::open(path).unwrap().decode().unwrap();
         let bytes = img.to_rgba8().bytes()
             .filter(|b| b.is_ok())
-            .map(|b| b.unwrap())
+            .flatten()
             .collect::<Vec<u8>>();
 
         let width = img.width();
@@ -73,7 +76,7 @@ impl Image {
 pub unsafe fn create_image(
     instance: &Instance,
     device: &Device,
-    data: &AppData,
+    data: &RendererData,
     width: u32,
     height: u32,
     mip_levels: u32,
@@ -118,7 +121,7 @@ pub unsafe fn create_image(
 pub unsafe fn create_texture_image(
     instance: &Instance,
     device: &Device,
-    data: &AppData,
+    data: &RendererData,
     size: vk::DeviceSize,
     pixels: Vec<u8>,
     width: u32,
@@ -160,9 +163,6 @@ pub unsafe fn create_texture_image(
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
-    let texture_image = texture_image;
-    let texture_image_memory = texture_image_memory;
-
     // Transition + Copy (image)
 
     transition_image_layout(
@@ -198,7 +198,7 @@ pub unsafe fn create_texture_image(
 
 unsafe fn transition_image_layout(
     device: &Device,
-    data: &AppData,
+    data: &RendererData,
     image: vk::Image,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
@@ -263,7 +263,7 @@ unsafe fn transition_image_layout(
 
 unsafe fn copy_buffer_to_image(
     device: &Device,
-    data: &AppData,
+    data: &RendererData,
     buffer: vk::Buffer,
     image: vk::Image,
     width: u32,
@@ -347,7 +347,7 @@ pub unsafe fn create_texture_sampler(device: &Device, mip_level: &u32) -> Result
 unsafe fn generate_mipmaps(
     instance: &Instance,
     device: &Device,
-    data: &AppData,
+    data: &RendererData,
     image: vk::Image,
     format: vk::Format,
     width: u32,

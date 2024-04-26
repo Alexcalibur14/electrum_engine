@@ -43,24 +43,25 @@ const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.na
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
+
 #[derive(Clone)]
-pub struct App {
+pub struct Renderer {
     _entry: Entry,
     instance: Instance,
-    data: AppData,
     pub device: Device,
+    data: RendererData,
+    stats: RenderStats,
     frame: usize,
     pub resized: bool,
-    stats: AppStats,
 }
 
-impl App {
-    /// Creates our Vulkan app.
+impl Renderer {
+    /// Creates the Vulkan Renderer.
     pub fn create(window: &Window) -> Result<Self> {
         let loader = unsafe { LibloadingLoader::new(LIBRARY)? };
         let entry = unsafe { Entry::new(loader) }.map_err(|b| anyhow!("{}", b))?;
 
-        let mut data = AppData::default();
+        let mut data = RendererData::default();
 
         let instance = unsafe { create_instance(window, &entry, &mut data)? };
         data.surface = unsafe { vk_window::create_surface(&instance, &window, &window)? };
@@ -111,9 +112,9 @@ impl App {
             SubpassData {
                 bind_point: vk::PipelineBindPoint::GRAPHICS,
                 attachments: vec![
-                    (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::ColorAttachment),
-                    (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencilAttachment),
-                    (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::ResolveAttachment),
+                    (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
+                    (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
+                    (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
                 ],
                 dependencies: vec![
                     vk::SubpassDependency::builder()
@@ -207,13 +208,13 @@ impl App {
 
         data.recreated = false;
 
-        let stats = AppStats {
+        let stats = RenderStats {
             start: Instant::now(),
             delta: Duration::ZERO,
             frame: 0,
         };
 
-        Ok(App {
+        Ok(Renderer {
             _entry: entry,
             instance,
             data,
@@ -475,7 +476,7 @@ impl App {
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
 #[derive(Default, Clone)]
-pub struct AppData {
+pub struct RendererData {
     // Debug
     messenger: vk::DebugUtilsMessengerEXT,
 
@@ -528,7 +529,7 @@ pub struct AppData {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct AppStats {
+pub struct RenderStats {
     start: Instant,
 
     #[allow(dead_code)]
@@ -537,7 +538,7 @@ pub struct AppStats {
     frame: u64,
 }
 
-unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
+unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut RendererData) -> Result<Instance> {
     // Application Info
 
     let application_info = vk::ApplicationInfo::builder()
@@ -611,7 +612,7 @@ unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) ->
 #[error("{0}")]
 pub struct SuitabilityError(pub &'static str);
 
-unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> Result<()> {
+unsafe fn pick_physical_device(instance: &Instance, data: &mut RendererData) -> Result<()> {
     for physical_device in instance.enumerate_physical_devices()? {
         let properties = instance.get_physical_device_properties(physical_device);
 
@@ -629,7 +630,7 @@ unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> Resul
     Err(anyhow!("Failed to find suitable physical device."))
 }
 
-unsafe fn check_physical_device(instance: &Instance, data: &AppData, physical_device: vk::PhysicalDevice) -> Result<()> {
+unsafe fn check_physical_device(instance: &Instance, data: &RendererData, physical_device: vk::PhysicalDevice) -> Result<()> {
     QueueFamilyIndices::get(instance, data, physical_device)?;
     check_physical_device_extensions(instance, physical_device)?;
 
@@ -659,7 +660,7 @@ unsafe fn check_physical_device_extensions(instance: &Instance, physical_device:
     }
 }
 
-unsafe fn get_max_msaa_samples(instance: &Instance, data: &AppData) -> vk::SampleCountFlags {
+unsafe fn get_max_msaa_samples(instance: &Instance, data: &RendererData) -> vk::SampleCountFlags {
     let properties = instance.get_physical_device_properties(data.physical_device);
     let counts = properties.limits.framebuffer_color_sample_counts & properties.limits.framebuffer_depth_sample_counts;
     [
@@ -677,7 +678,7 @@ unsafe fn get_max_msaa_samples(instance: &Instance, data: &AppData) -> vk::Sampl
 }
 
 
-unsafe fn create_logical_device(instance: &Instance, data: &mut AppData) -> Result<Device> {
+unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) -> Result<Device> {
     // Queue Create Infos
 
     let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
@@ -733,7 +734,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut AppData) -> Resu
 }
 
 
-unsafe fn get_depth_format(instance: &Instance, data: &AppData) -> Result<vk::Format> {
+unsafe fn get_depth_format(instance: &Instance, data: &RendererData) -> Result<vk::Format> {
     let candidates = &[
         vk::Format::D32_SFLOAT,
         vk::Format::D32_SFLOAT_S8_UINT,
@@ -751,7 +752,7 @@ unsafe fn get_depth_format(instance: &Instance, data: &AppData) -> Result<vk::Fo
 
 unsafe fn get_supported_format(
     instance: &Instance,
-    data: &AppData,
+    data: &RendererData,
     candidates: &[vk::Format],
     tiling: vk::ImageTiling,
     features: vk::FormatFeatureFlags,
@@ -774,7 +775,7 @@ unsafe fn get_supported_format(
         .ok_or_else(|| anyhow!("Failed to find supported format!"))
 }
 
-unsafe fn create_sync_objects(device: &Device, data: &mut AppData) -> Result<()> {
+unsafe fn create_sync_objects(device: &Device, data: &mut RendererData) -> Result<()> {
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
@@ -801,7 +802,7 @@ struct QueueFamilyIndices {
 }
 
 impl QueueFamilyIndices {
-    unsafe fn get(instance: &Instance, data: &AppData, physical_device: vk::PhysicalDevice) -> Result<Self> {
+    unsafe fn get(instance: &Instance, data: &RendererData, physical_device: vk::PhysicalDevice) -> Result<Self> {
         let properties = instance.get_physical_device_queue_family_properties(physical_device);
 
         let graphics = properties
@@ -834,7 +835,7 @@ struct SwapchainSupport {
 }
 
 impl SwapchainSupport {
-    unsafe fn get(instance: &Instance, data: &AppData, physical_device: vk::PhysicalDevice) -> Result<Self> {
+    unsafe fn get(instance: &Instance, data: &RendererData, physical_device: vk::PhysicalDevice) -> Result<Self> {
         Ok(Self {
             capabilities: instance.get_physical_device_surface_capabilities_khr(physical_device, data.surface)?,
             formats: instance.get_physical_device_surface_formats_khr(physical_device, data.surface)?,

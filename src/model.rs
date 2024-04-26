@@ -1,9 +1,11 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::ptr::copy_nonoverlapping as memcpy;
-use std::{hash::Hasher, mem::size_of};
-use std::hash::Hash;
+use std::mem::size_of;
+use std::hash::{Hash, Hasher};
 
 use glam::{vec2, vec3, Mat4, Vec2, Vec3};
 use anyhow::Result;
@@ -11,14 +13,14 @@ use vulkanalia::prelude::v1_2::*;
 
 use crate::buffer::{copy_buffer, create_buffer, BufferWrapper};
 use crate::shader::{Material, PipelineMeshSettings, VFShader};
-use crate::{AppData, AppStats, Image};
+use crate::{RendererData, RenderStats, Image};
 
 
 pub trait Renderable {
     unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize);
-    fn update(&mut self, device: &Device, data: &AppData, stats: AppStats, index: usize, view_proj: Mat4, id: usize);
+    fn update(&mut self, device: &Device, data: &RendererData, stats: RenderStats, index: usize, view_proj: Mat4, id: usize);
     fn destroy_swapchain(&self, device: &Device);
-    fn recreate_swapchain(&mut self, device: &Device, data: &AppData);
+    fn recreate_swapchain(&mut self, device: &Device, data: &RendererData);
     fn destroy(&self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Renderable>;
 }
@@ -44,7 +46,7 @@ pub struct Descriptors {
 }
 
 impl Descriptors {
-    pub fn new(device: &Device, data: &AppData, bindings: Vec<vk::DescriptorSetLayoutBinding>) -> Self {
+    pub fn new(device: &Device, data: &RendererData, bindings: Vec<vk::DescriptorSetLayoutBinding>) -> Self {
         let info = vk::DescriptorSetLayoutCreateInfo::builder()
             .bindings(&bindings)
             .build();
@@ -61,7 +63,7 @@ impl Descriptors {
         }
     }
 
-    pub unsafe fn create_descriptor_pool(device: &Device, data: &AppData, bindings: &Vec<vk::DescriptorSetLayoutBinding>) -> Result<vk::DescriptorPool> {
+    pub unsafe fn create_descriptor_pool(device: &Device, data: &RendererData, bindings: &Vec<vk::DescriptorSetLayoutBinding>) -> Result<vk::DescriptorPool> {
         let images = data.swapchain_images.len() as u32;
     
         let mut sizes = vec![];
@@ -88,7 +90,7 @@ impl Descriptors {
         unsafe { device.destroy_descriptor_pool(self.descriptor_pool, None) };
     }
 
-    pub fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
+    pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
         self.descriptor_pool = unsafe { Self::create_descriptor_pool(device, data, &self.bindings) }.unwrap();
     }
 
@@ -136,7 +138,7 @@ impl Renderable for ObjectPrototype {
         self.material.destroy_swapchain(device);
     }
 
-    fn recreate_swapchain(&mut self, device: &Device, data: &AppData) {
+    fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
         self.material.recreate_swapchain(device, data);
 
         let layouts = vec![self.material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
@@ -147,16 +149,16 @@ impl Renderable for ObjectPrototype {
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
         
-        for i in 0..data.swapchain_images.len() {
+        for (set_index, descriptor_set) in descriptor_sets.iter().enumerate().take(data.swapchain_images.len()) {
             let info = vk::DescriptorBufferInfo::builder()
-                .buffer(self.ubo_buffers[i].buffer)
+                .buffer(self.ubo_buffers[set_index].buffer)
                 .offset(0)
                 .range(64)
                 .build();
             
             let buffer_info = &[info];
             let ubo_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
+                .dst_set(*descriptor_set)
                 .dst_binding(0)
                 .dst_array_element(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
@@ -171,7 +173,7 @@ impl Renderable for ObjectPrototype {
             
             let image_info = &[info];
             let texture_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
+                .dst_set(*descriptor_set)
                 .dst_binding(1)
                 .dst_array_element(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
@@ -201,7 +203,7 @@ impl Renderable for ObjectPrototype {
         Box::new(self.clone())
     }
 
-    fn update(&mut self, device: &Device, _data: &AppData, stats: AppStats, index: usize, view_proj: Mat4, id: usize) {
+    fn update(&mut self, device: &Device, _data: &RendererData, stats: RenderStats, index: usize, view_proj: Mat4, id: usize) {
         self.ubo.model = Mat4::from_translation(vec3(stats.start.elapsed().as_secs_f32().sin() * 0.5, (id as f32 * 2.0) - 1.0, 0.0));
 
         let mvp = view_proj * self.ubo.model;
@@ -216,7 +218,7 @@ impl Renderable for ObjectPrototype {
 
 
 impl ObjectPrototype {
-    pub fn load(instance: &Instance, device: &Device, data: &AppData, path: &str, shader: VFShader, model: Mat4, view: Mat4, proj: Mat4, image: (Image, vk::Sampler)) -> Self {
+    pub fn load(instance: &Instance, device: &Device, data: &RendererData, path: &str, shader: VFShader, model: Mat4, view: Mat4, proj: Mat4, image: (Image, vk::Sampler)) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
 
         let mesh_settings = PipelineMeshSettings {
@@ -330,7 +332,7 @@ impl ObjectPrototype {
         }
     }
 
-    pub unsafe fn generate_vertex_buffer(&mut self, instance: &Instance, device: &Device, data: &AppData) {
+    pub unsafe fn generate_vertex_buffer(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let size = (size_of::<PCTVertex>() * self.vertices.len()) as u64;
 
         let staging_buffer = create_buffer(
@@ -370,7 +372,7 @@ impl ObjectPrototype {
         self.vertex_buffer = vertex_buffer;
     }
 
-    pub unsafe fn generate_index_buffer(&mut self, instance: &Instance, device: &Device, data: &AppData) {
+    pub unsafe fn generate_index_buffer(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let size = (size_of::<u32>() * self.indices.len()) as u64;
 
         let staging_buffer = create_buffer(

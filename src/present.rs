@@ -4,7 +4,7 @@ use vulkanalia::{prelude::v1_2::*, vk::KhrSwapchainExtension};
 use anyhow::{Ok, Result};
 use winit::window::Window;
 
-use crate::{texture::{Image, MipLevels}, AppData, QueueFamilyIndices, SwapchainSupport};
+use crate::{texture::{Image, MipLevels}, RendererData, QueueFamilyIndices, SwapchainSupport};
 
 use crate::texture::*;
 
@@ -17,14 +17,14 @@ pub struct SubpassData {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentType {
-    InputAttachment,
-    ColorAttachment,
-    ResolveAttachment,
-    DepthStencilAttachment,
-    PreserveAttachment,
+    Input,
+    Color,
+    Resolve,
+    DepthStencil,
+    Preserve,
 }
 
-pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &Vec<vk::AttachmentDescription>, device: &Device) -> Result<vk::RenderPass> {
+pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &[vk::AttachmentDescription], device: &Device) -> Result<vk::RenderPass> {
     let mut dependencies = vec![];
     let mut subpasses = vec![];
 
@@ -38,7 +38,7 @@ pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &
         let mut preserve_attachments = vec![];
 
         for attachment in &subpass_data.attachments {
-            if attachment.2 == AttachmentType::PreserveAttachment {
+            if attachment.2 == AttachmentType::Preserve {
                 preserve_attachments.push(attachment.0);
                 continue;
             }
@@ -49,11 +49,11 @@ pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &
                 .build();
 
             match attachment.2 {
-                AttachmentType::InputAttachment => input_attachments.push(attachment_ref),
-                AttachmentType::ColorAttachment => color_attachments.push(attachment_ref),
-                AttachmentType::ResolveAttachment => resolve_attachments.push(attachment_ref),
-                AttachmentType::DepthStencilAttachment => depth_stencil_attachment = attachment_ref,
-                AttachmentType::PreserveAttachment => panic!("This should not happen"),
+                AttachmentType::Input => input_attachments.push(attachment_ref),
+                AttachmentType::Color => color_attachments.push(attachment_ref),
+                AttachmentType::Resolve => resolve_attachments.push(attachment_ref),
+                AttachmentType::DepthStencil => depth_stencil_attachment = attachment_ref,
+                AttachmentType::Preserve => panic!("This should not happen"),
             }
         }
 
@@ -70,14 +70,14 @@ pub fn generate_render_pass(subpass_datas: &mut Vec<SubpassData>, attachments: &
     }
 
     let info = vk::RenderPassCreateInfo::builder()
-        .attachments(&attachments)
+        .attachments(attachments)
         .subpasses(&subpasses)
         .dependencies(&dependencies);
 
     Ok(unsafe { device.create_render_pass(&info, None) }?)
 }
 
-pub fn generate_render_pass_images(attachments: Vec<(vk::AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>, data: &AppData, instance: &Instance, device: &Device) -> Vec<Image> {
+pub fn generate_render_pass_images(attachments: Vec<(vk::AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>, data: &RendererData, instance: &Instance, device: &Device) -> Vec<Image> {
     let mut images = vec![];
     
     let mut atta = attachments.clone();
@@ -104,7 +104,7 @@ pub fn generate_render_pass_images(attachments: Vec<(vk::AttachmentDescription, 
     images
 }
 
-pub unsafe fn create_framebuffers(data: &AppData, device: &Device) -> Result<Vec<vk::Framebuffer>> {
+pub unsafe fn create_framebuffers(data: &RendererData, device: &Device) -> Result<Vec<vk::Framebuffer>> {
     let framebuffers = data.swapchain_image_views.iter()
         .map(|i| {
             let mut views = data.images.iter().map(|i| i.view).collect::<Vec<_>>();
@@ -126,7 +126,7 @@ pub unsafe fn create_framebuffers(data: &AppData, device: &Device) -> Result<Vec
 }
 
 
-pub unsafe fn create_swapchain(window: &Window, instance: &Instance, device: &Device, data: &mut AppData) -> Result<()> {
+pub unsafe fn create_swapchain(window: &Window, instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
     // Image
 
     let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
@@ -217,7 +217,7 @@ fn get_swapchain_extent(window: &Window, capabilities: vk::SurfaceCapabilitiesKH
     }
 }
 
-pub unsafe fn create_swapchain_image_views(device: &Device, data: &mut AppData) -> Result<()> {
+pub unsafe fn create_swapchain_image_views(device: &Device, data: &mut RendererData) -> Result<()> {
     data.swapchain_image_views = data
         .swapchain_images
         .iter()

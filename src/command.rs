@@ -2,10 +2,10 @@ use vulkanalia::prelude::v1_2::*;
 
 use anyhow::Result;
 
-use crate::{AppData, QueueFamilyIndices};
+use crate::{RendererData, QueueFamilyIndices};
 
 
-pub unsafe fn create_command_pools(instance: &Instance, device: &Device, data: &mut AppData) -> Result<()> {
+pub unsafe fn create_command_pools(instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
     data.command_pool = create_command_pool(instance, device, data)?;
 
     let num_images = data.swapchain_images.len();
@@ -20,7 +20,7 @@ pub unsafe fn create_command_pools(instance: &Instance, device: &Device, data: &
 unsafe fn create_command_pool(
     instance: &Instance,
     device: &Device,
-    data: &mut AppData,
+    data: &mut RendererData,
 ) -> Result<vk::CommandPool> {
     let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
 
@@ -31,7 +31,7 @@ unsafe fn create_command_pool(
     Ok(device.create_command_pool(&info, None)?)
 }
 
-pub unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<()> {
+pub unsafe fn create_command_buffers(device: &Device, data: &mut RendererData) -> Result<()> {
     let num_images = data.swapchain_images.len();
     for image_index in 0..num_images {
         let allocate_info = vk::CommandBufferAllocateInfo::builder()
