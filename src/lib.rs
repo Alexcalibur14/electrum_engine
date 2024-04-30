@@ -1,3 +1,4 @@
+use buffer::BufferWrapper;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::vk::KhrSurfaceExtension;
@@ -24,6 +25,7 @@ mod model;
 mod present;
 mod shader;
 mod texture;
+mod light;
 
 use camera::*;
 use command::*;
@@ -31,6 +33,7 @@ use model::*;
 use present::*;
 use shader::*;
 use texture::*;
+use light::*;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -194,46 +197,20 @@ impl Renderer {
         let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
 
         let projection = Projection::new(PI / 4.0, aspect, 0.1, 100.0);
-        let mut camera = SimpleCamera::new(vec3(0.0, 2.0, 4.0), vec3(0.0, 0.0, 0.0), projection);
+        let mut camera = SimpleCamera::new(&instance, &device, &data, vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), projection);
         camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
-        data.cameras.push(Box::new(camera));
-
-        let shader = VFShader::default()
-            .compile_vertex(&device, "res\\shaders\\vert.glsl")
-            .compile_fragment(&device, "res\\shaders\\frag.glsl")
-            .to_owned();
+        data.cameras.push(Box::new(camera.clone()));
 
         let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
         let view = data.cameras[0].view();
         let proj = data.cameras[0].proj();
 
-        let image = Image::from_path(
-            "res\\textures\\photomode.png",
-            MipLevels::Maximum,
-            &instance,
-            &device,
-            &data,
-            vk::Format::R8G8B8A8_SRGB,
-        );
-        let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
+        let light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(0.5, 1.0, 0.5), 1.0);
+        let light_buffers = light.get_buffers(&instance, &device, &data)?;
 
-        let mut object = ObjectPrototype::load(
-            &instance,
-            &device,
-            &data,
-            "res\\models\\MONKEY.obj",
-            shader,
-            position,
-            view,
-            proj,
-            (image, sampler),
-        );
-        unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
-        unsafe { object.generate_index_buffer(&instance, &device, &data) };
-
-        data.objects.push(Box::new(object));
+        data.point_lights.push(light_buffers.clone());
 
         let shader = VFShader::default()
             .compile_vertex(&device, "res\\shaders\\vert.glsl")
@@ -241,7 +218,7 @@ impl Renderer {
             .to_owned();
 
         let image = Image::from_path(
-            "res\\textures\\viking_room.png",
+            "res\\textures\\white.png",
             MipLevels::Maximum,
             &instance,
             &device,
@@ -254,12 +231,14 @@ impl Renderer {
             &instance,
             &device,
             &data,
-            "res\\models\\viking_room.obj",
+            "res\\models\\blender_cube.obj",
             shader,
             position,
             view,
             proj,
             (image, sampler),
+            light_buffers,
+            vec![camera.get_set_layout()]
         );
         unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
         unsafe { object.generate_index_buffer(&instance, &device, &data) };
@@ -271,6 +250,7 @@ impl Renderer {
         let stats = RenderStats {
             start: Instant::now(),
             delta: Duration::ZERO,
+            delda_start: Instant::now(),
             frame: 0,
         };
 
@@ -353,6 +333,9 @@ impl Renderer {
 
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
         self.stats.frame += 1;
+
+        self.stats.delta = self.stats.delda_start.elapsed();
+        self.stats.delda_start = Instant::now();
 
         Ok(())
     }
@@ -451,7 +434,7 @@ impl Renderer {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        self.data.objects[model_index].draw(&self.device, command_buffer, image_index);
+        self.data.objects[model_index].draw(&self.device, command_buffer, image_index, self.data.cameras[0].get_descriptor_sets()[image_index]);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -600,6 +583,8 @@ impl Renderer {
             .iter()
             .for_each(|c| c.destroy(&self.device));
 
+        self.data.point_lights.iter().for_each(|l| l.iter().for_each(|b| b.destroy(&self.device)));
+
         self.data
             .in_flight_fences
             .iter()
@@ -664,6 +649,7 @@ pub struct RendererData {
 
     objects: Vec<Box<dyn Renderable>>,
     cameras: Vec<Box<dyn Camera>>,
+    point_lights: Vec<Vec<BufferWrapper>>,
 
     // Semaphores
     image_available_semaphores: Vec<vk::Semaphore>,
@@ -683,8 +669,8 @@ pub struct RendererData {
 pub struct RenderStats {
     start: Instant,
 
-    #[allow(dead_code)]
     delta: Duration,
+    delda_start: Instant,
 
     frame: u64,
 }
@@ -882,7 +868,8 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     // Features
 
     // change this for other features
-    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+    let features = vk::PhysicalDeviceFeatures::builder()
+        .sampler_anisotropy(true);
 
     // Create
 

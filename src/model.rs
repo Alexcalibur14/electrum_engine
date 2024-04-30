@@ -13,10 +13,10 @@ use vulkanalia::prelude::v1_2::*;
 
 use crate::buffer::{copy_buffer, create_buffer, BufferWrapper};
 use crate::shader::{Material, PipelineMeshSettings, VFShader};
-use crate::{Image, RenderStats, RendererData};
+use crate::{Image, PointLight, RenderStats, RendererData};
 
 pub trait Renderable {
-    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize);
+    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize, camera_data: vk::DescriptorSet);
     fn update(
         &mut self,
         device: &Device,
@@ -135,7 +135,7 @@ pub struct ObjectPrototype {
 }
 
 impl Renderable for ObjectPrototype {
-    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize) {
+    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize, camera_data: vk::DescriptorSet) {
         device.cmd_bind_pipeline(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -147,6 +147,13 @@ impl Renderable for ObjectPrototype {
             self.material.pipeline_layout,
             0,
             &[self.descriptor_sets[image_index]],
+            &[],
+        );
+        device.cmd_bind_descriptor_sets(command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            self.material.pipeline_layout,
+            1,
+            &[camera_data],
             &[],
         );
         device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
@@ -182,7 +189,7 @@ impl Renderable for ObjectPrototype {
             let info = vk::DescriptorBufferInfo::builder()
                 .buffer(self.ubo_buffers[set_index].buffer)
                 .offset(0)
-                .range(64)
+                .range(size_of::<ModelData>() as u64)
                 .build();
 
             let buffer_info = &[info];
@@ -209,9 +216,24 @@ impl Renderable for ObjectPrototype {
                 .image_info(image_info)
                 .build();
 
+            let info = vk::DescriptorBufferInfo::builder()
+                .buffer(data.point_lights[0][set_index].buffer)
+                .offset(0)
+                .range(size_of::<PointLight>() as u64)
+                .build();
+
+            let buffer_info = &[info];
+            let light_write = vk::WriteDescriptorSet::builder()
+                .dst_set(*descriptor_set)
+                .dst_binding(2)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(buffer_info)
+                .build();
+
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write],
+                    &[ubo_write, texture_write, light_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -241,27 +263,33 @@ impl Renderable for ObjectPrototype {
         stats: RenderStats,
         index: usize,
         view_proj: Mat4,
-        id: usize,
+        _id: usize,
     ) {
         self.ubo.model = Mat4::from_translation(vec3(
-            stats.start.elapsed().as_secs_f32().sin() * 0.5,
-            (id as f32 * 2.0) - 1.0,
             0.0,
-        ));
+            0.0,
+            0.0,
+        )) * Mat4::from_axis_angle(Vec3::Y, stats.start.elapsed().as_secs_f32() / 2.0);
 
         let mvp = view_proj * self.ubo.model;
+
+        let model_data = ModelData {
+            model: self.ubo.model,
+            mvp,
+            normal: Mat4::from_quat(self.ubo.model.to_scale_rotation_translation().1),
+        };
 
         let mem = unsafe {
             device.map_memory(
                 self.ubo_buffers[index].memory,
                 0,
-                64,
+                size_of::<ModelData>() as u64,
                 vk::MemoryMapFlags::empty(),
             )
         }
         .unwrap();
 
-        unsafe { memcpy(&mvp, mem.cast(), 1) };
+        unsafe { memcpy(&model_data, mem.cast(), 1) };
 
         unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
     }
@@ -278,6 +306,8 @@ impl ObjectPrototype {
         view: Mat4,
         proj: Mat4,
         image: (Image, vk::Sampler),
+        light: Vec<BufferWrapper>,
+        other_layouts: Vec<vk::DescriptorSetLayout>
     ) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
 
@@ -301,13 +331,25 @@ impl ObjectPrototype {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(2)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .build(),
         ];
 
-        let material = Material::new(device, data, bindings, vec![], shader, mesh_settings);
+        let material = Material::new(device, data, bindings, vec![], shader, mesh_settings, other_layouts);
 
         let ubo = UniformBufferObject { model, view, proj };
 
         let mvp = proj * view * model;
+        
+        let model_data = ModelData {
+            model: ubo.model,
+            mvp,
+            normal: Mat4::from_quat(ubo.model.to_scale_rotation_translation().1),
+        };
 
         let mut ubo_buffers = vec![];
 
@@ -317,7 +359,7 @@ impl ObjectPrototype {
                     instance,
                     device,
                     data,
-                    64,
+                    size_of::<ModelData>() as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
                 )
@@ -325,10 +367,10 @@ impl ObjectPrototype {
             .unwrap();
 
             let ubo_mem =
-                unsafe { device.map_memory(buffer.memory, 0, 64, vk::MemoryMapFlags::empty()) }
+                unsafe { device.map_memory(buffer.memory, 0, size_of::<ModelData>() as u64, vk::MemoryMapFlags::empty()) }
                     .unwrap();
 
-            unsafe { memcpy(&mvp, ubo_mem.cast(), 1) };
+            unsafe { memcpy(&model_data, ubo_mem.cast(), 1) };
 
             unsafe { device.unmap_memory(buffer.memory) };
 
@@ -346,7 +388,7 @@ impl ObjectPrototype {
             let info = vk::DescriptorBufferInfo::builder()
                 .buffer(ubo_buffers[i].buffer)
                 .offset(0)
-                .range(64)
+                .range(size_of::<ModelData>() as u64)
                 .build();
 
             let buffer_info = &[info];
@@ -373,9 +415,24 @@ impl ObjectPrototype {
                 .image_info(image_info)
                 .build();
 
+            let info = vk::DescriptorBufferInfo::builder()
+                .buffer(light[i].buffer)
+                .offset(0)
+                .range(size_of::<PointLight>() as u64)
+                .build();
+
+            let buffer_info = &[info];
+            let light_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(2)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(buffer_info)
+                .build();
+
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write],
+                    &[ubo_write, texture_write, light_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -507,6 +564,7 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
     let (models, _) = tobj::load_obj_buf(
         &mut reader,
         &tobj::LoadOptions {
+            single_index: true,
             triangulate: false,
             ..Default::default()
         },
@@ -533,6 +591,11 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
                     model.mesh.texcoords[tex_coord_offset],
                     1.0 - model.mesh.texcoords[tex_coord_offset + 1],
                 ),
+                normal: vec3(
+                    model.mesh.normals[pos_offset],
+                    model.mesh.normals[pos_offset + 1],
+                    model.mesh.normals[pos_offset + 2],
+                )
             };
 
             if let Some(index) = unique_vertices.get(&vertex) {
@@ -554,6 +617,7 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
 pub struct PCTVertex {
     pub pos: Vec3,
     pub tex_coord: Vec2,
+    pub normal: Vec3,
 }
 
 impl Vertex for PCTVertex {
@@ -579,13 +643,19 @@ impl Vertex for PCTVertex {
                 .format(vk::Format::R32G32_SFLOAT)
                 .offset(size_of::<Vec3>() as u32)
                 .build(),
+            vk::VertexInputAttributeDescription::builder()
+                .binding(0)
+                .location(2)
+                .format(vk::Format::R32G32B32_SFLOAT)
+                .offset(size_of::<Vec3>() as u32 + size_of::<Vec2>() as u32)
+                .build(),
         ]
     }
 }
 
 impl PartialEq for PCTVertex {
     fn eq(&self, other: &Self) -> bool {
-        self.pos == other.pos && self.tex_coord == other.tex_coord
+        self.pos == other.pos && self.tex_coord == other.tex_coord && self.normal == other.normal
     }
 }
 
@@ -598,6 +668,9 @@ impl Hash for PCTVertex {
         self.pos[2].to_bits().hash(state);
         self.tex_coord[0].to_bits().hash(state);
         self.tex_coord[1].to_bits().hash(state);
+        self.normal[0].to_bits().hash(state);
+        self.normal[1].to_bits().hash(state);
+        self.normal[2].to_bits().hash(state);
     }
 }
 
@@ -607,4 +680,12 @@ struct UniformBufferObject {
     model: Mat4,
     view: Mat4,
     proj: Mat4,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+struct ModelData {
+    model: Mat4,
+    mvp: Mat4,
+    normal: Mat4,
 }

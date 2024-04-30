@@ -1,7 +1,9 @@
+use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
+
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
-use crate::buffer::BufferWrapper;
+use crate::{buffer::{create_buffer, BufferWrapper}, Descriptors, RendererData};
 
 pub trait Camera {
     /// Returns the View matrix
@@ -11,6 +13,10 @@ pub trait Camera {
     /// Returns the Inverse Projection matrix
     fn inv_proj(&self) -> Mat4;
 
+    fn get_data(&self) -> CameraData;
+    fn get_descriptor_sets(&self) -> Vec<vk::DescriptorSet>;
+    fn get_set_layout(&self) -> vk::DescriptorSetLayout;
+
     /// Calculate the view matrix and update the view buffer with the new matrix
     fn calculate_view(&mut self, device: &Device, image_index: usize);
 
@@ -19,14 +25,20 @@ pub trait Camera {
     /// Calculate the sets the aspect for the projection matrix
     fn set_aspect(&mut self, aspect_ratio: f32);
 
-    fn view_buffer(&self, image_index: usize) -> BufferWrapper;
-    fn proj_buffer(&self, image_index: usize) -> BufferWrapper;
-
     /// Used to destroy all buffers associated with the camera
     fn destroy(&self, device: &Device);
 
     /// Used to implement Clone on the trait
     fn clone_dyn(&self) -> Box<dyn Camera>;
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CameraData {
+    pub position: Vec3,
+    pub _padd: u32,
+    pub view: Mat4,
+    pub proj: Mat4,
 }
 
 impl Clone for Box<dyn Camera> {
@@ -41,20 +53,101 @@ pub struct SimpleCamera {
     pub rotation: Vec3,
     pub view: Mat4,
     pub projection: Projection,
+    
+    pub descriptor: Descriptors,
+    pub descriptor_sets: Vec<vk::DescriptorSet>,
+    pub buffers: Vec<BufferWrapper>,
 }
 
 impl SimpleCamera {
-    pub fn new(position: Vec3, rotation: Vec3, projection: Projection) -> Self {
+    pub fn new(instance: &Instance, device: &Device, data: &RendererData,position: Vec3, rotation: Vec3, projection: Projection) -> Self {
         let view = Mat4::from_rotation_translation(
             Quat::from_euler(glam::EulerRot::XYZ, rotation.x, rotation.y, rotation.z),
             position,
         );
+
+        let bindings = vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .build(),
+        ];
+
+        let descriptor = Descriptors::new(device, data, bindings);
+
+        let camera_data = CameraData {
+            position,
+            _padd: 0,
+            view,
+            proj: Mat4::default(),
+        };
+
+
+        let mut buffers = vec![];
+
+        for _ in 0..data.swapchain_images.len() {
+            let buffer = unsafe { create_buffer(
+                instance,
+                device,
+                data,
+                size_of::<CameraData>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            )}.unwrap();
+
+            let buffer_mem =
+                unsafe { device.map_memory(buffer.memory, 0, size_of::<CameraData>() as u64, vk::MemoryMapFlags::empty()) }
+                    .unwrap();
+
+            unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
+
+            unsafe { device.unmap_memory(buffer.memory) };
+
+            buffers.push(buffer);
+        }
+
+        let layouts = vec![descriptor.descriptor_set_layout; data.swapchain_images.len()];
+        let info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor.descriptor_pool)
+            .set_layouts(&layouts);
+
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
+
+        for i in 0..data.swapchain_images.len() {
+            let info = vk::DescriptorBufferInfo::builder()
+                .buffer(buffers[i].buffer)
+                .offset(0)
+                .range(size_of::<CameraData>() as u64)
+                .build();
+
+            let buffer_info = &[info];
+            let cam_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(buffer_info)
+                .build();
+
+            unsafe {
+                device.update_descriptor_sets(
+                    &[cam_write],
+                    &[] as &[vk::CopyDescriptorSet],
+                )
+            };
+        }
 
         SimpleCamera {
             position,
             rotation,
             view,
             projection,
+
+            descriptor,
+            descriptor_sets,
+            buffers,
         }
     }
 
@@ -83,7 +176,7 @@ impl Camera for SimpleCamera {
         self.projection.inv_proj
     }
 
-    fn calculate_view(&mut self, _device: &Device, _image_index: usize) {
+    fn calculate_view(&mut self, device: &Device, image_index: usize) {
         self.view = Mat4::from_rotation_translation(
             Quat::from_euler(
                 glam::EulerRot::XYZ,
@@ -93,28 +186,74 @@ impl Camera for SimpleCamera {
             ),
             self.position,
         );
+
+        let camera_data = CameraData {
+            position: self.position,
+            _padd: 0,
+            view: self.view,
+            proj: self.proj(),
+        };
+
+        let buffer = self.buffers[image_index];
+
+        let buffer_mem =
+            unsafe { device.map_memory(buffer.memory, 0, size_of::<CameraData>() as u64, vk::MemoryMapFlags::empty()) }
+                .unwrap();
+
+        unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
+
+        unsafe { device.unmap_memory(buffer.memory) };
     }
 
-    fn calculate_proj(&mut self, _device: &Device) {
+    fn calculate_proj(&mut self, device: &Device) {
         self.projection.recalculate();
+
+        let camera_data = CameraData {
+            position: self.position,
+            _padd: 0,
+            view: self.view,
+            proj: self.proj(),
+        };
+
+        for buffer in self.buffers.clone() {
+            let buffer_mem =
+                unsafe { device.map_memory(buffer.memory, 0, size_of::<CameraData>() as u64, vk::MemoryMapFlags::empty()) }
+                    .unwrap();
+
+            unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
+
+            unsafe { device.unmap_memory(buffer.memory) };
+        }
     }
 
     fn set_aspect(&mut self, aspect_ratio: f32) {
         self.projection.aspect_ratio = aspect_ratio;
     }
 
-    fn view_buffer(&self, _image_index: usize) -> BufferWrapper {
-        BufferWrapper::default()
+    fn destroy(&self, device: &Device) {
+        self.descriptor.destroy(device);
+        self.buffers.iter().for_each(|b| b.destroy(device));
     }
-
-    fn proj_buffer(&self, _image_index: usize) -> BufferWrapper {
-        BufferWrapper::default()
-    }
-
-    fn destroy(&self, _device: &Device) {}
 
     fn clone_dyn(&self) -> Box<dyn Camera> {
         Box::new(self.clone())
+    }
+    
+    fn get_data(&self) -> CameraData {
+        CameraData {
+            position: self.position,
+            _padd: 0,
+            view: self.view,
+            proj: self.projection.proj,
+        }
+    }
+    
+    fn get_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
+        self.descriptor_sets.clone()
+    }
+    
+    fn get_set_layout(&self) -> vk::DescriptorSetLayout {
+        self.descriptor.descriptor_set_layout
     }
 }
 
@@ -143,11 +282,10 @@ impl Projection {
         }
     }
 
-    pub fn recalculate(&mut self) -> &mut Self {
+    pub fn recalculate(&mut self) {
         let proj = Mat4::perspective_rh(self.fov_y_rad, self.aspect_ratio, self.z_near, self.z_far);
 
         self.proj = proj;
         self.inv_proj = proj.inverse();
-        self
     }
 }
