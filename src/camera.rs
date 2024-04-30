@@ -231,6 +231,7 @@ impl Camera for SimpleCamera {
     }
 
     fn destroy(&self, device: &Device) {
+        self.descriptor.destroy_swapchain(device);
         self.descriptor.destroy(device);
         self.buffers.iter().for_each(|b| b.destroy(device));
     }

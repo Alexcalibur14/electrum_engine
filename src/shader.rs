@@ -123,7 +123,7 @@ impl Material {
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
         shader: VFShader,
         mesh_settings: PipelineMeshSettings,
-        mut other_layouts: Vec<vk::DescriptorSetLayout>,
+        other_layouts: Vec<vk::DescriptorSetLayout>,
     ) -> Self {
         let descriptor = Descriptors::new(device, data, bindings);
 
@@ -141,9 +141,7 @@ impl Material {
         }
 
         let mut set_layouts = vec![descriptor.descriptor_set_layout];
-        set_layouts.append(&mut other_layouts);
-
-        println!("{:?}", set_layouts);
+        set_layouts.append(&mut other_layouts.clone());
         
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&set_layouts)
@@ -190,9 +188,8 @@ impl Material {
         self.descriptor.recreate_swapchain(device, data);
 
         let mut set_layouts = vec![self.descriptor.descriptor_set_layout];
+        
         set_layouts.append(&mut self.other_set_layouts);
-
-        println!("{:?}", set_layouts);
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&set_layouts)

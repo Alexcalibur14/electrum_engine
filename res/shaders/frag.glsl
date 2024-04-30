@@ -3,6 +3,7 @@
 layout(location = 0) in vec3 vert_position;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 inNormal;
+layout(location = 3) in vec3 camera_position;
 
 layout(location = 0) out vec4 outColor;
 
@@ -29,8 +30,15 @@ void main() {
     float diffuse_strength = max(dot(inNormal, light_dir), 0.0);
     vec3 diffuse_colour = point_light.colour * diffuse_strength;
 
+    // specular lighting
+    vec3 view_dir = normalize(camera_position - vert_position);
+    vec3 half_dir = normalize(view_dir + light_dir);
 
-    vec3 result = (ambiant_colour + diffuse_colour) * obj_colour.rgb;
+    float specular_strength = pow(max(dot(view_dir, half_dir), 0.0), 32.0);
+    vec3 specular_colour = specular_strength * point_light.colour;
+
+    // output
+    vec3 result = (ambiant_colour + diffuse_colour + specular_colour) * obj_colour.rgb;
 
     outColor = vec4(result * gamma, obj_colour.a);
 }

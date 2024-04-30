@@ -231,7 +231,7 @@ impl Renderer {
             &instance,
             &device,
             &data,
-            "res\\models\\blender_cube.obj",
+            "res\\models\\MONKEY.obj",
             shader,
             position,
             view,

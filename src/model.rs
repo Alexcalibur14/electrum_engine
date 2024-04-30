@@ -173,8 +173,7 @@ impl Renderable for ObjectPrototype {
     fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
         self.material.recreate_swapchain(device, data);
 
-        let layouts =
-            vec![self.material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
+        let layouts = vec![self.material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
         let info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(self.material.descriptor.descriptor_pool)
             .set_layouts(&layouts);
