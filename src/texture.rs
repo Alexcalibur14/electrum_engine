@@ -188,6 +188,7 @@ pub unsafe fn create_texture_image(
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        None,
     )?;
 
     // Copy (staging)

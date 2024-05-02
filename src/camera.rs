@@ -3,7 +3,10 @@ use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{buffer::{create_buffer, BufferWrapper}, Descriptors, RendererData};
+use crate::{
+    buffer::{create_buffer, BufferWrapper},
+    Descriptors, RendererData,
+};
 
 pub trait Camera {
     /// Returns the View matrix
@@ -53,27 +56,32 @@ pub struct SimpleCamera {
     pub rotation: Vec3,
     pub view: Mat4,
     pub projection: Projection,
-    
+
     pub descriptor: Descriptors,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub buffers: Vec<BufferWrapper>,
 }
 
 impl SimpleCamera {
-    pub fn new(instance: &Instance, device: &Device, data: &RendererData,position: Vec3, rotation: Vec3, projection: Projection) -> Self {
+    pub fn new(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        position: Vec3,
+        rotation: Vec3,
+        projection: Projection,
+    ) -> Self {
         let view = Mat4::from_rotation_translation(
             Quat::from_euler(glam::EulerRot::XYZ, rotation.x, rotation.y, rotation.z),
             position,
         );
 
-        let bindings = vec![
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
-        ];
+        let bindings = vec![vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .build()];
 
         let descriptor = Descriptors::new(device, data, bindings);
 
@@ -84,22 +92,31 @@ impl SimpleCamera {
             proj: Mat4::default(),
         };
 
-
         let mut buffers = vec![];
 
-        for _ in 0..data.swapchain_images.len() {
-            let buffer = unsafe { create_buffer(
-                instance,
-                device,
-                data,
-                size_of::<CameraData>() as u64,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            )}.unwrap();
+        for i in 0..data.swapchain_images.len() {
+            let buffer = unsafe {
+                create_buffer(
+                    instance,
+                    device,
+                    data,
+                    size_of::<CameraData>() as u64,
+                    vk::BufferUsageFlags::UNIFORM_BUFFER,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    Some(format!("Camera Data {}", i)),
+                )
+            }
+            .unwrap();
 
-            let buffer_mem =
-                unsafe { device.map_memory(buffer.memory, 0, size_of::<CameraData>() as u64, vk::MemoryMapFlags::empty()) }
-                    .unwrap();
+            let buffer_mem = unsafe {
+                device.map_memory(
+                    buffer.memory,
+                    0,
+                    size_of::<CameraData>() as u64,
+                    vk::MemoryMapFlags::empty(),
+                )
+            }
+            .unwrap();
 
             unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
 
@@ -131,12 +148,7 @@ impl SimpleCamera {
                 .buffer_info(buffer_info)
                 .build();
 
-            unsafe {
-                device.update_descriptor_sets(
-                    &[cam_write],
-                    &[] as &[vk::CopyDescriptorSet],
-                )
-            };
+            unsafe { device.update_descriptor_sets(&[cam_write], &[] as &[vk::CopyDescriptorSet]) };
         }
 
         SimpleCamera {
@@ -196,9 +208,15 @@ impl Camera for SimpleCamera {
 
         let buffer = self.buffers[image_index];
 
-        let buffer_mem =
-            unsafe { device.map_memory(buffer.memory, 0, size_of::<CameraData>() as u64, vk::MemoryMapFlags::empty()) }
-                .unwrap();
+        let buffer_mem = unsafe {
+            device.map_memory(
+                buffer.memory,
+                0,
+                size_of::<CameraData>() as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
 
         unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
 
@@ -216,9 +234,15 @@ impl Camera for SimpleCamera {
         };
 
         for buffer in self.buffers.clone() {
-            let buffer_mem =
-                unsafe { device.map_memory(buffer.memory, 0, size_of::<CameraData>() as u64, vk::MemoryMapFlags::empty()) }
-                    .unwrap();
+            let buffer_mem = unsafe {
+                device.map_memory(
+                    buffer.memory,
+                    0,
+                    size_of::<CameraData>() as u64,
+                    vk::MemoryMapFlags::empty(),
+                )
+            }
+            .unwrap();
 
             unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
 
@@ -239,7 +263,7 @@ impl Camera for SimpleCamera {
     fn clone_dyn(&self) -> Box<dyn Camera> {
         Box::new(self.clone())
     }
-    
+
     fn get_data(&self) -> CameraData {
         CameraData {
             position: self.position,
@@ -248,11 +272,11 @@ impl Camera for SimpleCamera {
             proj: self.projection.proj,
         }
     }
-    
+
     fn get_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
         self.descriptor_sets.clone()
     }
-    
+
     fn get_set_layout(&self) -> vk::DescriptorSetLayout {
         self.descriptor.descriptor_set_layout
     }

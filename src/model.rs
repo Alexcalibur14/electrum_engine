@@ -16,7 +16,13 @@ use crate::shader::{Material, PipelineMeshSettings, VFShader};
 use crate::{Image, PointLight, RenderStats, RendererData};
 
 pub trait Renderable {
-    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize, camera_data: vk::DescriptorSet);
+    unsafe fn draw(
+        &self,
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        image_index: usize,
+        camera_data: vk::DescriptorSet,
+    );
     fn update(
         &mut self,
         device: &Device,
@@ -135,7 +141,13 @@ pub struct ObjectPrototype {
 }
 
 impl Renderable for ObjectPrototype {
-    unsafe fn draw(&self, device: &Device, command_buffer: vk::CommandBuffer, image_index: usize, camera_data: vk::DescriptorSet) {
+    unsafe fn draw(
+        &self,
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        image_index: usize,
+        camera_data: vk::DescriptorSet,
+    ) {
         device.cmd_bind_pipeline(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -149,7 +161,8 @@ impl Renderable for ObjectPrototype {
             &[self.descriptor_sets[image_index]],
             &[],
         );
-        device.cmd_bind_descriptor_sets(command_buffer,
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.material.pipeline_layout,
             1,
@@ -173,7 +186,8 @@ impl Renderable for ObjectPrototype {
     fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
         self.material.recreate_swapchain(device, data);
 
-        let layouts = vec![self.material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
+        let layouts =
+            vec![self.material.descriptor.descriptor_set_layout; data.swapchain_images.len()];
         let info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(self.material.descriptor.descriptor_pool)
             .set_layouts(&layouts);
@@ -264,11 +278,8 @@ impl Renderable for ObjectPrototype {
         view_proj: Mat4,
         _id: usize,
     ) {
-        self.ubo.model = Mat4::from_translation(vec3(
-            0.0,
-            0.0,
-            0.0,
-        )) * Mat4::from_axis_angle(Vec3::Y, stats.start.elapsed().as_secs_f32() / 2.0);
+        self.ubo.model = Mat4::from_translation(vec3(0.0, 0.0, 0.0))
+            * Mat4::from_axis_angle(Vec3::Y, stats.start.elapsed().as_secs_f32() / 2.0);
 
         let mvp = view_proj * self.ubo.model;
 
@@ -306,7 +317,7 @@ impl ObjectPrototype {
         proj: Mat4,
         image: (Image, vk::Sampler),
         light: Vec<BufferWrapper>,
-        other_layouts: Vec<vk::DescriptorSetLayout>
+        other_layouts: Vec<vk::DescriptorSetLayout>,
     ) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
 
@@ -338,12 +349,20 @@ impl ObjectPrototype {
                 .build(),
         ];
 
-        let material = Material::new(device, data, bindings, vec![], shader, mesh_settings, other_layouts);
+        let material = Material::new(
+            device,
+            data,
+            bindings,
+            vec![],
+            shader,
+            mesh_settings,
+            other_layouts,
+        );
 
         let ubo = UniformBufferObject { model, view, proj };
 
         let mvp = proj * view * model;
-        
+
         let model_data = ModelData {
             model: ubo.model,
             mvp,
@@ -352,7 +371,7 @@ impl ObjectPrototype {
 
         let mut ubo_buffers = vec![];
 
-        for _ in 0..data.swapchain_images.len() {
+        for i in 0..data.swapchain_images.len() {
             let buffer = unsafe {
                 create_buffer(
                     instance,
@@ -361,13 +380,20 @@ impl ObjectPrototype {
                     size_of::<ModelData>() as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    Some(format!("Object UBO {}", i)),
                 )
             }
             .unwrap();
 
-            let ubo_mem =
-                unsafe { device.map_memory(buffer.memory, 0, size_of::<ModelData>() as u64, vk::MemoryMapFlags::empty()) }
-                    .unwrap();
+            let ubo_mem = unsafe {
+                device.map_memory(
+                    buffer.memory,
+                    0,
+                    size_of::<ModelData>() as u64,
+                    vk::MemoryMapFlags::empty(),
+                )
+            }
+            .unwrap();
 
             unsafe { memcpy(&model_data, ubo_mem.cast(), 1) };
 
@@ -469,6 +495,7 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            None,
         )
         .unwrap();
 
@@ -487,6 +514,7 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            Some("Vertex Buffer".to_string()),
         )
         .unwrap();
 
@@ -520,6 +548,7 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            None,
         )
         .unwrap();
 
@@ -538,6 +567,7 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            Some("Index Buffer".to_string()),
         )
         .unwrap();
 
@@ -594,7 +624,7 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
                     model.mesh.normals[pos_offset],
                     model.mesh.normals[pos_offset + 1],
                     model.mesh.normals[pos_offset + 2],
-                )
+                ),
             };
 
             if let Some(index) = unique_vertices.get(&vertex) {

@@ -1,10 +1,13 @@
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
 
-use glam::Vec3;
 use anyhow::Result;
+use glam::Vec3;
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{buffer::{create_buffer, BufferWrapper}, RendererData};
+use crate::{
+    buffer::{create_buffer, BufferWrapper},
+    RendererData,
+};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -25,12 +28,34 @@ impl PointLight {
         }
     }
 
-    pub fn get_buffers(&self, instance: &Instance, device: &Device, data: &RendererData ) -> Result<Vec<BufferWrapper>> {
+    pub fn get_buffers(
+        &self,
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+    ) -> Result<Vec<BufferWrapper>> {
         let mut buffers = vec![];
-        for _ in 0..data.swapchain_images.len() {
-            let buffer = unsafe { create_buffer(instance, device, data, size_of::<PointLight>() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE) }?;
-            
-            let mem = unsafe { device.map_memory(buffer.memory, 0, size_of::<PointLight>() as u64, vk::MemoryMapFlags::empty()) }?;
+        for i in 0..data.swapchain_images.len() {
+            let buffer = unsafe {
+                create_buffer(
+                    instance,
+                    device,
+                    data,
+                    size_of::<PointLight>() as u64,
+                    vk::BufferUsageFlags::UNIFORM_BUFFER,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    Some(format!("Point Light {}", i)),
+                )
+            }?;
+
+            let mem = unsafe {
+                device.map_memory(
+                    buffer.memory,
+                    0,
+                    size_of::<PointLight>() as u64,
+                    vk::MemoryMapFlags::empty(),
+                )
+            }?;
 
             unsafe { memcpy(self, mem.cast(), 1) };
 

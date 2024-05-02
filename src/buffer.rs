@@ -2,7 +2,7 @@ use vulkanalia::prelude::v1_2::*;
 
 use anyhow::{anyhow, Result};
 
-use crate::RendererData;
+use crate::{set_object_name, RendererData, VALIDATION_ENABLED};
 
 pub unsafe fn begin_single_time_commands(
     device: &Device,
@@ -48,6 +48,7 @@ pub unsafe fn create_buffer(
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
+    name: Option<String>,
 ) -> Result<BufferWrapper> {
     let buffer_info = vk::BufferCreateInfo::builder()
         .size(size)
@@ -75,6 +76,18 @@ pub unsafe fn create_buffer(
         buffer,
         memory: buffer_memory,
     };
+
+    if let Some(object_name) = name {
+        if VALIDATION_ENABLED {
+            set_object_name(
+                instance,
+                device,
+                object_name,
+                vk::ObjectType::BUFFER,
+                buffer.as_raw(),
+            )?
+        }
+    }
 
     Ok(wrapper)
 }

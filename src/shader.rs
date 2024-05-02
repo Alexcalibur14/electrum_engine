@@ -142,7 +142,7 @@ impl Material {
 
         let mut set_layouts = vec![descriptor.descriptor_set_layout];
         set_layouts.append(&mut other_layouts.clone());
-        
+
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&set_layouts)
             .push_constant_ranges(&push_constant_ranges)
@@ -188,7 +188,7 @@ impl Material {
         self.descriptor.recreate_swapchain(device, data);
 
         let mut set_layouts = vec![self.descriptor.descriptor_set_layout];
-        
+
         set_layouts.append(&mut self.other_set_layouts);
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()

@@ -21,19 +21,19 @@ use std::time::{Duration, Instant};
 mod buffer;
 mod camera;
 mod command;
+mod light;
 mod model;
 mod present;
 mod shader;
 mod texture;
-mod light;
 
 use camera::*;
 use command::*;
+use light::*;
 use model::*;
 use present::*;
 use shader::*;
 use texture::*;
-use light::*;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -197,7 +197,14 @@ impl Renderer {
         let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
 
         let projection = Projection::new(PI / 4.0, aspect, 0.1, 100.0);
-        let mut camera = SimpleCamera::new(&instance, &device, &data, vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), projection);
+        let mut camera = SimpleCamera::new(
+            &instance,
+            &device,
+            &data,
+            vec3(0.0, 4.0, 4.0),
+            vec3(0.0, 0.0, 0.0),
+            projection,
+        );
         camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
         data.cameras.push(Box::new(camera.clone()));
@@ -238,7 +245,7 @@ impl Renderer {
             proj,
             (image, sampler),
             light_buffers,
-            vec![camera.get_set_layout()]
+            vec![camera.get_set_layout()],
         );
         unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
         unsafe { object.generate_index_buffer(&instance, &device, &data) };
@@ -434,7 +441,12 @@ impl Renderer {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        self.data.objects[model_index].draw(&self.device, command_buffer, image_index, self.data.cameras[0].get_descriptor_sets()[image_index]);
+        self.data.objects[model_index].draw(
+            &self.device,
+            command_buffer,
+            image_index,
+            self.data.cameras[0].get_descriptor_sets()[image_index],
+        );
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -583,7 +595,10 @@ impl Renderer {
             .iter()
             .for_each(|c| c.destroy(&self.device));
 
-        self.data.point_lights.iter().for_each(|l| l.iter().for_each(|b| b.destroy(&self.device)));
+        self.data
+            .point_lights
+            .iter()
+            .for_each(|l| l.iter().for_each(|b| b.destroy(&self.device)));
 
         self.data
             .in_flight_fences
@@ -868,8 +883,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     // Features
 
     // change this for other features
-    let features = vk::PhysicalDeviceFeatures::builder()
-        .sampler_anisotropy(true);
+    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
 
     // Create
 
@@ -1036,4 +1050,20 @@ extern "system" fn debug_callback(
     }
 
     vk::FALSE
+}
+
+fn set_object_name(
+    instance: &Instance,
+    device: &Device,
+    name: String,
+    object_type: vk::ObjectType,
+    object_handle: u64,
+) -> Result<()> {
+    let name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
+        .object_name((name + "\0").as_bytes())
+        .object_type(object_type)
+        .object_handle(object_handle)
+        .build();
+
+    Ok(unsafe { instance.set_debug_utils_object_name_ext(device.handle(), &name_info) }?)
 }
