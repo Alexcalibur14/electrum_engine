@@ -214,7 +214,7 @@ impl Renderer {
         let view = data.cameras[0].view();
         let proj = data.cameras[0].proj();
 
-        let light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(0.5, 1.0, 0.5), 1.0);
+        let light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 1.0, 1.0), 5.0);
         let light_buffers = light.get_buffers(&instance, &device, &data)?;
 
         data.point_lights.push(light_buffers.clone());
@@ -464,7 +464,7 @@ impl Renderer {
         let mut objects = self.data.objects.clone();
 
         objects.iter_mut().enumerate().for_each(|(id, o)| {
-            o.update(&self.device, &self.data, self.stats, image_index, vp, id)
+            o.update(&self.device, &self.data, &self.stats, image_index, vp, id)
         });
 
         self.data.objects = objects;

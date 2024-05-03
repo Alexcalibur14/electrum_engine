@@ -26,6 +26,7 @@ impl VFShader {
     pub fn compile_vertex(&mut self, device: &Device, path: &str) -> &mut Self {
         self.vertex =
             unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
+
         self
     }
 
@@ -33,6 +34,7 @@ impl VFShader {
     pub fn compile_fragment(&mut self, device: &Device, path: &str) -> &mut Self {
         self.fragment =
             unsafe { compile_shader_module(device, path, "main", ShaderKind::Fragment) }.unwrap();
+
         self
     }
 }
@@ -86,10 +88,11 @@ pub unsafe fn compile_shader_module(
     let mut options = CompileOptions::new().unwrap();
     options.add_macro_definition("EP", Some(entry_point_name));
 
-    let binding = compiler
+    let compiled = compiler
         .compile_into_spirv(&glsl, shader_kind, path, entry_point_name, Some(&options))
         .expect("Could not compile glsl shader to spriv");
-    let bytes = binding.as_binary_u8();
+
+    let bytes = compiled.as_binary_u8();
 
     let bytecode = Bytecode::new(bytes).unwrap();
 

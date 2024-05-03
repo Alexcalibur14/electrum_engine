@@ -15,12 +15,15 @@ layout(set = 0, binding = 2) uniform PointLight {
     float strength;
 } point_light;
 
+const float GAMMA = 2.2;
+const float AMBIANT_STRENGTH = 0.005;
+
 void main() {
-    float gamma = 2.2;
+    float light_distance = distance(point_light.position, vert_position);
+    float attenuation = 1.0 / pow(light_distance, 2.0);
 
     // ambiant lighting
-    float ambiant_strength = 0.005;
-    vec3 ambiant_colour = point_light.colour * ambiant_strength;
+    vec3 ambiant_colour = point_light.colour * AMBIANT_STRENGTH;
 
     vec4 obj_colour = texture(texSampler, fragTexCoord);
 
@@ -40,5 +43,7 @@ void main() {
     // output
     vec3 result = (ambiant_colour + diffuse_colour + specular_colour) * obj_colour.rgb;
 
-    outColor = vec4(result * gamma, obj_colour.a);
+    vec3 gamma_correction = pow(result, vec3(1.0 / GAMMA));
+
+    outColor = vec4(gamma_correction, obj_colour.a);
 }

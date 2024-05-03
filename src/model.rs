@@ -27,7 +27,7 @@ pub trait Renderable {
         &mut self,
         device: &Device,
         data: &RendererData,
-        stats: RenderStats,
+        stats: &RenderStats,
         index: usize,
         view_proj: Mat4,
         id: usize,
@@ -273,7 +273,7 @@ impl Renderable for ObjectPrototype {
         &mut self,
         device: &Device,
         _data: &RendererData,
-        stats: RenderStats,
+        stats: &RenderStats,
         index: usize,
         view_proj: Mat4,
         _id: usize,
@@ -283,10 +283,12 @@ impl Renderable for ObjectPrototype {
 
         let mvp = view_proj * self.ubo.model;
 
+        let normal = self.ubo.model.inverse().transpose();
+
         let model_data = ModelData {
             model: self.ubo.model,
             mvp,
-            normal: Mat4::from_quat(self.ubo.model.to_scale_rotation_translation().1),
+            normal,
         };
 
         let mem = unsafe {
@@ -363,10 +365,12 @@ impl ObjectPrototype {
 
         let mvp = proj * view * model;
 
+        let normal = ubo.model.inverse().transpose();
+
         let model_data = ModelData {
             model: ubo.model,
             mvp,
-            normal: Mat4::from_quat(ubo.model.to_scale_rotation_translation().1),
+            normal,
         };
 
         let mut ubo_buffers = vec![];
