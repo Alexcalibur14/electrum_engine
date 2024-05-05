@@ -207,12 +207,12 @@ impl Renderer {
         );
         camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
-        data.cameras.push(Box::new(camera.clone()));
+        data.camera = Box::new(camera.clone());
 
         let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-        let view = data.cameras[0].view();
-        let proj = data.cameras[0].proj();
+        let view = data.camera.view();
+        let proj = data.camera.proj();
 
         let light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 1.0, 1.0), 5.0);
         let light_buffers = light.get_buffers(&instance, &device, &data)?;
@@ -251,8 +251,6 @@ impl Renderer {
         unsafe { object.generate_index_buffer(&instance, &device, &data) };
 
         data.objects.push(Box::new(object));
-
-        data.recreated = false;
 
         let stats = RenderStats {
             start: Instant::now(),
@@ -445,7 +443,7 @@ impl Renderer {
             &self.device,
             command_buffer,
             image_index,
-            self.data.cameras[0].get_descriptor_sets()[image_index],
+            self.data.camera.get_descriptor_sets()[image_index],
         );
 
         self.device.end_command_buffer(command_buffer)?;
@@ -454,12 +452,9 @@ impl Renderer {
     }
 
     fn update(&mut self, image_index: usize) {
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|c| c.calculate_view(&self.device, image_index));
+        self.data.camera.calculate_view(&self.device, image_index);
 
-        let vp = self.data.cameras[0].proj() * self.data.cameras[0].view();
+        let vp = self.data.camera.proj() * self.data.camera.view();
 
         let mut objects = self.data.objects.clone();
 
@@ -533,14 +528,8 @@ impl Renderer {
         let aspect =
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
 
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|c| c.set_aspect(aspect));
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|c| c.calculate_proj(&self.device));
+        self.data.camera.set_aspect(aspect);
+        self.data.camera.calculate_proj(&self.device);
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -590,10 +579,7 @@ impl Renderer {
             .iter()
             .for_each(|o| o.destroy(&self.device));
 
-        self.data
-            .cameras
-            .iter()
-            .for_each(|c| c.destroy(&self.device));
+        self.data.camera.destroy(&self.device);
 
         self.data
             .point_lights
@@ -663,7 +649,7 @@ pub struct RendererData {
     secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     objects: Vec<Box<dyn Renderable>>,
-    cameras: Vec<Box<dyn Camera>>,
+    camera: Box<dyn Camera>,
     point_lights: Vec<Vec<BufferWrapper>>,
 
     // Semaphores

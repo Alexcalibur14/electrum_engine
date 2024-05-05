@@ -163,6 +163,18 @@ impl SimpleCamera {
         }
     }
 
+    fn blank() -> Self {
+        SimpleCamera {
+            position: Vec3::default(),
+            rotation: Vec3::default(),
+            view: Mat4::default(),
+            projection: Projection::default(),
+            descriptor: Descriptors::default(),
+            descriptor_sets: vec![],
+            buffers: vec![],
+        }
+    }
+
     pub fn look_at(&mut self, target: Vec3, up: Vec3) {
         self.view = Mat4::look_at_rh(self.position, target, up);
         self.rotation = self
@@ -172,6 +184,12 @@ impl SimpleCamera {
             .to_euler(glam::EulerRot::XYZ)
             .into();
         self.position = self.view.to_scale_rotation_translation().2;
+    }
+}
+
+impl Default for Box<dyn Camera> {
+    fn default() -> Self {
+        Box::new(SimpleCamera::blank())
     }
 }
 
