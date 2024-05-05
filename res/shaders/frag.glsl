@@ -41,7 +41,7 @@ void main() {
     vec3 specular_colour = specular_strength * point_light.colour;
 
     // output
-    vec3 result = (ambiant_colour + diffuse_colour + specular_colour) * obj_colour.rgb;
+    vec3 result = (ambiant_colour + diffuse_colour + specular_colour) * attenuation * point_light.strength * obj_colour.rgb;
 
     vec3 gamma_correction = pow(result, vec3(1.0 / GAMMA));
 

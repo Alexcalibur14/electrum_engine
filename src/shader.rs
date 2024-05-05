@@ -175,7 +175,7 @@ impl Material {
             shader: Box::new(shader),
             mesh_settings,
 
-            other_set_layouts: other_layouts,
+            other_set_layouts: other_layouts.clone(),
         }
     }
 
@@ -192,7 +192,7 @@ impl Material {
 
         let mut set_layouts = vec![self.descriptor.descriptor_set_layout];
 
-        set_layouts.append(&mut self.other_set_layouts);
+        set_layouts.append(&mut self.other_set_layouts.clone());
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&set_layouts)
