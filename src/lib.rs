@@ -1,4 +1,5 @@
 use buffer::BufferWrapper;
+use model::mesh::{ObjectPrototype, Plane};
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::vk::KhrSurfaceExtension;
@@ -219,12 +220,45 @@ impl Renderer {
 
         data.point_lights.push(light_buffers.clone());
 
-        let shader = VFShader::default()
+        // let shader = VFShader::default()
+        //     .compile_vertex(&device, "res\\shaders\\vert.glsl")
+        //     .compile_fragment(&device, "res\\shaders\\frag.glsl")
+        //     .to_owned();
+
+        // let image = Image::from_path(
+        //     "res\\textures\\white.png",
+        //     MipLevels::Maximum,
+        //     &instance,
+        //     &device,
+        //     &data,
+        //     vk::Format::R8G8B8A8_SRGB,
+        // );
+        // let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
+
+        // let mut monkey = ObjectPrototype::load(
+        //     &instance,
+        //     &device,
+        //     &data,
+        //     "res\\models\\MONKEY.obj",
+        //     shader,
+        //     position,
+        //     view,
+        //     proj,
+        //     (image, sampler),
+        //     light_buffers.clone(),
+        //     vec![camera.get_set_layout()],
+        // );
+        // unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
+        // unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
+
+        // data.objects.push(Box::new(monkey));
+
+        let plane_shader = VFShader::default()
             .compile_vertex(&device, "res\\shaders\\vert.glsl")
             .compile_fragment(&device, "res\\shaders\\frag.glsl")
             .to_owned();
 
-        let image = Image::from_path(
+        let plane_image = Image::from_path(
             "res\\textures\\white.png",
             MipLevels::Maximum,
             &instance,
@@ -232,26 +266,15 @@ impl Renderer {
             &data,
             vk::Format::R8G8B8A8_SRGB,
         );
-        let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
+        let plane_sampler = unsafe { create_texture_sampler(&device, &plane_image.mip_level) }.unwrap();
 
-        let mut object = ObjectPrototype::load(
-            &instance,
-            &device,
-            &data,
-            "res\\models\\MONKEY.obj",
-            shader,
-            position,
-            view,
-            proj,
-            (image, sampler),
-            light_buffers,
-            vec![camera.get_set_layout()],
-        );
-        unsafe { object.generate_vertex_buffer(&instance, &device, &data) };
-        unsafe { object.generate_index_buffer(&instance, &device, &data) };
+        let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-        data.objects.push(Box::new(object));
+        let mut plane = Plane::new(&instance, &device, &data, 3, 3.0, 3.0, plane_shader, (plane_image, plane_sampler), light_buffers, position, view, proj, vec![camera.get_set_layout()]);
+        plane.generate(&instance, &device, &data);
 
+        data.objects.push(Box::new(plane));
+        
         let stats = RenderStats {
             start: Instant::now(),
             delta: Duration::ZERO,
@@ -869,7 +892,8 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     // Features
 
     // change this for other features
-    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+    let features = vk::PhysicalDeviceFeatures::builder()
+        .sampler_anisotropy(true);
 
     // Create
 
