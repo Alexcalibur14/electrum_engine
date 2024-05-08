@@ -1,23 +1,29 @@
-use std::{collections::HashMap, fs::File, io::BufReader, mem::size_of, ptr::copy_nonoverlapping as memcpy};
+#![allow(dead_code)]
+use std::{
+    collections::HashMap, fs::File, io::BufReader, mem::size_of, ptr::copy_nonoverlapping as memcpy,
+};
 
-use glam::{vec2, vec3, Mat4, Vec3};
 use anyhow::Result;
+use glam::{vec2, vec3, Mat4, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{buffer::{copy_buffer, create_buffer, BufferWrapper}, vertices::PCTVertex, Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData, VFShader, Vertex};
+use crate::{
+    begin_command_label, buffer::{copy_buffer, create_buffer, BufferWrapper}, end_command_label, vertices::PCTVertex, Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData, VFShader, Vertex
+};
 
 use super::{ModelData, ModelMVP};
 
-
 #[derive(Clone)]
 pub struct Plane {
+    name: String,
+
     resolution: u32,
 
     size_x: f32,
     size_y: f32,
 
     vertices: Vec<PCTVertex>,
-    indices: Vec<u32>, 
+    indices: Vec<u32>,
 
     vertex_buffer: BufferWrapper,
     index_buffer: BufferWrapper,
@@ -37,7 +43,7 @@ impl Plane {
         instance: &Instance,
         device: &Device,
         data: &RendererData,
-        
+
         resolution: u32,
         size_x: f32,
         size_y: f32,
@@ -50,6 +56,8 @@ impl Plane {
         view: Mat4,
         proj: Mat4,
         other_layouts: Vec<vk::DescriptorSetLayout>,
+
+        name: String,
     ) -> Self {
         let mesh_settings = PipelineMeshSettings {
             binding_descriptions: PCTVertex::binding_descriptions(),
@@ -91,7 +99,7 @@ impl Plane {
 
         let ubo = ModelMVP { model, view, proj };
 
-        let model_data = ubo.to_data(&(proj * view));
+        let model_data = ubo.get_data(&(proj * view));
 
         let mut ubo_buffers = vec![];
 
@@ -188,6 +196,8 @@ impl Plane {
         }
 
         Plane {
+            name,
+
             resolution,
             vertex_buffer: BufferWrapper::default(),
             index_buffer: BufferWrapper::default(),
@@ -212,14 +222,16 @@ impl Plane {
         for y in 0..self.resolution {
             for x in 0..self.resolution {
                 let percent = vec2(x as f32, y as f32) / (self.resolution - 1) as f32;
-                
-                vertices.push(
-                    PCTVertex {
-                        pos: vec3((percent.x - 0.5) * self.size_x, (percent.y - 0.5) * self.size_y, 0.0),
-                        tex_coord: vec2(0.0, 0.0),
-                        normal: vec3(0.0, 1.0, 0.0),
-                    }
-                );
+
+                vertices.push(PCTVertex {
+                    pos: vec3(
+                        (percent.x - 0.5) * self.size_x,
+                        (percent.y - 0.5) * self.size_y,
+                        0.0,
+                    ),
+                    tex_coord: vec2(0.0, 0.0),
+                    normal: vec3(0.0, 1.0, 0.0),
+                });
 
                 if x != self.resolution - 1 && y != self.resolution - 1 {
                     // top triangle
@@ -237,65 +249,113 @@ impl Plane {
             }
         }
 
-        let vertex_buffer = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            (size_of::<PCTVertex>() * vertices.len()) as u64,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some("Plane Vertex Buffer".to_string())
-        ) }.unwrap();
+        let vertex_buffer = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                (size_of::<PCTVertex>() * vertices.len()) as u64,
+                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                Some(format!("{} Vertex Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        let staging = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            (size_of::<PCTVertex>() * vertices.len()) as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            None,
-        ) }.unwrap();
+        let vertex_staging = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                (size_of::<PCTVertex>() * vertices.len()) as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                Some(format!("{} Vertex Staging Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        let staging_mem = unsafe { device.map_memory(staging.memory, 0, (size_of::<PCTVertex>() * vertices.len()) as u64, vk::MemoryMapFlags::empty()) }.unwrap();
+        let vertex_staging_mem = unsafe {
+            device.map_memory(
+                vertex_staging.memory,
+                0,
+                (size_of::<PCTVertex>() * vertices.len()) as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
 
-        unsafe { memcpy(&vertices, staging_mem.cast(), 1) }
+        unsafe { memcpy(&vertices, vertex_staging_mem.cast(), 1) }
 
-        unsafe { device.unmap_memory(staging.memory) };
+        unsafe { device.unmap_memory(vertex_staging.memory) };
 
-        unsafe { copy_buffer(device, staging.buffer, vertex_buffer.buffer, (size_of::<PCTVertex>() * vertices.len()) as u64, data) }.unwrap();
+        unsafe {
+            copy_buffer(
+                instance,
+                device,
+                vertex_staging.buffer,
+                vertex_buffer.buffer,
+                (size_of::<PCTVertex>() * vertices.len()) as u64,
+                data,
+            )
+        }
+        .unwrap();
 
-        staging.destroy(device);
+        vertex_staging.destroy(device);
 
-        let index_buffer = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            (size_of::<u32>() * indices.len()) as u64,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some("Plane Index Buffer".to_string())
-        ) }.unwrap();
+        let index_buffer = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                (size_of::<u32>() * indices.len()) as u64,
+                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                Some(format!("{} Index Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        let staging = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            (size_of::<u32>() * indices.len()) as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            None,
-        ) }.unwrap();
+        let index_staging = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                (size_of::<u32>() * indices.len()) as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                Some(format!("{} Index Staging Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        let staging_mem = unsafe { device.map_memory(staging.memory, 0, (size_of::<u32>() * indices.len()) as u64, vk::MemoryMapFlags::empty()) }.unwrap();
+        let index_staging_mem = unsafe {
+            device.map_memory(
+                index_staging.memory,
+                0,
+                (size_of::<u32>() * indices.len()) as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
 
-        unsafe { memcpy(&indices, staging_mem.cast(), 1) }
+        unsafe { memcpy(&indices, index_staging_mem.cast(), 1) }
 
-        unsafe { device.unmap_memory(staging.memory) };
+        unsafe { device.unmap_memory(index_staging.memory) };
 
-        unsafe { copy_buffer(device, staging.buffer, index_buffer.buffer, (size_of::<u32>() * indices.len()) as u64, data) }.unwrap();
+        unsafe {
+            copy_buffer(
+                instance,
+                device,
+                index_staging.buffer,
+                index_buffer.buffer,
+                (size_of::<u32>() * indices.len()) as u64,
+                data,
+            )
+        }
+        .unwrap();
 
-        staging.destroy(device);
+        index_staging.destroy(device);
 
         vertices.iter().for_each(|v| println!("{:?}", v.pos));
 
@@ -310,8 +370,7 @@ impl Plane {
 
             if cursor % 3 != 0 {
                 string += format!("{} ", indices[cursor]).as_str();
-            }
-            else {
+            } else {
                 println!("{}", string);
                 string = format!("{} ", indices[cursor]);
             }
@@ -330,11 +389,13 @@ impl Plane {
 impl Renderable for Plane {
     unsafe fn draw(
         &self,
+        instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
         camera_data: vk::DescriptorSet,
     ) {
+        begin_command_label(instance, command_buffer, format!("Draw {}", self.name), [0.0, 0.5, 0.1, 1.0]);
         device.cmd_bind_pipeline(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -364,6 +425,7 @@ impl Renderable for Plane {
             vk::IndexType::UINT32,
         );
         device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
+        end_command_label(instance, command_buffer);
     }
 
     fn update(
@@ -375,7 +437,6 @@ impl Renderable for Plane {
         _view_proj: Mat4,
         _id: usize,
     ) {
-        return;
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -469,9 +530,10 @@ impl Renderable for Plane {
     }
 }
 
-
 #[derive(Clone)]
 pub struct ObjectPrototype {
+    name: String,
+
     vertices: Vec<PCTVertex>,
     indices: Vec<u32>,
 
@@ -491,11 +553,13 @@ pub struct ObjectPrototype {
 impl Renderable for ObjectPrototype {
     unsafe fn draw(
         &self,
+        instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
         camera_data: vk::DescriptorSet,
     ) {
+        begin_command_label(instance, command_buffer, format!("Draw {}", self.name), [0.0, 0.5, 0.1, 1.0]);
         device.cmd_bind_pipeline(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -525,6 +589,7 @@ impl Renderable for ObjectPrototype {
             vk::IndexType::UINT32,
         );
         device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
+        end_command_label(instance, command_buffer);
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -629,7 +694,7 @@ impl Renderable for ObjectPrototype {
         self.ubo.model = Mat4::from_translation(vec3(0.0, 0.0, 0.0))
             * Mat4::from_axis_angle(Vec3::Y, stats.start.elapsed().as_secs_f32() / 2.0);
 
-        let model_data = self.ubo.to_data(&view_proj);
+        let model_data = self.ubo.get_data(&view_proj);
 
         let mem = unsafe {
             device.map_memory(
@@ -660,6 +725,7 @@ impl ObjectPrototype {
         image: (Image, vk::Sampler),
         light: Vec<BufferWrapper>,
         other_layouts: Vec<vk::DescriptorSetLayout>,
+        name: String,
     ) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
 
@@ -703,7 +769,7 @@ impl ObjectPrototype {
 
         let ubo = ModelMVP { model, view, proj };
 
-        let model_data = ubo.to_data(&(proj * view));
+        let model_data = ubo.get_data(&(proj * view));
 
         let mut ubo_buffers = vec![];
 
@@ -800,6 +866,8 @@ impl ObjectPrototype {
         }
 
         ObjectPrototype {
+            name,
+
             vertices,
             indices,
 
@@ -831,7 +899,7 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            None,
+            Some(format!("{} Vertex Staging Buffer", self.name)),
         )
         .unwrap();
 
@@ -850,11 +918,12 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some("Vertex Buffer".to_string()),
+            Some(format!("{} Vertex Buffer", self.name)),
         )
         .unwrap();
 
         copy_buffer(
+            instance,
             device,
             staging_buffer.buffer,
             vertex_buffer.buffer,
@@ -884,7 +953,7 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            None,
+            Some(format!("{} Index Staging Buffer", self.name)),
         )
         .unwrap();
 
@@ -903,11 +972,12 @@ impl ObjectPrototype {
             size,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some("Index Buffer".to_string()),
+            Some(format!("{} Index Buffer", self.name)),
         )
         .unwrap();
 
         copy_buffer(
+            instance,
             device,
             staging_buffer.buffer,
             index_buffer.buffer,

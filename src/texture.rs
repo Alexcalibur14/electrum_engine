@@ -188,7 +188,7 @@ pub unsafe fn create_texture_image(
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-        None,
+        Some("Image staging buffer".to_string()),
     )?;
 
     // Copy (staging)
@@ -220,6 +220,7 @@ pub unsafe fn create_texture_image(
     // Transition + Copy (image)
 
     transition_image_layout(
+        instance,
         device,
         data,
         texture_image,
@@ -229,6 +230,7 @@ pub unsafe fn create_texture_image(
     )?;
 
     copy_buffer_to_image(
+        instance,
         device,
         data,
         staging_buffer.buffer,
@@ -258,6 +260,7 @@ pub unsafe fn create_texture_image(
 }
 
 unsafe fn transition_image_layout(
+    instance: &Instance,
     device: &Device,
     data: &RendererData,
     image: vk::Image,
@@ -282,7 +285,7 @@ unsafe fn transition_image_layout(
             _ => return Err(anyhow!("Unsupported image layout transition!")),
         };
 
-    let command_buffer = begin_single_time_commands(device, data)?;
+    let command_buffer = begin_single_time_commands(instance, device, data, "Transition Image Layout".to_string())?;
 
     let subresource = vk::ImageSubresourceRange::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -311,12 +314,13 @@ unsafe fn transition_image_layout(
         &[barrier],
     );
 
-    end_single_time_commands(device, data, command_buffer)?;
+    end_single_time_commands(instance, device, data, command_buffer)?;
 
     Ok(())
 }
 
 unsafe fn copy_buffer_to_image(
+    instance: &Instance,
     device: &Device,
     data: &RendererData,
     buffer: vk::Buffer,
@@ -324,7 +328,7 @@ unsafe fn copy_buffer_to_image(
     width: u32,
     height: u32,
 ) -> Result<()> {
-    let command_buffer = begin_single_time_commands(device, data)?;
+    let command_buffer = begin_single_time_commands(instance, device, data, "Copy Buffer To Image".to_string())?;
 
     let subresource = vk::ImageSubresourceLayers::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -352,7 +356,7 @@ unsafe fn copy_buffer_to_image(
         &[region],
     );
 
-    end_single_time_commands(device, data, command_buffer)?;
+    end_single_time_commands(instance, device, data, command_buffer)?;
 
     Ok(())
 }
@@ -427,7 +431,7 @@ unsafe fn generate_mipmaps(
 
     // Mipmaps
 
-    let command_buffer = begin_single_time_commands(device, data)?;
+    let command_buffer = begin_single_time_commands(instance, device, data, "Generate MipMaps".to_string())?;
 
     let subresource = vk::ImageSubresourceRange::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -543,7 +547,7 @@ unsafe fn generate_mipmaps(
         &[barrier],
     );
 
-    end_single_time_commands(device, data, command_buffer)?;
+    end_single_time_commands(instance, device, data, command_buffer)?;
 
     Ok(())
 }

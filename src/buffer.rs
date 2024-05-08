@@ -2,11 +2,13 @@ use vulkanalia::prelude::v1_2::*;
 
 use anyhow::{anyhow, Result};
 
-use crate::{set_object_name, RendererData, VALIDATION_ENABLED};
+use crate::{begin_command_label, end_command_label, set_object_name, RendererData};
 
 pub unsafe fn begin_single_time_commands(
+    instance: &Instance,
     device: &Device,
     data: &RendererData,
+    name: String,
 ) -> Result<vk::CommandBuffer> {
     let info = vk::CommandBufferAllocateInfo::builder()
         .level(vk::CommandBufferLevel::PRIMARY)
@@ -18,17 +20,20 @@ pub unsafe fn begin_single_time_commands(
     let info =
         vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
+    begin_command_label(instance, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
     device.begin_command_buffer(command_buffer, &info)?;
 
     Ok(command_buffer)
 }
 
 pub unsafe fn end_single_time_commands(
+    instance: &Instance,
     device: &Device,
     data: &RendererData,
     command_buffer: vk::CommandBuffer,
 ) -> Result<()> {
     device.end_command_buffer(command_buffer)?;
+    end_command_label(instance, command_buffer);
 
     let command_buffers = &[command_buffer];
     let info = vk::SubmitInfo::builder().command_buffers(command_buffers);
@@ -78,15 +83,13 @@ pub unsafe fn create_buffer(
     };
 
     if let Some(object_name) = name {
-        if VALIDATION_ENABLED {
-            set_object_name(
-                instance,
-                device,
-                object_name,
-                vk::ObjectType::BUFFER,
-                buffer.as_raw(),
-            )?
-        }
+        set_object_name(
+            instance,
+            device,
+            object_name,
+            vk::ObjectType::BUFFER,
+            buffer.as_raw(),
+        )?
     }
 
     Ok(wrapper)
@@ -111,18 +114,19 @@ pub unsafe fn get_memory_type_index(
 }
 
 pub unsafe fn copy_buffer(
+    instance: &Instance,
     device: &Device,
     source: vk::Buffer,
     destination: vk::Buffer,
     size: vk::DeviceSize,
     data: &RendererData,
 ) -> Result<()> {
-    let command_buffer = begin_single_time_commands(device, data)?;
+    let command_buffer = begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
 
     let regions = vk::BufferCopy::builder().size(size);
     device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
 
-    end_single_time_commands(device, data, command_buffer)?;
+    end_single_time_commands(instance, device, data, command_buffer)?;
 
     Ok(())
 }

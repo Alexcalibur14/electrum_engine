@@ -1,5 +1,3 @@
-use buffer::BufferWrapper;
-use model::mesh::{ObjectPrototype, Plane};
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_2::*;
 use vulkanalia::vk::KhrSurfaceExtension;
@@ -28,9 +26,11 @@ mod present;
 mod shader;
 mod texture;
 
+use buffer::*;
 use camera::*;
 use command::*;
 use light::*;
+use mesh::*;
 use model::*;
 use present::*;
 use shader::*;
@@ -49,7 +49,7 @@ const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.na
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 #[derive(Clone)]
-pub struct Renderer {
+pub struct Renderer {   
     _entry: Entry,
     instance: Instance,
     pub device: Device,
@@ -193,7 +193,7 @@ impl Renderer {
         unsafe { create_command_pools(&instance, &device, &mut data) }.unwrap();
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
-        unsafe { create_sync_objects(&device, &mut data) }?;
+        unsafe { create_sync_objects(&instance, &device, &mut data) }?;
 
         let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
 
@@ -210,7 +210,7 @@ impl Renderer {
 
         data.camera = Box::new(camera.clone());
 
-        let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
+        // let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
         let view = data.camera.view();
         let proj = data.camera.proj();
@@ -253,10 +253,10 @@ impl Renderer {
 
         // data.objects.push(Box::new(monkey));
 
-        let plane_shader = VFShader::default()
-            .compile_vertex(&device, "res\\shaders\\vert.glsl")
-            .compile_fragment(&device, "res\\shaders\\frag.glsl")
-            .to_owned();
+        let plane_shader = VFShader::builder(&instance, &device, "Lit".to_string())
+            .compile_vertex("res\\shaders\\vert.glsl")
+            .compile_fragment("res\\shders\\frag.glsl")
+            .build();
 
         let plane_image = Image::from_path(
             "res\\textures\\white.png",
@@ -266,15 +266,31 @@ impl Renderer {
             &data,
             vk::Format::R8G8B8A8_SRGB,
         );
-        let plane_sampler = unsafe { create_texture_sampler(&device, &plane_image.mip_level) }.unwrap();
+        let plane_sampler =
+            unsafe { create_texture_sampler(&device, &plane_image.mip_level) }.unwrap();
 
         let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-        let mut plane = Plane::new(&instance, &device, &data, 3, 3.0, 3.0, plane_shader, (plane_image, plane_sampler), light_buffers, position, view, proj, vec![camera.get_set_layout()]);
+        let mut plane = Plane::new(
+            &instance,
+            &device,
+            &data,
+            3,
+            3.0,
+            3.0,
+            plane_shader,
+            (plane_image, plane_sampler),
+            light_buffers,
+            position,
+            view,
+            proj,
+            vec![camera.get_set_layout()],
+            "Plane".to_string(),
+        );
         plane.generate(&instance, &device, &data);
 
         data.objects.push(Box::new(plane));
-        
+
         let stats = RenderStats {
             start: Instant::now(),
             delta: Duration::ZERO,
@@ -293,6 +309,10 @@ impl Renderer {
         })
     }
 
+    /// This function renders a frame
+    ///
+    /// # Safety
+    /// Do not call this function if the window is minimised
     pub unsafe fn render(&mut self, window: &Window) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
 
@@ -410,6 +430,8 @@ impl Renderer {
             .render_area(render_area)
             .clear_values(clear_values);
 
+        begin_command_label(&self.instance, command_buffer, "Main Object Pass".to_string(), [0.0, 0.1, 0.5, 1.0]);
+
         self.device.cmd_begin_render_pass(
             command_buffer,
             &info,
@@ -426,6 +448,8 @@ impl Renderer {
         self.device.cmd_end_render_pass(command_buffer);
 
         self.device.end_command_buffer(command_buffer)?;
+
+        end_command_label(&self.instance, command_buffer);
 
         Ok(())
     }
@@ -463,6 +487,7 @@ impl Renderer {
         self.device.begin_command_buffer(command_buffer, &info)?;
 
         self.data.objects[model_index].draw(
+            &self.instance,
             &self.device,
             command_buffer,
             image_index,
@@ -587,6 +612,11 @@ impl Renderer {
         self.device.destroy_swapchain_khr(self.data.swapchain, None);
     }
 
+    /// This function will destroy all vulkan objects in the renderer
+    ///
+    /// # Safety
+    /// This function **MUST** be called befoore the end of the program
+    /// and **MUST** be the last function called on the renderer
     pub unsafe fn destroy(&mut self) {
         self.destroy_swapchain();
         self.data
@@ -892,8 +922,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     // Features
 
     // change this for other features
-    let features = vk::PhysicalDeviceFeatures::builder()
-        .sampler_anisotropy(true);
+    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
 
     // Create
 
@@ -906,9 +935,13 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     let device = instance.create_device(data.physical_device, &info, None)?;
 
     // Queues
+    let graphics_queue = device.get_device_queue(indices.graphics, 0);
+    set_object_name(instance, &device, "Graphics Queue".to_string(), vk::ObjectType::QUEUE, graphics_queue.as_raw() as u64)?;
+    data.graphics_queue = graphics_queue;
 
-    data.graphics_queue = device.get_device_queue(indices.graphics, 0);
-    data.present_queue = device.get_device_queue(indices.present, 0);
+    let present_queue = device.get_device_queue(indices.present, 0);
+    set_object_name(instance, &device, "Present Queue".to_string(), vk::ObjectType::QUEUE, graphics_queue.as_raw() as u64)?;
+    data.present_queue = present_queue;
 
     Ok(device)
 }
@@ -952,18 +985,23 @@ unsafe fn get_supported_format(
         .ok_or_else(|| anyhow!("Failed to find supported format!"))
 }
 
-unsafe fn create_sync_objects(device: &Device, data: &mut RendererData) -> Result<()> {
+unsafe fn create_sync_objects(instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
-    for _ in 0..MAX_FRAMES_IN_FLIGHT {
-        data.image_available_semaphores
-            .push(device.create_semaphore(&semaphore_info, None)?);
-        data.render_finished_semaphores
-            .push(device.create_semaphore(&semaphore_info, None)?);
+    for i in 0..MAX_FRAMES_IN_FLIGHT {
+        let image_available_semaphor = device.create_semaphore(&semaphore_info, None)?;
+        set_object_name(instance, device, format!("Image Available Semaphore {}", i), vk::ObjectType::SEMAPHORE, image_available_semaphor.as_raw())?;
+        data.image_available_semaphores.push(image_available_semaphor);
 
-        data.in_flight_fences
-            .push(device.create_fence(&fence_info, None)?);
+
+        let render_finished_semaphor = device.create_semaphore(&semaphore_info, None)?;
+        set_object_name(instance, device, format!("Render Finished Semaphore {}", i), vk::ObjectType::SEMAPHORE, render_finished_semaphor.as_raw())?;
+        data.render_finished_semaphores.push(render_finished_semaphor);
+
+        let in_flight_fence = device.create_fence(&fence_info, None)?;
+        set_object_name(instance, device, format!("In Flight Fence {}", i), vk::ObjectType::FENCE, in_flight_fence.as_raw())?;
+        data.in_flight_fences.push(in_flight_fence);
     }
 
     data.images_in_flight = data
@@ -1069,11 +1107,37 @@ fn set_object_name(
     object_type: vk::ObjectType,
     object_handle: u64,
 ) -> Result<()> {
-    let name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
-        .object_name((name + "\0").as_bytes())
-        .object_type(object_type)
-        .object_handle(object_handle)
+    if VALIDATION_ENABLED {
+        let name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
+            .object_name((name + "\0").as_bytes())
+            .object_type(object_type)
+            .object_handle(object_handle)
+            .build();
+    
+        unsafe { instance.set_debug_utils_object_name_ext(device.handle(), &name_info) }?
+    }
+
+    Ok(())
+}
+
+fn begin_command_label(instance: &Instance, command_buffer: vk::CommandBuffer, name: String, colour: [f32; 4]) {
+    let info = vk::DebugUtilsLabelEXT::builder()
+        .label_name((name + "\0").as_bytes())
+        .color(colour)
         .build();
 
-    Ok(unsafe { instance.set_debug_utils_object_name_ext(device.handle(), &name_info) }?)
+    unsafe { instance.cmd_begin_debug_utils_label_ext(command_buffer, &info) }
+}
+
+fn end_command_label(instance: &Instance, command_buffer: vk::CommandBuffer) {
+    unsafe { instance.cmd_end_debug_utils_label_ext(command_buffer) }
+}
+
+fn insert_command_label(instance: &Instance, command_buffer: vk::CommandBuffer, name: String, colour: [f32; 4]) {
+    let info = vk::DebugUtilsLabelEXT::builder()
+        .label_name((name + "\0").as_bytes())
+        .color(colour)
+        .build();
+
+    unsafe { instance.cmd_insert_debug_utils_label_ext(command_buffer, &info) };
 }

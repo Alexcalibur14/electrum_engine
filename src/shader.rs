@@ -7,12 +7,18 @@ use shaderc::{CompileOptions, Compiler, ShaderKind};
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{Descriptors, RendererData};
+use crate::{set_object_name, Descriptors, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
     unsafe fn destroy(&self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Shader>;
+}
+
+impl Clone for Box<dyn Shader> {
+    fn clone(&self) -> Self {
+        self.clone_dyn()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -22,20 +28,8 @@ pub struct VFShader {
 }
 
 impl VFShader {
-    /// Compiles the vertex shader at the location from `path`
-    pub fn compile_vertex(&mut self, device: &Device, path: &str) -> &mut Self {
-        self.vertex =
-            unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
-
-        self
-    }
-
-    /// Compiles the fragment shader at the location from `path`
-    pub fn compile_fragment(&mut self, device: &Device, path: &str) -> &mut Self {
-        self.fragment =
-            unsafe { compile_shader_module(device, path, "main", ShaderKind::Fragment) }.unwrap();
-
-        self
+    pub fn builder(instance: &Instance, device: &Device, name: String) -> VFShaderBuilder {
+        VFShaderBuilder::new(instance.clone(), device.clone(), name)
     }
 }
 
@@ -65,11 +59,48 @@ impl Shader for VFShader {
     }
 }
 
-impl Clone for Box<dyn Shader> {
-    fn clone(&self) -> Self {
-        self.clone_dyn()
+pub struct VFShaderBuilder {
+    instance: Instance,
+    device: Device,
+    name: String,
+    vertex: vk::ShaderModule,
+    fragment: vk::ShaderModule,
+}
+
+impl VFShaderBuilder {
+    fn new(instance: Instance, device: Device, name: String) -> Self {
+        VFShaderBuilder {
+            instance,
+            device,
+            name,
+            vertex: vk::ShaderModule::default(),
+            fragment: vk::ShaderModule::default(),
+        }
+    }
+
+    pub fn compile_vertex(&mut self, path: &str) -> &mut Self {
+        let vertex = unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Vertex) }.unwrap();
+        set_object_name(&self.instance, &self.device, self.name.clone() + " Vertex Shader", vk::ObjectType::SHADER_MODULE, vertex.as_raw()).unwrap();
+        self.vertex = vertex;
+        self
+    }
+
+    /// Compiles the fragment shader at the location from `path`
+    pub fn compile_fragment(&mut self, path: &str) -> &mut Self {
+        let fragment = unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Fragment) }.unwrap();
+        set_object_name(&self.instance, &self.device, self.name.clone() + " Fragment Shader", vk::ObjectType::SHADER_MODULE, fragment.as_raw()).unwrap();
+        self.fragment = fragment;
+        self
+    }
+
+    pub fn build(&mut self) -> VFShader {
+        VFShader {
+            vertex: self.vertex,
+            fragment: self.fragment,
+        }
     }
 }
+
 
 /// Compiles a shader file
 pub unsafe fn compile_shader_module(

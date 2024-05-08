@@ -1,5 +1,5 @@
-use std::mem::size_of;
 use std::hash::{Hash, Hasher};
+use std::mem::size_of;
 
 use glam::{Vec2, Vec3};
 use vulkanalia::prelude::v1_2::*;

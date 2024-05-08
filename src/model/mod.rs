@@ -12,6 +12,7 @@ pub mod vertices;
 pub trait Renderable {
     unsafe fn draw(
         &self,
+        instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
@@ -125,8 +126,7 @@ struct ModelMVP {
 }
 
 impl ModelMVP {
-    pub fn to_data(&self, view_proj: &Mat4) -> ModelData {
-        
+    pub fn get_data(&self, view_proj: &Mat4) -> ModelData {
         ModelData {
             model: self.model,
             mvp: *view_proj * self.model,
