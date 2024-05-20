@@ -4,6 +4,7 @@ use std::io::Read;
 use anyhow::Result;
 use shaderc::{CompileOptions, Compiler, ShaderKind};
 
+use tracing::info;
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::prelude::v1_2::*;
 
@@ -11,7 +12,7 @@ use crate::{set_object_name, Descriptors, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
-    unsafe fn destroy(&self, device: &Device);
+    unsafe fn destroy(&mut self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Shader>;
 }
 
@@ -25,6 +26,7 @@ impl Clone for Box<dyn Shader> {
 pub struct VFShader {
     pub vertex: vk::ShaderModule,
     pub fragment: vk::ShaderModule,
+    is_destroyed: bool,
 }
 
 impl VFShader {
@@ -49,9 +51,14 @@ impl Shader for VFShader {
         ]
     }
 
-    unsafe fn destroy(&self, device: &Device) {
-        device.destroy_shader_module(self.vertex, None);
-        device.destroy_shader_module(self.fragment, None);
+    unsafe fn destroy(&mut self, device: &Device) {
+        if self.is_destroyed == false {
+            info!("trying to destroy");
+            device.destroy_shader_module(self.vertex, None);
+            device.destroy_shader_module(self.fragment, None);
+            self.is_destroyed = true;
+        }
+        info!("{}", self.is_destroyed)
     }
 
     fn clone_dyn(&self) -> Box<dyn Shader> {
@@ -97,6 +104,7 @@ impl VFShaderBuilder {
         VFShader {
             vertex: self.vertex,
             fragment: self.fragment,
+            is_destroyed: false,
         }
     }
 }
@@ -246,7 +254,7 @@ impl Material {
         self.pipeline_layout = pipeline_layout;
     }
 
-    pub fn destroy(&self, device: &Device) {
+    pub fn destroy(&mut self, device: &Device) {
         unsafe { self.shader.destroy(device) };
         self.descriptor.destroy(device);
     }

@@ -29,7 +29,7 @@ pub trait Renderable {
     );
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &RendererData);
-    fn destroy(&self, device: &Device);
+    fn destroy(&mut self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Renderable>;
 }
 

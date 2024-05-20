@@ -86,10 +86,18 @@ pub unsafe fn create_buffer(
         set_object_name(
             instance,
             device,
-            object_name,
+            object_name.clone(),
             vk::ObjectType::BUFFER,
             buffer.as_raw(),
-        )?
+        )?;
+
+        set_object_name(
+            instance,
+            device,
+            object_name + " Memory",
+            vk::ObjectType::DEVICE_MEMORY,
+            buffer_memory.as_raw(),
+        )?;
     }
 
     Ok(wrapper)
@@ -123,7 +131,10 @@ pub unsafe fn copy_buffer(
 ) -> Result<()> {
     let command_buffer = begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
 
-    let regions = vk::BufferCopy::builder().size(size);
+    let regions = vk::BufferCopy::builder()
+        .src_offset(0)
+        .dst_offset(0)
+        .size(size);
     device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
 
     end_single_time_commands(instance, device, data, command_buffer)?;

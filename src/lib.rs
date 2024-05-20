@@ -210,8 +210,6 @@ impl Renderer {
 
         data.camera = Box::new(camera.clone());
 
-        // let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
-
         let view = data.camera.view();
         let proj = data.camera.proj();
 
@@ -220,43 +218,41 @@ impl Renderer {
 
         data.point_lights.push(light_buffers.clone());
 
-        // let shader = VFShader::default()
-        //     .compile_vertex(&device, "res\\shaders\\vert.glsl")
-        //     .compile_fragment(&device, "res\\shaders\\frag.glsl")
-        //     .to_owned();
+        let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-        // let image = Image::from_path(
-        //     "res\\textures\\white.png",
-        //     MipLevels::Maximum,
-        //     &instance,
-        //     &device,
-        //     &data,
-        //     vk::Format::R8G8B8A8_SRGB,
-        // );
-        // let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
-
-        // let mut monkey = ObjectPrototype::load(
-        //     &instance,
-        //     &device,
-        //     &data,
-        //     "res\\models\\MONKEY.obj",
-        //     shader,
-        //     position,
-        //     view,
-        //     proj,
-        //     (image, sampler),
-        //     light_buffers.clone(),
-        //     vec![camera.get_set_layout()],
-        // );
-        // unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
-        // unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
-
-        // data.objects.push(Box::new(monkey));
-
-        let plane_shader = VFShader::builder(&instance, &device, "Lit".to_string())
+        let lit_shader = VFShader::builder(&instance, &device, "Lit".to_string())
             .compile_vertex("res\\shaders\\vert.glsl")
-            .compile_fragment("res\\shders\\frag.glsl")
+            .compile_fragment("res\\shaders\\frag.glsl")
             .build();
+
+        let image = Image::from_path(
+            "res\\textures\\white.png",
+            MipLevels::Maximum,
+            &instance,
+            &device,
+            &data,
+            vk::Format::R8G8B8A8_SRGB,
+        );
+        let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
+
+        let mut monkey = ObjectPrototype::load(
+            &instance,
+            &device,
+            &data,
+            "res\\models\\MONKEY.obj",
+            lit_shader,
+            position,
+            view,
+            proj,
+            (image, sampler),
+            light_buffers.clone(),
+            vec![camera.get_set_layout()],
+            "monkey".to_string(),
+        );
+        unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
+        unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
+
+        data.objects.push(Box::new(monkey));
 
         let plane_image = Image::from_path(
             "res\\textures\\white.png",
@@ -271,21 +267,20 @@ impl Renderer {
 
         let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-        let mut plane = Plane::new(
+        let mut plane = Quad::new(
             &instance,
             &device,
             &data,
-            3,
-            3.0,
-            3.0,
-            plane_shader,
+            [vec3(-1.5, 0.0, -1.5), vec3(1.5, 0.0, -1.5), vec3(-1.5, 0.0, 1.5), vec3(1.5, 0.0, 1.5)],
+            vec3(0.0, 1.0, 0.0),
+            lit_shader,
             (plane_image, plane_sampler),
-            light_buffers,
+            light_buffers.clone(),
             position,
             view,
             proj,
             vec![camera.get_set_layout()],
-            "Plane".to_string(),
+            "Quad".to_string(),
         );
         plane.generate(&instance, &device, &data);
 
@@ -627,10 +622,10 @@ impl Renderer {
         self.device
             .destroy_command_pool(self.data.command_pool, None);
 
-        self.data
-            .objects
-            .iter()
-            .for_each(|o| o.destroy(&self.device));
+
+        let mut objects = self.data.objects.clone();
+        objects.iter_mut().for_each(|o| o.destroy(&self.device));
+        self.data.objects = objects;
 
         self.data.camera.destroy(&self.device);
 
@@ -922,7 +917,10 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     // Features
 
     // change this for other features
-    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+    let features = vk::PhysicalDeviceFeatures::builder()
+        .sampler_anisotropy(true)
+        .fill_mode_non_solid(true)
+        .wide_lines(true);
 
     // Create
 
@@ -1121,23 +1119,31 @@ fn set_object_name(
 }
 
 fn begin_command_label(instance: &Instance, command_buffer: vk::CommandBuffer, name: String, colour: [f32; 4]) {
-    let info = vk::DebugUtilsLabelEXT::builder()
-        .label_name((name + "\0").as_bytes())
-        .color(colour)
-        .build();
+    if VALIDATION_ENABLED {
+        let info = vk::DebugUtilsLabelEXT::builder()
+            .label_name((name + "\0").as_bytes())
+            .color(colour)
+            .build();
 
-    unsafe { instance.cmd_begin_debug_utils_label_ext(command_buffer, &info) }
+        unsafe { instance.cmd_begin_debug_utils_label_ext(command_buffer, &info) }
+    }
 }
 
 fn end_command_label(instance: &Instance, command_buffer: vk::CommandBuffer) {
-    unsafe { instance.cmd_end_debug_utils_label_ext(command_buffer) }
+    if VALIDATION_ENABLED {
+        unsafe { instance.cmd_end_debug_utils_label_ext(command_buffer) }
+    }
 }
 
+/// This will place a label for debbuging applications to display at that point
+/// If all the values in the `colour` array are 0.0 the colour wil be ignored
 fn insert_command_label(instance: &Instance, command_buffer: vk::CommandBuffer, name: String, colour: [f32; 4]) {
-    let info = vk::DebugUtilsLabelEXT::builder()
-        .label_name((name + "\0").as_bytes())
-        .color(colour)
-        .build();
+    if VALIDATION_ENABLED {
+        let info = vk::DebugUtilsLabelEXT::builder()
+            .label_name((name + "\0").as_bytes())
+            .color(colour)
+            .build();
 
-    unsafe { instance.cmd_insert_debug_utils_label_ext(command_buffer, &info) };
+        unsafe { instance.cmd_insert_debug_utils_label_ext(command_buffer, &info) };
+    }
 }
