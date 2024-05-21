@@ -429,13 +429,28 @@ impl Renderable for Plane {
 
     fn update(
         &mut self,
-        _device: &Device,
+        device: &Device,
         _data: &RendererData,
         _stats: &RenderStats,
-        _index: usize,
-        _view_proj: Mat4,
+        index: usize,
+        view_proj: Mat4,
         _id: usize,
     ) {
+        let model_data = self.ubo.get_data(&view_proj);
+
+        let mem = unsafe {
+            device.map_memory(
+                self.ubo_buffers[index].memory,
+                0,
+                size_of::<ModelData>() as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        unsafe { memcpy(&model_data, mem.cast(), 1) };
+
+        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -543,7 +558,7 @@ pub struct Quad {
     vertex_buffer: BufferWrapper,
     index_buffer: BufferWrapper,
 
-    image: (Image, u64),
+    image: (u64, u64),
 
     material: Material,
 
@@ -563,7 +578,7 @@ impl Quad {
         normal: Vec3,
 
         shader: u64,
-        image: (Image, u64),
+        image: (u64, u64),
 
         light: Vec<BufferWrapper>,
         model: Mat4,
@@ -656,6 +671,7 @@ impl Quad {
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
         let sampler = data.samplers.get(&image.1).unwrap();
+        let texture = data.textures.get(&image.0).unwrap();
 
         for i in 0..data.swapchain_images.len() {
             let info = vk::DescriptorBufferInfo::builder()
@@ -675,7 +691,7 @@ impl Quad {
 
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(image.0.view)
+                .image_view(texture.view)
                 .sampler(sampler.clone())
                 .build();
 
@@ -851,14 +867,28 @@ impl Renderable for Quad {
 
     fn update(
         &mut self,
-        _device: &Device,
+        device: &Device,
         _data: &RendererData,
         _stats: &RenderStats,
-        _index: usize,
-        _view_proj: Mat4,
+        index: usize,
+        view_proj: Mat4,
         _id: usize,
     ) {
-        
+        let model_data = self.ubo.get_data(&view_proj);
+
+        let mem = unsafe {
+            device.map_memory(
+                self.ubo_buffers[index].memory,
+                0,
+                size_of::<ModelData>() as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        unsafe { memcpy(&model_data, mem.cast(), 1) };
+
+        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -877,6 +907,7 @@ impl Renderable for Quad {
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
         let sampler = data.samplers.get(&self.image.1).unwrap();
+        let texture = data.textures.get(&self.image.0).unwrap();
 
         for (set_index, descriptor_set) in descriptor_sets
             .iter()
@@ -900,7 +931,7 @@ impl Renderable for Quad {
 
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(self.image.0.view)
+                .image_view(texture.view)
                 .sampler(sampler.clone())
                 .build();
 
@@ -943,9 +974,6 @@ impl Renderable for Quad {
         self.vertex_buffer.destroy(device);
         self.index_buffer.destroy(device);
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
-        unsafe {
-            self.image.0.destroy(device);
-        }
     }
 
     fn clone_dyn(&self) -> Box<dyn Renderable> {
@@ -968,7 +996,7 @@ pub struct ObjectPrototype {
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
-    image: (Image, u64),
+    image: (u64, u64),
 
     descriptor_sets: Vec<vk::DescriptorSet>,
 }
@@ -1030,6 +1058,8 @@ impl Renderable for ObjectPrototype {
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
         let sampler = data.samplers.get(&self.image.1).unwrap();
+        let texture = data.textures.get(&self.image.0).unwrap();
+
         for (set_index, descriptor_set) in descriptor_sets
             .iter()
             .enumerate()
@@ -1052,7 +1082,7 @@ impl Renderable for ObjectPrototype {
 
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(self.image.0.view)
+                .image_view(texture.view)
                 .sampler(sampler.clone())
                 .build();
 
@@ -1095,9 +1125,6 @@ impl Renderable for ObjectPrototype {
         self.vertex_buffer.destroy(device);
         self.index_buffer.destroy(device);
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
-        unsafe {
-            self.image.0.destroy(device);
-        }
     }
 
     fn clone_dyn(&self) -> Box<dyn Renderable> {
@@ -1144,7 +1171,7 @@ impl ObjectPrototype {
         model: Mat4,
         view: Mat4,
         proj: Mat4,
-        image: (Image, u64),
+        image: (u64, u64),
         light: Vec<BufferWrapper>,
         other_layouts: Vec<vk::DescriptorSetLayout>,
         name: String,
@@ -1234,6 +1261,7 @@ impl ObjectPrototype {
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
         let sampler = data.samplers.get(&image.1).unwrap();
+        let texture = data.textures.get(&image.0).unwrap();
 
         for i in 0..data.swapchain_images.len() {
             let info = vk::DescriptorBufferInfo::builder()
@@ -1253,7 +1281,7 @@ impl ObjectPrototype {
 
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(image.0.view)
+                .image_view(texture.view)
                 .sampler(sampler.clone())
                 .build();
 

@@ -21,7 +21,7 @@ pub enum MipLevels {
     Maximum,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash)]
 pub struct Image {
     pub image: vk::Image,
     pub image_memory: vk::DeviceMemory,
