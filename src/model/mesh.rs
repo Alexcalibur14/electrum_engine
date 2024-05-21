@@ -5,11 +5,10 @@ use std::{
 
 use anyhow::Result;
 use glam::{vec2, vec3, Mat4, Vec3};
-use tracing::info;
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{copy_buffer, create_buffer, BufferWrapper}, insert_command_label, vertices::PCTVertex, Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData, VFShader, Vertex
+    buffer::{copy_buffer, create_buffer, BufferWrapper}, insert_command_label, vertices::PCTVertex, Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData, Vertex
 };
 
 use super::{ModelData, ModelMVP};
@@ -49,7 +48,7 @@ impl Plane {
         size_x: f32,
         size_y: f32,
 
-        shader: VFShader,
+        shader: u64,
         image: (Image, vk::Sampler),
 
         light: Vec<BufferWrapper>,
@@ -563,7 +562,7 @@ impl Quad {
         points: [Vec3; 4],
         normal: Vec3,
 
-        shader: VFShader,
+        shader: u64,
         image: (Image, vk::Sampler),
 
         light: Vec<BufferWrapper>,
@@ -936,7 +935,6 @@ impl Renderable for Quad {
     }
 
     fn destroy(&mut self, device: &Device) {
-        info!("{} destroying", self.name);
         self.material.destroy(device);
         self.vertex_buffer.destroy(device);
         self.index_buffer.destroy(device);
@@ -1089,7 +1087,6 @@ impl Renderable for ObjectPrototype {
     }
 
     fn destroy(&mut self, device: &Device) {
-        info!("{} destroying", self.name);
         self.material.destroy(device);
         self.vertex_buffer.destroy(device);
         self.index_buffer.destroy(device);
@@ -1140,7 +1137,7 @@ impl ObjectPrototype {
         device: &Device,
         data: &RendererData,
         path: &str,
-        shader: VFShader,
+        shader: u64,
         model: Mat4,
         view: Mat4,
         proj: Mat4,

@@ -11,7 +11,7 @@ use thiserror::Error;
 use tracing::*;
 use winit::window::Window;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::ffi::CStr;
 use std::os::raw::c_void;
@@ -225,6 +225,10 @@ impl Renderer {
             .compile_fragment("res\\shaders\\frag.glsl")
             .build();
 
+        let lit_shader_hash =  lit_shader.hash();
+
+        data.shaders.insert(lit_shader_hash, Box::new(lit_shader));
+
         let image = Image::from_path(
             "res\\textures\\white.png",
             MipLevels::Maximum,
@@ -240,7 +244,7 @@ impl Renderer {
             &device,
             &data,
             "res\\models\\MONKEY.obj",
-            lit_shader,
+            lit_shader_hash,
             position,
             view,
             proj,
@@ -273,7 +277,7 @@ impl Renderer {
             &data,
             [vec3(-1.5, 0.0, -1.5), vec3(1.5, 0.0, -1.5), vec3(-1.5, 0.0, 1.5), vec3(1.5, 0.0, 1.5)],
             vec3(0.0, 1.0, 0.0),
-            lit_shader,
+            lit_shader_hash,
             (plane_image, plane_sampler),
             light_buffers.clone(),
             position,
@@ -627,6 +631,8 @@ impl Renderer {
         objects.iter_mut().for_each(|o| o.destroy(&self.device));
         self.data.objects = objects;
 
+        self.data.shaders.iter().for_each(|(_, s)| s.destroy(&self.device));
+
         self.data.camera.destroy(&self.device);
 
         self.data
@@ -696,6 +702,8 @@ pub struct RendererData {
     command_buffers: Vec<vk::CommandBuffer>,
     secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
+    // objects
+    shaders: HashMap<u64, Box<dyn Shader>>,
     objects: Vec<Box<dyn Renderable>>,
     camera: Box<dyn Camera>,
     point_lights: Vec<Vec<BufferWrapper>>,

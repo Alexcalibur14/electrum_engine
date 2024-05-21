@@ -1,10 +1,10 @@
-use std::fs::File;
+use std::hash::{DefaultHasher, Hasher};
+use std::{fs::File, hash::Hash};
 use std::io::Read;
 
 use anyhow::Result;
 use shaderc::{CompileOptions, Compiler, ShaderKind};
 
-use tracing::info;
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::prelude::v1_2::*;
 
@@ -12,8 +12,10 @@ use crate::{set_object_name, Descriptors, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
-    unsafe fn destroy(&mut self, device: &Device);
+    unsafe fn destroy(&self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Shader>;
+
+    fn hash(&self) -> u64;
 }
 
 impl Clone for Box<dyn Shader> {
@@ -26,7 +28,6 @@ impl Clone for Box<dyn Shader> {
 pub struct VFShader {
     pub vertex: vk::ShaderModule,
     pub fragment: vk::ShaderModule,
-    is_destroyed: bool,
 }
 
 impl VFShader {
@@ -51,18 +52,20 @@ impl Shader for VFShader {
         ]
     }
 
-    unsafe fn destroy(&mut self, device: &Device) {
-        if self.is_destroyed == false {
-            info!("trying to destroy");
-            device.destroy_shader_module(self.vertex, None);
-            device.destroy_shader_module(self.fragment, None);
-            self.is_destroyed = true;
-        }
-        info!("{}", self.is_destroyed)
+    unsafe fn destroy(&self, device: &Device) {
+        device.destroy_shader_module(self.vertex, None);
+        device.destroy_shader_module(self.fragment, None);
     }
 
     fn clone_dyn(&self) -> Box<dyn Shader> {
         Box::new(*self)
+    }
+    
+    fn hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.vertex.hash(&mut hasher);
+        self.fragment.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -104,7 +107,6 @@ impl VFShaderBuilder {
         VFShader {
             vertex: self.vertex,
             fragment: self.fragment,
-            is_destroyed: false,
         }
     }
 }
@@ -151,7 +153,7 @@ pub struct Material {
 
     pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
-    shader: Box<dyn Shader>,
+    shader: u64,
     mesh_settings: PipelineMeshSettings,
 
     pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
@@ -163,7 +165,7 @@ impl Material {
         data: &RendererData,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
-        shader: VFShader,
+        shader: u64,
         mesh_settings: PipelineMeshSettings,
         other_layouts: Vec<vk::DescriptorSetLayout>,
     ) -> Self {
@@ -196,7 +198,7 @@ impl Material {
             create_pipeline(
                 device,
                 data,
-                &shader,
+                shader,
                 mesh_settings.clone(),
                 pipeline_layout,
             )
@@ -211,7 +213,7 @@ impl Material {
 
             push_constant_ranges,
 
-            shader: Box::new(shader),
+            shader,
             mesh_settings,
 
             other_set_layouts: other_layouts.clone(),
@@ -244,7 +246,7 @@ impl Material {
             create_pipeline(
                 device,
                 data,
-                self.shader.as_ref(),
+                self.shader,
                 self.mesh_settings.clone(),
                 pipeline_layout,
             )
@@ -255,7 +257,6 @@ impl Material {
     }
 
     pub fn destroy(&mut self, device: &Device) {
-        unsafe { self.shader.destroy(device) };
         self.descriptor.destroy(device);
     }
 }
@@ -263,7 +264,7 @@ impl Material {
 unsafe fn create_pipeline(
     device: &Device,
     data: &RendererData,
-    shader: &dyn Shader,
+    shader: u64,
     mesh_settings: PipelineMeshSettings,
     pipeline_layout: vk::PipelineLayout,
 ) -> Result<vk::Pipeline> {
@@ -348,7 +349,7 @@ unsafe fn create_pipeline(
 
     // Create
 
-    let shader_stages = shader.stages();
+    let shader_stages = data.shaders.get(&shader).unwrap().stages();
 
     let stages = shader_stages.as_slice();
     let info = vk::GraphicsPipelineCreateInfo::builder()
