@@ -11,8 +11,7 @@ use image::io::Reader;
 use crate::{
     buffer::{
         begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index,
-    },
-    RendererData,
+    }, set_object_name, RendererData
 };
 
 #[allow(dead_code)]
@@ -384,7 +383,7 @@ pub unsafe fn create_image_view(
     Ok(device.create_image_view(&info, None)?)
 }
 
-pub unsafe fn create_texture_sampler(device: &Device, mip_level: &u32) -> Result<vk::Sampler> {
+pub unsafe fn create_texture_sampler(instance: &Instance, device: &Device, mip_level: &u32, name: String) -> Result<vk::Sampler> {
     let info = vk::SamplerCreateInfo::builder()
         .mag_filter(vk::Filter::LINEAR)
         .min_filter(vk::Filter::LINEAR)
@@ -403,6 +402,7 @@ pub unsafe fn create_texture_sampler(device: &Device, mip_level: &u32) -> Result
         .mip_lod_bias(0.0);
 
     let texture_sampler = device.create_sampler(&info, None)?;
+    set_object_name(instance, device, name, vk::ObjectType::SAMPLER, texture_sampler.as_raw()).unwrap();
 
     Ok(texture_sampler)
 }

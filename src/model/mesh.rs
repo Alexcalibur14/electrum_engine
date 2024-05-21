@@ -543,7 +543,7 @@ pub struct Quad {
     vertex_buffer: BufferWrapper,
     index_buffer: BufferWrapper,
 
-    image: (Image, vk::Sampler),
+    image: (Image, u64),
 
     material: Material,
 
@@ -563,7 +563,7 @@ impl Quad {
         normal: Vec3,
 
         shader: u64,
-        image: (Image, vk::Sampler),
+        image: (Image, u64),
 
         light: Vec<BufferWrapper>,
         model: Mat4,
@@ -655,6 +655,8 @@ impl Quad {
 
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
+        let sampler = data.samplers.get(&image.1).unwrap();
+
         for i in 0..data.swapchain_images.len() {
             let info = vk::DescriptorBufferInfo::builder()
                 .buffer(ubo_buffers[i].buffer)
@@ -674,7 +676,7 @@ impl Quad {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(image.0.view)
-                .sampler(image.1)
+                .sampler(sampler.clone())
                 .build();
 
             let image_info = &[info];
@@ -874,6 +876,8 @@ impl Renderable for Quad {
 
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
+        let sampler = data.samplers.get(&self.image.1).unwrap();
+
         for (set_index, descriptor_set) in descriptor_sets
             .iter()
             .enumerate()
@@ -897,7 +901,7 @@ impl Renderable for Quad {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(self.image.0.view)
-                .sampler(self.image.1)
+                .sampler(sampler.clone())
                 .build();
 
             let image_info = &[info];
@@ -941,7 +945,6 @@ impl Renderable for Quad {
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
         unsafe {
             self.image.0.destroy(device);
-            device.destroy_sampler(self.image.1, None);
         }
     }
 
@@ -965,7 +968,7 @@ pub struct ObjectPrototype {
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
-    image: (Image, vk::Sampler),
+    image: (Image, u64),
 
     descriptor_sets: Vec<vk::DescriptorSet>,
 }
@@ -1026,6 +1029,7 @@ impl Renderable for ObjectPrototype {
 
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
+        let sampler = data.samplers.get(&self.image.1).unwrap();
         for (set_index, descriptor_set) in descriptor_sets
             .iter()
             .enumerate()
@@ -1049,7 +1053,7 @@ impl Renderable for ObjectPrototype {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(self.image.0.view)
-                .sampler(self.image.1)
+                .sampler(sampler.clone())
                 .build();
 
             let image_info = &[info];
@@ -1093,7 +1097,6 @@ impl Renderable for ObjectPrototype {
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
         unsafe {
             self.image.0.destroy(device);
-            device.destroy_sampler(self.image.1, None);
         }
     }
 
@@ -1141,7 +1144,7 @@ impl ObjectPrototype {
         model: Mat4,
         view: Mat4,
         proj: Mat4,
-        image: (Image, vk::Sampler),
+        image: (Image, u64),
         light: Vec<BufferWrapper>,
         other_layouts: Vec<vk::DescriptorSetLayout>,
         name: String,
@@ -1201,7 +1204,7 @@ impl ObjectPrototype {
                     size_of::<ModelData>() as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("Object UBO {}", i)),
+                    Some(format!("{} UBO {}", name, i)),
                 )
             }
             .unwrap();
@@ -1230,6 +1233,8 @@ impl ObjectPrototype {
 
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
 
+        let sampler = data.samplers.get(&image.1).unwrap();
+
         for i in 0..data.swapchain_images.len() {
             let info = vk::DescriptorBufferInfo::builder()
                 .buffer(ubo_buffers[i].buffer)
@@ -1249,7 +1254,7 @@ impl ObjectPrototype {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(image.0.view)
-                .sampler(image.1)
+                .sampler(sampler.clone())
                 .build();
 
             let image_info = &[info];

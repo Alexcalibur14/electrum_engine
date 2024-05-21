@@ -14,6 +14,7 @@ use winit::window::Window;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::ffi::CStr;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::os::raw::c_void;
 use std::time::{Duration, Instant};
 
@@ -237,7 +238,10 @@ impl Renderer {
             &data,
             vk::Format::R8G8B8A8_SRGB,
         );
-        let sampler = unsafe { create_texture_sampler(&device, &image.mip_level) }.unwrap();
+        let sampler = unsafe { create_texture_sampler(&instance, &device, &image.mip_level, "white sampler".to_string()) }.unwrap();
+        let sampler_hash = get_hash(sampler);
+
+        data.samplers.insert(sampler_hash, sampler);
 
         let mut monkey = ObjectPrototype::load(
             &instance,
@@ -248,7 +252,7 @@ impl Renderer {
             position,
             view,
             proj,
-            (image, sampler),
+            (image, sampler_hash),
             light_buffers.clone(),
             vec![camera.get_set_layout()],
             "monkey".to_string(),
@@ -266,8 +270,6 @@ impl Renderer {
             &data,
             vk::Format::R8G8B8A8_SRGB,
         );
-        let plane_sampler =
-            unsafe { create_texture_sampler(&device, &plane_image.mip_level) }.unwrap();
 
         let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -278,7 +280,7 @@ impl Renderer {
             [vec3(-1.5, 0.0, -1.5), vec3(1.5, 0.0, -1.5), vec3(-1.5, 0.0, 1.5), vec3(1.5, 0.0, 1.5)],
             vec3(0.0, 1.0, 0.0),
             lit_shader_hash,
-            (plane_image, plane_sampler),
+            (plane_image, sampler_hash),
             light_buffers.clone(),
             position,
             view,
@@ -632,6 +634,7 @@ impl Renderer {
         self.data.objects = objects;
 
         self.data.shaders.iter().for_each(|(_, s)| s.destroy(&self.device));
+        self.data.samplers.iter().for_each(|(_, s)| self.device.destroy_sampler(*s, None));
 
         self.data.camera.destroy(&self.device);
 
@@ -704,6 +707,8 @@ pub struct RendererData {
 
     // objects
     shaders: HashMap<u64, Box<dyn Shader>>,
+    samplers: HashMap<u64, vk::Sampler>,
+
     objects: Vec<Box<dyn Renderable>>,
     camera: Box<dyn Camera>,
     point_lights: Vec<Vec<BufferWrapper>>,
@@ -1105,6 +1110,15 @@ extern "system" fn debug_callback(
 
     vk::FALSE
 }
+
+
+fn get_hash<T>(object: T) -> u64
+where T: Hash {
+    let mut hasher = DefaultHasher::new();
+    object.hash(&mut hasher);
+    hasher.finish()
+}
+
 
 fn set_object_name(
     instance: &Instance,
