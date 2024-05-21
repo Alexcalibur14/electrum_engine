@@ -11,7 +11,8 @@ use image::io::Reader;
 use crate::{
     buffer::{
         begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index,
-    }, set_object_name, RendererData
+    },
+    set_object_name, RendererData,
 };
 
 #[allow(dead_code)]
@@ -284,7 +285,12 @@ unsafe fn transition_image_layout(
             _ => return Err(anyhow!("Unsupported image layout transition!")),
         };
 
-    let command_buffer = begin_single_time_commands(instance, device, data, "Transition Image Layout".to_string())?;
+    let command_buffer = begin_single_time_commands(
+        instance,
+        device,
+        data,
+        "Transition Image Layout".to_string(),
+    )?;
 
     let subresource = vk::ImageSubresourceRange::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -327,7 +333,8 @@ unsafe fn copy_buffer_to_image(
     width: u32,
     height: u32,
 ) -> Result<()> {
-    let command_buffer = begin_single_time_commands(instance, device, data, "Copy Buffer To Image".to_string())?;
+    let command_buffer =
+        begin_single_time_commands(instance, device, data, "Copy Buffer To Image".to_string())?;
 
     let subresource = vk::ImageSubresourceLayers::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -383,7 +390,12 @@ pub unsafe fn create_image_view(
     Ok(device.create_image_view(&info, None)?)
 }
 
-pub unsafe fn create_texture_sampler(instance: &Instance, device: &Device, mip_level: &u32, name: String) -> Result<vk::Sampler> {
+pub unsafe fn create_texture_sampler(
+    instance: &Instance,
+    device: &Device,
+    mip_level: &u32,
+    name: String,
+) -> Result<vk::Sampler> {
     let info = vk::SamplerCreateInfo::builder()
         .mag_filter(vk::Filter::LINEAR)
         .min_filter(vk::Filter::LINEAR)
@@ -402,7 +414,14 @@ pub unsafe fn create_texture_sampler(instance: &Instance, device: &Device, mip_l
         .mip_lod_bias(0.0);
 
     let texture_sampler = device.create_sampler(&info, None)?;
-    set_object_name(instance, device, name, vk::ObjectType::SAMPLER, texture_sampler.as_raw()).unwrap();
+    set_object_name(
+        instance,
+        device,
+        name,
+        vk::ObjectType::SAMPLER,
+        texture_sampler.as_raw(),
+    )
+    .unwrap();
 
     Ok(texture_sampler)
 }
@@ -431,7 +450,8 @@ unsafe fn generate_mipmaps(
 
     // Mipmaps
 
-    let command_buffer = begin_single_time_commands(instance, device, data, "Generate MipMaps".to_string())?;
+    let command_buffer =
+        begin_single_time_commands(instance, device, data, "Generate MipMaps".to_string())?;
 
     let subresource = vk::ImageSubresourceRange::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)

@@ -8,7 +8,11 @@ use glam::{vec2, vec3, Mat4, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{copy_buffer, create_buffer, BufferWrapper}, insert_command_label, vertices::PCTVertex, Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData, Vertex
+    buffer::{copy_buffer, create_buffer, BufferWrapper},
+    insert_command_label,
+    vertices::PCTVertex,
+    Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData,
+    Vertex,
 };
 
 use super::{ModelData, ModelMVP};
@@ -423,7 +427,12 @@ impl Renderable for Plane {
             0,
             vk::IndexType::UINT32,
         );
-        insert_command_label(instance, command_buffer, format!("Draw {}", self.name), [0.0, 0.5, 0.1, 1.0]);
+        insert_command_label(
+            instance,
+            command_buffer,
+            format!("Draw {}", self.name),
+            [0.0, 0.5, 0.1, 1.0],
+        );
         device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
     }
 
@@ -543,7 +552,6 @@ impl Renderable for Plane {
         Box::new(self.clone())
     }
 }
-
 
 #[derive(Clone)]
 pub struct Quad {
@@ -692,7 +700,7 @@ impl Quad {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(sampler.clone())
+                .sampler(*sampler)
                 .build();
 
             let image_info = &[info];
@@ -747,77 +755,119 @@ impl Quad {
         let mut vertices = vec![];
 
         for point in self.points {
-            vertices.push(
-                PCTVertex {
-                    pos: point,
-                    tex_coord: vec2(0.0, 0.0),
-                    normal: self.normal,
-                }
-            )
+            vertices.push(PCTVertex {
+                pos: point,
+                tex_coord: vec2(0.0, 0.0),
+                normal: self.normal,
+            })
         }
 
         let vertex_size = (size_of::<PCTVertex>() * vertices.len()) as u64;
-        let vertex_staging = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            vertex_size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            Some(format!("{} Vertex Staging Buffer", self.name))
-        ) }.unwrap();
+        let vertex_staging = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                vertex_size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                Some(format!("{} Vertex Staging Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        let vstage_mem = unsafe { device.map_memory(vertex_staging.memory, 0, vertex_size, vk::MemoryMapFlags::empty()) }.unwrap();
+        let vstage_mem = unsafe {
+            device.map_memory(
+                vertex_staging.memory,
+                0,
+                vertex_size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
         unsafe { memcpy(vertices.as_ptr(), vstage_mem.cast(), vertices.len()) };
         unsafe { device.unmap_memory(vertex_staging.memory) };
 
-        let vertex_buffer = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            vertex_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some(format!("{} Vertex Buffer", self.name))
-        ) }.unwrap();
+        let vertex_buffer = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                vertex_size,
+                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                Some(format!("{} Vertex Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        unsafe { copy_buffer(instance, device, vertex_staging.buffer, vertex_buffer.buffer, vertex_size, data) }.unwrap();
+        unsafe {
+            copy_buffer(
+                instance,
+                device,
+                vertex_staging.buffer,
+                vertex_buffer.buffer,
+                vertex_size,
+                data,
+            )
+        }
+        .unwrap();
 
         self.vertex_buffer = vertex_buffer;
         vertex_staging.destroy(device);
 
-
-        let indices: Vec<u32> = vec![
-            0, 3, 1,
-            0, 2, 3,
-        ];
+        let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
 
         let index_size = (size_of::<u32>() * indices.len()) as u64;
-        let index_staging = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            index_size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            Some(format!("{} Index Staging Buffer", self.name))
-        )}.unwrap();
+        let index_staging = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                index_size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                Some(format!("{} Index Staging Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        let istage_mem = unsafe { device.map_memory(index_staging.memory, 0, index_size, vk::MemoryMapFlags::empty()) }.unwrap();
+        let istage_mem = unsafe {
+            device.map_memory(
+                index_staging.memory,
+                0,
+                index_size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
         unsafe { memcpy(indices.as_ptr(), istage_mem.cast(), indices.len()) };
         unsafe { device.unmap_memory(index_staging.memory) };
 
-        let index_buffer = unsafe { create_buffer(
-            instance,
-            device,
-            data,
-            index_size,
-            vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some(format!("{} Index Buffer", self.name)),
-        ) }.unwrap();
+        let index_buffer = unsafe {
+            create_buffer(
+                instance,
+                device,
+                data,
+                index_size,
+                vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                Some(format!("{} Index Buffer", self.name)),
+            )
+        }
+        .unwrap();
 
-        unsafe { copy_buffer(instance, device, index_staging.buffer, index_buffer.buffer, index_size, data) }.unwrap();
+        unsafe {
+            copy_buffer(
+                instance,
+                device,
+                index_staging.buffer,
+                index_buffer.buffer,
+                index_size,
+                data,
+            )
+        }
+        .unwrap();
 
         self.index_buffer = index_buffer;
         index_staging.destroy(device);
@@ -861,7 +911,12 @@ impl Renderable for Quad {
             0,
             vk::IndexType::UINT32,
         );
-        insert_command_label(instance, command_buffer, format!("Draw {}", self.name), [0.0, 0.5, 0.1, 1.0]);
+        insert_command_label(
+            instance,
+            command_buffer,
+            format!("Draw {}", self.name),
+            [0.0, 0.5, 0.1, 1.0],
+        );
         device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
     }
 
@@ -932,7 +987,7 @@ impl Renderable for Quad {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(sampler.clone())
+                .sampler(*sampler)
                 .build();
 
             let image_info = &[info];
@@ -1038,7 +1093,12 @@ impl Renderable for ObjectPrototype {
             0,
             vk::IndexType::UINT32,
         );
-        insert_command_label(instance, command_buffer, format!("Draw {}", self.name), [0.0, 0.5, 0.1, 1.0]);
+        insert_command_label(
+            instance,
+            command_buffer,
+            format!("Draw {}", self.name),
+            [0.0, 0.5, 0.1, 1.0],
+        );
         device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
     }
 
@@ -1083,7 +1143,7 @@ impl Renderable for ObjectPrototype {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(sampler.clone())
+                .sampler(*sampler)
                 .build();
 
             let image_info = &[info];
@@ -1282,7 +1342,7 @@ impl ObjectPrototype {
             let info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(sampler.clone())
+                .sampler(*sampler)
                 .build();
 
             let image_info = &[info];

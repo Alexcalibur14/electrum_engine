@@ -1,6 +1,6 @@
 use std::hash::{DefaultHasher, Hasher};
-use std::{fs::File, hash::Hash};
 use std::io::Read;
+use std::{fs::File, hash::Hash};
 
 use anyhow::Result;
 use shaderc::{CompileOptions, Compiler, ShaderKind};
@@ -60,7 +60,7 @@ impl Shader for VFShader {
     fn clone_dyn(&self) -> Box<dyn Shader> {
         Box::new(*self)
     }
-    
+
     fn hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.vertex.hash(&mut hasher);
@@ -89,16 +89,38 @@ impl VFShaderBuilder {
     }
 
     pub fn compile_vertex(&mut self, path: &str) -> &mut Self {
-        let vertex = unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Vertex) }.unwrap();
-        set_object_name(&self.instance, &self.device, self.name.clone() + " Vertex Shader", vk::ObjectType::SHADER_MODULE, vertex.as_raw()).unwrap();
+        let vertex =
+            unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Vertex) }
+                .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            self.name.clone() + " Vertex Shader",
+            vk::ObjectType::SHADER_MODULE,
+            vertex.as_raw(),
+        )
+        .unwrap();
+
         self.vertex = vertex;
         self
     }
 
     /// Compiles the fragment shader at the location from `path`
     pub fn compile_fragment(&mut self, path: &str) -> &mut Self {
-        let fragment = unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Fragment) }.unwrap();
-        set_object_name(&self.instance, &self.device, self.name.clone() + " Fragment Shader", vk::ObjectType::SHADER_MODULE, fragment.as_raw()).unwrap();
+        let fragment =
+            unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Fragment) }
+                .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            self.name.clone() + " Fragment Shader",
+            vk::ObjectType::SHADER_MODULE,
+            fragment.as_raw(),
+        )
+        .unwrap();
+
         self.fragment = fragment;
         self
     }
@@ -110,7 +132,6 @@ impl VFShaderBuilder {
         }
     }
 }
-
 
 /// Compiles a shader file
 pub unsafe fn compile_shader_module(
@@ -195,13 +216,7 @@ impl Material {
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
         let pipeline = unsafe {
-            create_pipeline(
-                device,
-                data,
-                shader,
-                mesh_settings.clone(),
-                pipeline_layout,
-            )
+            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout)
         }
         .unwrap();
 

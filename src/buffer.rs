@@ -129,7 +129,8 @@ pub unsafe fn copy_buffer(
     size: vk::DeviceSize,
     data: &RendererData,
 ) -> Result<()> {
-    let command_buffer = begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
+    let command_buffer =
+        begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
 
     let regions = vk::BufferCopy::builder()
         .src_offset(0)

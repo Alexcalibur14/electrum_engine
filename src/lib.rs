@@ -50,7 +50,7 @@ const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.na
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 #[derive(Clone)]
-pub struct Renderer {   
+pub struct Renderer {
     _entry: Entry,
     instance: Instance,
     pub device: Device,
@@ -148,7 +148,7 @@ impl Renderer {
                     .build(),
             ],
         }];
-        
+
         data.subpass_number = data.subpass_data.len();
         data.render_pass =
             generate_render_pass(&mut data.subpass_data, &data.attachments, &device)?;
@@ -226,7 +226,7 @@ impl Renderer {
             .compile_fragment("res\\shaders\\frag.glsl")
             .build();
 
-        let lit_shader_hash =  lit_shader.hash();
+        let lit_shader_hash = lit_shader.hash();
 
         data.shaders.insert(lit_shader_hash, Box::new(lit_shader));
 
@@ -238,7 +238,17 @@ impl Renderer {
             &data,
             vk::Format::R8G8B8A8_SRGB,
         );
-        let sampler = unsafe { create_texture_sampler(&instance, &device, &image.mip_level, "white sampler".to_string()) }.unwrap();
+        
+        let sampler = unsafe {
+            create_texture_sampler(
+                &instance,
+                &device,
+                &image.mip_level,
+                "white sampler".to_string(),
+            )
+        }
+        .unwrap();
+
         let sampler_hash = get_hash(&sampler);
         data.samplers.insert(sampler_hash, sampler);
 
@@ -270,7 +280,12 @@ impl Renderer {
             &instance,
             &device,
             &data,
-            [vec3(-1.5, 0.0, -1.5), vec3(1.5, 0.0, -1.5), vec3(-1.5, 0.0, 1.5), vec3(1.5, 0.0, 1.5)],
+            [
+                vec3(-1.5, 0.0, -1.5),
+                vec3(1.5, 0.0, -1.5),
+                vec3(-1.5, 0.0, 1.5),
+                vec3(1.5, 0.0, 1.5),
+            ],
             vec3(0.0, 1.0, 0.0),
             lit_shader_hash,
             (image_hash, sampler_hash),
@@ -424,7 +439,12 @@ impl Renderer {
             .render_area(render_area)
             .clear_values(clear_values);
 
-        begin_command_label(&self.instance, command_buffer, "Main Object Pass".to_string(), [0.0, 0.1, 0.5, 1.0]);
+        begin_command_label(
+            &self.instance,
+            command_buffer,
+            "Main Object Pass".to_string(),
+            [0.0, 0.1, 0.5, 1.0],
+        );
 
         self.device.cmd_begin_render_pass(
             command_buffer,
@@ -621,14 +641,22 @@ impl Renderer {
         self.device
             .destroy_command_pool(self.data.command_pool, None);
 
-
         let mut objects = self.data.objects.clone();
         objects.iter_mut().for_each(|o| o.destroy(&self.device));
         self.data.objects = objects;
 
-        self.data.shaders.iter().for_each(|(_, s)| s.destroy(&self.device));
-        self.data.samplers.iter().for_each(|(_, s)| self.device.destroy_sampler(*s, None));
-        self.data.textures.iter().for_each(|(_, t)| t.destroy(&self.device));
+        self.data
+            .shaders
+            .iter()
+            .for_each(|(_, s)| s.destroy(&self.device));
+        self.data
+            .samplers
+            .iter()
+            .for_each(|(_, s)| self.device.destroy_sampler(*s, None));
+        self.data
+            .textures
+            .iter()
+            .for_each(|(_, t)| t.destroy(&self.device));
 
         self.data.camera.destroy(&self.device);
 
@@ -942,11 +970,23 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
 
     // Queues
     let graphics_queue = device.get_device_queue(indices.graphics, 0);
-    set_object_name(instance, &device, "Graphics Queue".to_string(), vk::ObjectType::QUEUE, graphics_queue.as_raw() as u64)?;
+    set_object_name(
+        instance,
+        &device,
+        "Graphics Queue".to_string(),
+        vk::ObjectType::QUEUE,
+        graphics_queue.as_raw() as u64,
+    )?;
     data.graphics_queue = graphics_queue;
 
     let present_queue = device.get_device_queue(indices.present, 0);
-    set_object_name(instance, &device, "Present Queue".to_string(), vk::ObjectType::QUEUE, graphics_queue.as_raw() as u64)?;
+    set_object_name(
+        instance,
+        &device,
+        "Present Queue".to_string(),
+        vk::ObjectType::QUEUE,
+        graphics_queue.as_raw() as u64,
+    )?;
     data.present_queue = present_queue;
 
     Ok(device)
@@ -991,22 +1031,45 @@ unsafe fn get_supported_format(
         .ok_or_else(|| anyhow!("Failed to find supported format!"))
 }
 
-unsafe fn create_sync_objects(instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
+unsafe fn create_sync_objects(
+    instance: &Instance,
+    device: &Device,
+    data: &mut RendererData,
+) -> Result<()> {
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
     for i in 0..MAX_FRAMES_IN_FLIGHT {
         let image_available_semaphor = device.create_semaphore(&semaphore_info, None)?;
-        set_object_name(instance, device, format!("Image Available Semaphore {}", i), vk::ObjectType::SEMAPHORE, image_available_semaphor.as_raw())?;
-        data.image_available_semaphores.push(image_available_semaphor);
-
+        set_object_name(
+            instance,
+            device,
+            format!("Image Available Semaphore {}", i),
+            vk::ObjectType::SEMAPHORE,
+            image_available_semaphor.as_raw(),
+        )?;
+        data.image_available_semaphores
+            .push(image_available_semaphor);
 
         let render_finished_semaphor = device.create_semaphore(&semaphore_info, None)?;
-        set_object_name(instance, device, format!("Render Finished Semaphore {}", i), vk::ObjectType::SEMAPHORE, render_finished_semaphor.as_raw())?;
-        data.render_finished_semaphores.push(render_finished_semaphor);
+        set_object_name(
+            instance,
+            device,
+            format!("Render Finished Semaphore {}", i),
+            vk::ObjectType::SEMAPHORE,
+            render_finished_semaphor.as_raw(),
+        )?;
+        data.render_finished_semaphores
+            .push(render_finished_semaphor);
 
         let in_flight_fence = device.create_fence(&fence_info, None)?;
-        set_object_name(instance, device, format!("In Flight Fence {}", i), vk::ObjectType::FENCE, in_flight_fence.as_raw())?;
+        set_object_name(
+            instance,
+            device,
+            format!("In Flight Fence {}", i),
+            vk::ObjectType::FENCE,
+            in_flight_fence.as_raw(),
+        )?;
         data.in_flight_fences.push(in_flight_fence);
     }
 
@@ -1106,14 +1169,14 @@ extern "system" fn debug_callback(
     vk::FALSE
 }
 
-
 fn get_hash<T>(object: &T) -> u64
-where T: Hash {
+where
+    T: Hash,
+{
     let mut hasher = DefaultHasher::new();
     object.hash(&mut hasher);
     hasher.finish()
 }
-
 
 fn set_object_name(
     instance: &Instance,
@@ -1128,14 +1191,19 @@ fn set_object_name(
             .object_type(object_type)
             .object_handle(object_handle)
             .build();
-    
+
         unsafe { instance.set_debug_utils_object_name_ext(device.handle(), &name_info) }?
     }
 
     Ok(())
 }
 
-fn begin_command_label(instance: &Instance, command_buffer: vk::CommandBuffer, name: String, colour: [f32; 4]) {
+fn begin_command_label(
+    instance: &Instance,
+    command_buffer: vk::CommandBuffer,
+    name: String,
+    colour: [f32; 4],
+) {
     if VALIDATION_ENABLED {
         let info = vk::DebugUtilsLabelEXT::builder()
             .label_name((name + "\0").as_bytes())
@@ -1154,7 +1222,12 @@ fn end_command_label(instance: &Instance, command_buffer: vk::CommandBuffer) {
 
 /// This will place a label for debbuging applications to display at that point
 /// If all the values in the `colour` array are 0.0 the colour wil be ignored
-fn insert_command_label(instance: &Instance, command_buffer: vk::CommandBuffer, name: String, colour: [f32; 4]) {
+fn insert_command_label(
+    instance: &Instance,
+    command_buffer: vk::CommandBuffer,
+    name: String,
+    colour: [f32; 4],
+) {
     if VALIDATION_ENABLED {
         let info = vk::DebugUtilsLabelEXT::builder()
             .label_name((name + "\0").as_bytes())
