@@ -1,5 +1,5 @@
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
-use vulkanalia::prelude::v1_2::*;
+pub use vulkanalia::prelude::v1_2::*;
 use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::vk::KhrSwapchainExtension;
 use vulkanalia::vk::{AttachmentDescription, ExtDebugUtilsExtension};
@@ -36,6 +36,8 @@ use model::*;
 use present::*;
 use shader::*;
 use texture::*;
+
+pub use electrum_engine_macros;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);

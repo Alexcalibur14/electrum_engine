@@ -1,50 +1,17 @@
 use std::hash::{Hash, Hasher};
-use std::mem::size_of;
 
+use electrum_engine_macros::Vertex;
 use glam::{Vec2, Vec3};
-use vulkanalia::prelude::v1_2::*;
-
-use crate::Vertex;
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Vertex)]
 pub struct PCTVertex {
+    #[vertex(format = 106)]
     pub pos: Vec3,
+    #[vertex(format = 103)]
     pub tex_coord: Vec2,
+    #[vertex(format = 106)]
     pub normal: Vec3,
-}
-
-impl Vertex for PCTVertex {
-    fn binding_descriptions() -> Vec<vk::VertexInputBindingDescription> {
-        vec![vk::VertexInputBindingDescription::builder()
-            .binding(0)
-            .stride(size_of::<PCTVertex>() as u32)
-            .input_rate(vk::VertexInputRate::VERTEX)
-            .build()]
-    }
-
-    fn attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription::builder()
-                .binding(0)
-                .location(0)
-                .format(vk::Format::R32G32B32_SFLOAT)
-                .offset(0)
-                .build(),
-            vk::VertexInputAttributeDescription::builder()
-                .binding(0)
-                .location(1)
-                .format(vk::Format::R32G32_SFLOAT)
-                .offset(size_of::<Vec3>() as u32)
-                .build(),
-            vk::VertexInputAttributeDescription::builder()
-                .binding(0)
-                .location(2)
-                .format(vk::Format::R32G32B32_SFLOAT)
-                .offset(size_of::<Vec3>() as u32 + size_of::<Vec2>() as u32)
-                .build(),
-        ]
-    }
 }
 
 impl PartialEq for PCTVertex {
