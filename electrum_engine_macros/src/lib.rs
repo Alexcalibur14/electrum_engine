@@ -40,32 +40,30 @@ fn impl_vertex_trait(mut ast: DeriveInput) -> proc_macro2::TokenStream {
         offset
     }).collect();
 
-    let locations = [0u32, 1, 2];
+    let locations: Vec<u32> = (0..field_types.len()).into_iter().map(|i| i as u32).collect();
 
     // Generate impl
     quote::quote! {
         impl #impl_generics crate::Vertex for #ident #type_generics #where_clauses {
             fn binding_descriptions() -> Vec<vulkanalia::prelude::v1_2::vk::VertexInputBindingDescription> {
-                use vulkanalia::prelude::v1_0::HasBuilder;
                 vec![
-                    vulkanalia::prelude::v1_2::vk::VertexInputBindingDescription::builder()
-                        .binding(#binding)
-                        .stride(std::mem::size_of::<#ident>() as u32)
-                        .input_rate(vulkanalia::prelude::v1_2::vk::VertexInputRate::VERTEX)
-                        .build()
+                    vulkanalia::prelude::v1_2::vk::VertexInputBindingDescription {
+                        binding: #binding,
+                        stride: std::mem::size_of::<#ident>() as u32,
+                        input_rate: vulkanalia::prelude::v1_2::vk::VertexInputRate::VERTEX,
+                    }
                 ]
             }
         
             fn attribute_descriptions() -> Vec<vulkanalia::prelude::v1_2::vk::VertexInputAttributeDescription> {
-                use vulkanalia::prelude::v1_0::HasBuilder;
                 vec![
                     #(
-                        vulkanalia::prelude::v1_2::vk::VertexInputAttributeDescription::builder()
-                            .binding(#field_bindings)
-                            .location(#locations)
-                            .format(vulkanalia::prelude::v1_2::vk::Format::from_raw(#field_formats))
-                            .offset(#offsets)
-                            .build(),
+                        vulkanalia::prelude::v1_2::vk::VertexInputAttributeDescription {
+                            location: #locations,
+                            binding: #field_bindings,
+                            format: vulkanalia::prelude::v1_2::vk::Format::from_raw(#field_formats),
+                            offset: #offsets,
+                        },
                     )*
                 ]
             }
