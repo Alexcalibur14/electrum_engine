@@ -11,95 +11,19 @@ use crate::{
 
 use crate::texture::*;
 
-#[derive(Debug, Clone)]
-pub struct SubpassData {
-    pub bind_point: vk::PipelineBindPoint,
-    pub attachments: Vec<(u32, vk::ImageLayout, AttachmentType)>,
-    pub dependencies: Vec<vk::SubpassDependency>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachmentType {
-    Input,
-    Color,
-    Resolve,
-    DepthStencil,
-    Preserve,
-}
-
-pub fn generate_render_pass(
-    subpass_datas: &mut Vec<SubpassData>,
-    attachments: &[vk::AttachmentDescription],
-    device: &Device,
-) -> Result<vk::RenderPass> {
-    let mut dependencies = vec![];
-    let mut subpasses = vec![];
-
-    for subpass_data in subpass_datas {
-        dependencies.append(&mut subpass_data.dependencies);
-
-        let mut input_attachments = vec![];
-        let mut color_attachments = vec![];
-        let mut resolve_attachments = vec![];
-        let mut depth_stencil_attachment = vk::AttachmentReference::default();
-        let mut preserve_attachments = vec![];
-
-        for attachment in &subpass_data.attachments {
-            if attachment.2 == AttachmentType::Preserve {
-                preserve_attachments.push(attachment.0);
-                continue;
-            }
-
-            let attachment_ref = vk::AttachmentReference::builder()
-                .attachment(attachment.0)
-                .layout(attachment.1)
-                .build();
-
-            match attachment.2 {
-                AttachmentType::Input => input_attachments.push(attachment_ref),
-                AttachmentType::Color => color_attachments.push(attachment_ref),
-                AttachmentType::Resolve => resolve_attachments.push(attachment_ref),
-                AttachmentType::DepthStencil => depth_stencil_attachment = attachment_ref,
-                AttachmentType::Preserve => panic!("This should not happen"),
-            }
-        }
-
-        let subpass = vk::SubpassDescription::builder()
-            .pipeline_bind_point(subpass_data.bind_point)
-            .input_attachments(&input_attachments)
-            .color_attachments(&color_attachments)
-            .resolve_attachments(&resolve_attachments)
-            .depth_stencil_attachment(&depth_stencil_attachment)
-            .preserve_attachments(&preserve_attachments)
-            .build();
-
-        subpasses.push(subpass);
-    }
-
-    let info = vk::RenderPassCreateInfo::builder()
-        .attachments(attachments)
-        .subpasses(&subpasses)
-        .dependencies(&dependencies);
-
-    Ok(unsafe { device.create_render_pass(&info, None) }?)
-}
-
 pub fn generate_render_pass_images(
-    attachments: Vec<(
+    instance: &Instance,
+    device: &Device,
+    data: &RendererData,
+    attachments: &Vec<(
         vk::AttachmentDescription,
         vk::ImageUsageFlags,
         vk::ImageAspectFlags,
     )>,
-    data: &RendererData,
-    instance: &Instance,
-    device: &Device,
 ) -> Vec<Image> {
     let mut images = vec![];
 
-    let mut atta = attachments.clone();
-    atta.pop();
-
-    for attachment in atta {
+    for attachment in attachments {
         images.push(Image::new(
             data,
             instance,
@@ -195,8 +119,8 @@ pub unsafe fn create_swapchain(
         .pre_transform(support.capabilities.current_transform)
         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
         .present_mode(present_mode)
-        .clipped(true)
-        .old_swapchain(vk::SwapchainKHR::null());
+        .clipped(false)
+        .old_swapchain(data.swapchain);
 
     data.swapchain = device.create_swapchain_khr(&info, None)?;
 

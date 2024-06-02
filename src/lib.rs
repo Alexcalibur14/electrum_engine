@@ -26,6 +26,7 @@ mod model;
 mod present;
 mod shader;
 mod texture;
+mod render_pass;
 
 use buffer::*;
 use camera::*;
@@ -36,6 +37,7 @@ use model::*;
 use present::*;
 use shader::*;
 use texture::*;
+use render_pass::*;
 
 pub use electrum_engine_macros;
 
@@ -79,118 +81,43 @@ impl Renderer {
         unsafe { create_swapchain(window, &instance, &device, &mut data) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
 
-        data.attachments = vec![
-            vk::AttachmentDescription::builder()
-                .format(data.swapchain_format)
-                .samples(data.msaa_samples)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .initial_layout(vk::ImageLayout::UNDEFINED)
-                .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .build(),
-            vk::AttachmentDescription::builder()
-                .format(unsafe { get_depth_format(&instance, &data) }?)
-                .samples(data.msaa_samples)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .initial_layout(vk::ImageLayout::UNDEFINED)
-                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                .build(),
-            vk::AttachmentDescription::builder()
-                .format(data.swapchain_format)
-                .samples(vk::SampleCountFlags::_1)
-                .load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .initial_layout(vk::ImageLayout::UNDEFINED)
-                .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                .build(),
+        let mut attachments = vec![
+            Attachment {
+                format: data.swapchain_format,
+                sample_count: data.msaa_samples,
+                ..Attachment::template_colour()
+            },
+            Attachment {
+                format: unsafe { get_depth_format(&instance, &data) }?,
+                sample_count: data.msaa_samples,
+                ..Attachment::template_depth()
+            },
+            Attachment {
+                format: data.swapchain_format,
+                ..Attachment::template_present()
+            },
         ];
 
-        data.subpass_data = vec![SubpassData {
-            bind_point: vk::PipelineBindPoint::GRAPHICS,
-            attachments: vec![
-                (
-                    0,
-                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    AttachmentType::Color,
-                ),
-                (
-                    1,
-                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    AttachmentType::DepthStencil,
-                ),
-                (
-                    2,
-                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    AttachmentType::Resolve,
-                ),
-            ],
-            dependencies: vec![
-                vk::SubpassDependency::builder()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .dst_subpass(0)
-                    .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .src_access_mask(vk::AccessFlags::empty())
-                    .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .build(),
-                vk::SubpassDependency::builder()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .dst_subpass(0)
-                    .src_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
-                    .dst_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
-                    .src_access_mask(vk::AccessFlags::empty())
-                    .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
-                    .build(),
-            ],
-        }];
+        attachments.iter_mut().for_each(|a| a.generate());
 
-        data.subpass_number = data.subpass_data.len();
-        data.render_pass =
-            generate_render_pass(&mut data.subpass_data, &data.attachments, &device)?;
+        data.attachments = attachments.iter().map(|a| a.attachment_desc).collect();
 
-        let mut image_data = data
-            .attachments
-            .iter()
-            .map(|a| {
-                let (usage, aspect) = match a.final_layout {
-                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        vk::ImageAspectFlags::COLOR,
-                    ),
-                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        vk::ImageAspectFlags::DEPTH,
-                    ),
-                    vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        vk::ImageAspectFlags::DEPTH,
-                    ),
-                    vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        vk::ImageAspectFlags::STENCIL,
-                    ),
-                    _ => (
-                        vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        vk::ImageAspectFlags::COLOR,
-                    ),
-                };
+        let mut subpasses = vec![
+            SubpassData { bind_point: vk::PipelineBindPoint::GRAPHICS, attachments: vec![
+                (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
+                (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
+                (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
+            ] }
+        ];
+        
+        data.render_pass = generate_render_pass(&device, &mut subpasses, &data.attachments, vec![]).unwrap();
 
-                (*a, usage, aspect)
-            })
-            .collect::<Vec<_>>();
+        data.swapchain_images_desc = vec![
+            (attachments[0].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
+            (attachments[1].attachment_desc, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
+        ];
 
-        image_data
-            .iter_mut()
-            .for_each(|d| *d = (d.0, d.1 | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT, d.2));
-
-        data.images = generate_render_pass_images(image_data, &data, &instance, &device);
+        data.images = generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
         data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
         unsafe { create_command_pools(&instance, &device, &mut data) }.unwrap();
@@ -535,49 +462,29 @@ impl Renderer {
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
 
+        let old_swapchain = self.data.swapchain;
         create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
+        self.device.destroy_swapchain_khr(old_swapchain, None);
+
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
+        let mut subpasses = vec![
+            SubpassData { bind_point: vk::PipelineBindPoint::GRAPHICS, attachments: vec![
+                (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
+                (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
+                (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
+            ] }
+        ];
+
         self.data.render_pass = generate_render_pass(
-            &mut self.data.subpass_data,
-            &self.data.attachments,
             &self.device,
-        )?;
-
-        let image_data = self
-            .data
-            .attachments
-            .iter()
-            .map(|a| {
-                let (usage, aspect) = match a.final_layout {
-                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        vk::ImageAspectFlags::COLOR,
-                    ),
-                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        vk::ImageAspectFlags::DEPTH,
-                    ),
-                    vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        vk::ImageAspectFlags::DEPTH,
-                    ),
-                    vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL => (
-                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        vk::ImageAspectFlags::STENCIL,
-                    ),
-                    _ => (
-                        vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        vk::ImageAspectFlags::COLOR,
-                    ),
-                };
-
-                (*a, usage, aspect)
-            })
-            .collect::<Vec<_>>();
+            &mut subpasses,
+            &self.data.attachments,
+            vec![],
+        ).unwrap();
 
         self.data.images =
-            generate_render_pass_images(image_data, &self.data, &self.instance, &self.device);
+            generate_render_pass_images(&self.instance, &self.device, &self.data, &self.data.swapchain_images_desc);
 
         self.data.framebuffers = create_framebuffers(&self.data, &self.device)?;
 
@@ -625,7 +532,6 @@ impl Renderer {
             .swapchain_image_views
             .iter()
             .for_each(|v| self.device.destroy_image_view(*v, None));
-        self.device.destroy_swapchain_khr(self.data.swapchain, None);
     }
 
     /// This function will destroy all vulkan objects in the renderer
@@ -635,6 +541,7 @@ impl Renderer {
     /// and **MUST** be the last function called on the renderer
     pub unsafe fn destroy(&mut self) {
         self.destroy_swapchain();
+        self.device.destroy_swapchain_khr(self.data.swapchain, None);
         self.data
             .command_pools
             .iter()
@@ -710,14 +617,13 @@ pub struct RendererData {
     swapchain_format: vk::Format,
     swapchain_extent: vk::Extent2D,
     swapchain: vk::SwapchainKHR,
+    swapchain_images_desc: Vec<(AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>,
     swapchain_images: Vec<vk::Image>,
     swapchain_image_views: Vec<vk::ImageView>,
 
     // Pipeline
     render_pass: vk::RenderPass,
-    subpass_number: usize,
     attachments: Vec<AttachmentDescription>,
-    subpass_data: Vec<SubpassData>,
 
     // Framebuffers
     images: Vec<Image>,
