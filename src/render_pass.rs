@@ -84,6 +84,7 @@ pub enum AttachmentType {
     Preserve,
 }
 
+#[derive(Debug, Clone)]
 pub struct SubpassData {
     pub bind_point: vk::PipelineBindPoint,
     pub attachments: Vec<(u32, vk::ImageLayout, AttachmentType)>,
@@ -91,7 +92,7 @@ pub struct SubpassData {
 
 pub fn generate_render_pass(
     device: &Device,
-    subpass_datas: &mut Vec<SubpassData>,
+    subpass_datas: &[SubpassData],
     attachments: &[vk::AttachmentDescription],
     dependencies: Vec<vk::SubpassDependency>,
 ) -> Result<vk::RenderPass> {

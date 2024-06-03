@@ -1,5 +1,5 @@
-use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 pub use vulkanalia::prelude::v1_2::*;
+use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::vk::KhrSwapchainExtension;
 use vulkanalia::vk::{AttachmentDescription, ExtDebugUtilsExtension};
@@ -81,6 +81,7 @@ impl Renderer {
         unsafe { create_swapchain(window, &instance, &device, &mut data) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
 
+        // generating subpasses, render passes and attachments
         let mut attachments = vec![
             Attachment {
                 format: data.swapchain_format,
@@ -102,7 +103,7 @@ impl Renderer {
 
         data.attachments = attachments.iter().map(|a| a.attachment_desc).collect();
 
-        let mut subpasses = vec![
+        data.subpass_data = vec![
             SubpassData { bind_point: vk::PipelineBindPoint::GRAPHICS, attachments: vec![
                 (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
                 (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
@@ -110,7 +111,7 @@ impl Renderer {
             ] }
         ];
         
-        data.render_pass = generate_render_pass(&device, &mut subpasses, &data.attachments, vec![]).unwrap();
+        data.render_pass = generate_render_pass(&device, &data.subpass_data, &data.attachments, vec![]).unwrap();
 
         data.swapchain_images_desc = vec![
             (attachments[0].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
@@ -118,6 +119,8 @@ impl Renderer {
         ];
 
         data.images = generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
+
+
         data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
         unsafe { create_command_pools(&instance, &device, &mut data) }.unwrap();
@@ -468,17 +471,9 @@ impl Renderer {
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
-        let mut subpasses = vec![
-            SubpassData { bind_point: vk::PipelineBindPoint::GRAPHICS, attachments: vec![
-                (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
-                (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
-                (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
-            ] }
-        ];
-
         self.data.render_pass = generate_render_pass(
             &self.device,
-            &mut subpasses,
+            &self.data.subpass_data,
             &self.data.attachments,
             vec![],
         ).unwrap();
@@ -624,6 +619,7 @@ pub struct RendererData {
     // Pipeline
     render_pass: vk::RenderPass,
     attachments: Vec<AttachmentDescription>,
+    subpass_data: Vec<SubpassData>,
 
     // Framebuffers
     images: Vec<Image>,
