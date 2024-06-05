@@ -81,7 +81,8 @@ impl SimpleCamera {
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .build()];
+            .build()
+        ];
 
         let descriptor = Descriptors::new(device, data, bindings);
 

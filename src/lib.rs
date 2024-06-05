@@ -28,16 +28,16 @@ mod shader;
 mod texture;
 mod render_pass;
 
-use buffer::*;
-use camera::*;
-use command::*;
-use light::*;
-use mesh::*;
-use model::*;
-use present::*;
-use shader::*;
-use texture::*;
-use render_pass::*;
+pub use buffer::*;
+pub use camera::*;
+pub use command::*;
+pub use light::*;
+pub use mesh::*;
+pub use model::*;
+pub use present::*;
+pub use shader::*;
+pub use texture::*;
+pub use render_pass::*;
 
 pub use electrum_engine_macros;
 
@@ -56,10 +56,10 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 #[derive(Clone)]
 pub struct Renderer {
     _entry: Entry,
-    instance: Instance,
+    pub instance: Instance,
     pub device: Device,
-    data: RendererData,
-    stats: RenderStats,
+    pub data: RendererData,
+    pub stats: RenderStats,
     frame: usize,
     pub resized: bool,
 }
@@ -146,10 +146,24 @@ impl Renderer {
         let view = data.camera.view();
         let proj = data.camera.proj();
 
-        let light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 1.0, 1.0), 5.0);
-        let light_buffers = light.get_buffers(&instance, &device, &data)?;
+        let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
+        let red_light_hash = get_hash(&red_light);
 
-        data.point_lights.push(light_buffers.clone());
+        data.point_light_data.insert(red_light_hash, red_light);
+
+        let blue_light = PointLight::new(vec3(-3.0, 3.0, 0.0), vec3(0.0, 0.0, 1.0), 5.0);
+        let blue_light_hash = get_hash(&blue_light);
+
+        data.point_light_data.insert(blue_light_hash, blue_light);
+
+
+        data.point_lights = PointLights::new(
+            &instance,
+            &device,
+            &data,
+            vec![red_light_hash, blue_light_hash],
+            10,
+        );
 
         let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -197,8 +211,7 @@ impl Renderer {
             view,
             proj,
             (image_hash, sampler_hash),
-            light_buffers.clone(),
-            vec![camera.get_set_layout()],
+            vec![camera.get_set_layout(), data.point_lights.get_set_layout()],
             "monkey".to_string(),
         );
         unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
@@ -221,11 +234,10 @@ impl Renderer {
             vec3(0.0, 1.0, 0.0),
             lit_shader_hash,
             (image_hash, sampler_hash),
-            light_buffers.clone(),
             position,
             view,
             proj,
-            vec![camera.get_set_layout()],
+            vec![camera.get_set_layout(), data.point_lights.get_set_layout()],
             "Quad".to_string(),
         );
         plane.generate(&instance, &device, &data);
@@ -437,7 +449,7 @@ impl Renderer {
             &self.device,
             command_buffer,
             image_index,
-            self.data.camera.get_descriptor_sets()[image_index],
+            vec![(1, self.data.camera.get_descriptor_sets()[image_index]), (2, self.data.point_lights.get_descriptor_sets()[image_index])],
         );
 
         self.device.end_command_buffer(command_buffer)?;
@@ -549,6 +561,8 @@ impl Renderer {
         objects.iter_mut().for_each(|o| o.destroy(&self.device));
         self.data.objects = objects;
 
+        self.data.point_lights.destroy(&self.device);
+
         self.data
             .shaders
             .iter()
@@ -563,11 +577,6 @@ impl Renderer {
             .for_each(|(_, t)| t.destroy(&self.device));
 
         self.data.camera.destroy(&self.device);
-
-        self.data
-            .point_lights
-            .iter()
-            .for_each(|l| l.iter().for_each(|b| b.destroy(&self.device)));
 
         self.data
             .in_flight_fences
@@ -635,10 +644,12 @@ pub struct RendererData {
     shaders: HashMap<u64, Box<dyn Shader>>,
     samplers: HashMap<u64, vk::Sampler>,
     textures: HashMap<u64, Image>,
+    point_light_data: HashMap<u64, PointLight>,
+    point_lights: PointLights,
 
     objects: Vec<Box<dyn Renderable>>,
     camera: Box<dyn Camera>,
-    point_lights: Vec<Vec<BufferWrapper>>,
+    // point_lights: Vec<Vec<BufferWrapper>>,
 
     // Semaphores
     image_available_semaphores: Vec<vk::Semaphore>,

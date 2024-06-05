@@ -1,3 +1,5 @@
+use std::ptr::copy_nonoverlapping as memcpy;
+
 use vulkanalia::prelude::v1_2::*;
 
 use anyhow::{anyhow, Result};
@@ -80,6 +82,7 @@ pub unsafe fn create_buffer(
     let wrapper = BufferWrapper {
         buffer,
         memory: buffer_memory,
+        size,
     };
 
     if let Some(object_name) = name {
@@ -121,6 +124,7 @@ pub unsafe fn get_memory_type_index(
         .ok_or_else(|| anyhow!("Failed to find suitable memory type."))
 }
 
+/// Copies the contents of one buffer into another buffer
 pub unsafe fn copy_buffer(
     instance: &Instance,
     device: &Device,
@@ -147,6 +151,7 @@ pub unsafe fn copy_buffer(
 pub struct BufferWrapper {
     pub buffer: vk::Buffer,
     pub memory: vk::DeviceMemory,
+    size: u64
 }
 
 impl BufferWrapper {
@@ -155,5 +160,73 @@ impl BufferWrapper {
             device.destroy_buffer(self.buffer, None);
             device.free_memory(self.memory, None);
         }
+    }
+
+    /// Copies data into the buffer, if you are trying to copy a vec use `copy_vec_into_buffer`
+    pub fn copy_data_into_buffer<T>(&self, device: &Device, data: &T) {
+        let buffer_mem = unsafe {
+            device.map_memory(
+                self.memory,
+                0,
+                self.size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        unsafe { memcpy(data, buffer_mem.cast(), 1) };
+
+        unsafe { device.unmap_memory(self.memory) };
+    }
+
+    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use `copy_vec_into_buffer_with_offset`
+    pub fn copy_data_into_buffer_with_offset<T>(&self, device: &Device, data: &T, offset: u64, size: u64) {
+        let buffer_mem = unsafe {
+            device.map_memory(
+                self.memory,
+                offset,
+                size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        unsafe { memcpy(data, buffer_mem.cast(), 1) };
+
+        unsafe { device.unmap_memory(self.memory) };
+    }
+
+    /// Copies a vec into the buffer
+    pub fn copy_vec_into_buffer<T> (&self, device: &Device, data: &Vec<T>) {
+        let buffer_mem = unsafe {
+            device.map_memory(
+                self.memory,
+                0,
+                self.size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
+
+        unsafe { device.unmap_memory(self.memory) };
+    }
+
+    /// Copies a vec into the buffer with an offset of `offset` in the buffer
+    pub fn copy_vec_into_buffer_with_offset<T> (&self, device: &Device, data: &Vec<T>, offset: u64, size: u64) {
+        let buffer_mem = unsafe {
+            device.map_memory(
+                self.memory,
+                offset,
+                size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
+
+        unsafe { device.unmap_memory(self.memory) };
     }
 }

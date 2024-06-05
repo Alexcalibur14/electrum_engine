@@ -1,12 +1,10 @@
-use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
+use std::{hash::Hash, mem::size_of};
 
-use anyhow::Result;
 use glam::Vec3;
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper},
-    RendererData,
+    buffer::{create_buffer, BufferWrapper}, Descriptors, RendererData
 };
 
 #[repr(C)]
@@ -18,6 +16,18 @@ pub struct PointLight {
     pub strength: f32,
 }
 
+impl Hash for PointLight {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.position[0].to_bits().hash(state);
+        self.position[1].to_bits().hash(state);
+        self.position[2].to_bits().hash(state);
+        self.colour[0].to_bits().hash(state);
+        self.colour[1].to_bits().hash(state);
+        self.colour[2].to_bits().hash(state);
+        self.strength.to_bits().hash(state);
+    }
+}
+
 impl PointLight {
     pub fn new(position: Vec3, colour: Vec3, strength: f32) -> PointLight {
         PointLight {
@@ -27,42 +37,119 @@ impl PointLight {
             strength,
         }
     }
+}
 
-    pub fn get_buffers(
-        &self,
+#[derive(Debug, Clone, Default)]
+pub struct PointLights {
+    lights: Vec<u64>,
+
+    pub descriptor: Descriptors,
+    pub descriptor_sets: Vec<vk::DescriptorSet>,
+    pub buffers: Vec<BufferWrapper>,
+}
+
+impl PointLights {
+    pub fn new(
         instance: &Instance,
         device: &Device,
         data: &RendererData,
-    ) -> Result<Vec<BufferWrapper>> {
+        mut loaded_lights: Vec<u64>,
+        capacity: usize
+    ) -> Self {
+        let mut lights = Vec::with_capacity(capacity);
+        lights.append(&mut loaded_lights);
+
+        let light_data = lights.iter().map(|i| data.point_light_data.get(i).unwrap().clone()).collect::<Vec<PointLight>>();
+
+        let bindings = vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(capacity as u32)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .build()
+        ];
+
+        let descriptor = Descriptors::new(device, data, bindings);
+
         let mut buffers = vec![];
+
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    size_of::<PointLight>() as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("Point Light {}", i)),
-                )
-            }?;
+            let buffer = unsafe { create_buffer(
+                &instance,
+                &device,
+                &data,
+                (size_of::<PointLight>() * capacity) as u64,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                Some(format!("Light Buffer {}", i)),
+            ) }.unwrap();
 
-            let mem = unsafe {
-                device.map_memory(
-                    buffer.memory,
-                    0,
-                    size_of::<PointLight>() as u64,
-                    vk::MemoryMapFlags::empty(),
-                )
-            }?;
+            buffer.copy_vec_into_buffer(device, &light_data);
 
-            unsafe { memcpy(self, mem.cast(), 1) };
-
-            unsafe { device.unmap_memory(buffer.memory) };
             buffers.push(buffer);
         }
 
-        Ok(buffers)
+        let layouts = vec![descriptor.descriptor_set_layout; data.swapchain_images.len()];
+        let info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor.descriptor_pool)
+            .set_layouts(&layouts);
+
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
+
+        for i in 0..data.swapchain_images.len() {
+            let info = vk::DescriptorBufferInfo::builder()
+                .buffer(buffers[i].buffer)
+                .offset(0)
+                .range((size_of::<PointLight>() * capacity) as u64)
+                .build();
+
+            let buffer_info = &[info];
+            let light_write = vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor_sets[i])
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(buffer_info)
+                .build();
+
+            unsafe { device.update_descriptor_sets(&[light_write], &[] as &[vk::CopyDescriptorSet]) };
+        }
+
+        PointLights {
+            lights,
+            descriptor,
+            descriptor_sets,
+            buffers,
+        }
+    }
+
+    pub fn add_light(&mut self, device: &Device, data: &RendererData, light: u64) {
+        let offset = (self.lights.len() * size_of::<PointLight>()) as u64;
+        self.lights.push(light);
+
+        let light_data = data.point_light_data.get(&light).unwrap();
+
+        for buffer in self.buffers.clone() {
+            buffer.copy_data_into_buffer_with_offset(device, &light_data, offset, size_of::<PointLight>() as u64);
+        }
+    }
+
+    pub fn get_lights(&self) -> Vec<u64> {
+        self.lights.clone()
+    }
+
+    pub fn get_set_layout(&self) -> vk::DescriptorSetLayout {
+        self.descriptor.descriptor_set_layout
+    }
+
+    pub fn get_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
+        self.descriptor_sets.clone()
+    }
+
+    pub fn destroy(&self, device: &Device) {
+        self.descriptor.destroy_swapchain(device);
+        self.descriptor.destroy(device);
+        self.buffers.iter().for_each(|b| b.destroy(device));
     }
 }

@@ -16,7 +16,7 @@ pub trait Renderable {
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
-        camera_data: vk::DescriptorSet,
+        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
     );
     fn update(
         &mut self,

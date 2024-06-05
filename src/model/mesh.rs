@@ -11,7 +11,7 @@ use crate::{
     buffer::{copy_buffer, create_buffer, BufferWrapper},
     insert_command_label,
     vertices::PCTVertex,
-    Image, Material, PipelineMeshSettings, PointLight, RenderStats, Renderable, RendererData,
+    Image, Material, PipelineMeshSettings, RenderStats, Renderable, RendererData,
     Vertex,
 };
 
@@ -55,7 +55,6 @@ impl Plane {
         shader: u64,
         image: (Image, vk::Sampler),
 
-        light: Vec<BufferWrapper>,
         model: Mat4,
         view: Mat4,
         proj: Mat4,
@@ -80,12 +79,6 @@ impl Plane {
             vk::DescriptorSetLayoutBinding::builder()
                 .binding(1)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(2)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
@@ -176,24 +169,9 @@ impl Plane {
                 .image_info(image_info)
                 .build();
 
-            let info = vk::DescriptorBufferInfo::builder()
-                .buffer(light[i].buffer)
-                .offset(0)
-                .range(size_of::<PointLight>() as u64)
-                .build();
-
-            let buffer_info = &[info];
-            let light_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
-
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write, light_write],
+                    &[ubo_write, texture_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -279,19 +257,7 @@ impl Plane {
         }
         .unwrap();
 
-        let vertex_staging_mem = unsafe {
-            device.map_memory(
-                vertex_staging.memory,
-                0,
-                (size_of::<PCTVertex>() * vertices.len()) as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-
-        unsafe { memcpy(vertices.as_ptr(), vertex_staging_mem.cast(), vertices.len()) }
-
-        unsafe { device.unmap_memory(vertex_staging.memory) };
+        vertex_staging.copy_vec_into_buffer(device, &vertices);
 
         unsafe {
             copy_buffer(
@@ -333,19 +299,7 @@ impl Plane {
         }
         .unwrap();
 
-        let index_staging_mem = unsafe {
-            device.map_memory(
-                index_staging.memory,
-                0,
-                (size_of::<u32>() * indices.len()) as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-
-        unsafe { memcpy(indices.as_ptr(), index_staging_mem.cast(), indices.len()) }
-
-        unsafe { device.unmap_memory(index_staging.memory) };
+        index_staging.copy_vec_into_buffer(device, &indices);
 
         unsafe {
             copy_buffer(
@@ -397,7 +351,7 @@ impl Renderable for Plane {
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
-        camera_data: vk::DescriptorSet,
+        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
     ) {
         device.cmd_bind_pipeline(
             command_buffer,
@@ -412,14 +366,16 @@ impl Renderable for Plane {
             &[self.descriptor_sets[image_index]],
             &[],
         );
-        device.cmd_bind_descriptor_sets(
+        for (set, descriptor) in other_descriptors {    
+            device.cmd_bind_descriptor_sets(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.material.pipeline_layout,
-            1,
-            &[camera_data],
+            set,
+            &[descriptor],
             &[],
-        );
+            );
+        }
         device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
         device.cmd_bind_index_buffer(
             command_buffer,
@@ -447,19 +403,7 @@ impl Renderable for Plane {
     ) {
         let model_data = self.ubo.get_data(&view_proj);
 
-        let mem = unsafe {
-            device.map_memory(
-                self.ubo_buffers[index].memory,
-                0,
-                size_of::<ModelData>() as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-
-        unsafe { memcpy(&model_data, mem.cast(), 1) };
-
-        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
+        self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -512,24 +456,9 @@ impl Renderable for Plane {
                 .image_info(image_info)
                 .build();
 
-            let info = vk::DescriptorBufferInfo::builder()
-                .buffer(data.point_lights[0][set_index].buffer)
-                .offset(0)
-                .range(size_of::<PointLight>() as u64)
-                .build();
-
-            let buffer_info = &[info];
-            let light_write = vk::WriteDescriptorSet::builder()
-                .dst_set(*descriptor_set)
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
-
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write, light_write],
+                    &[ubo_write, texture_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -588,7 +517,6 @@ impl Quad {
         shader: u64,
         image: (u64, u64),
 
-        light: Vec<BufferWrapper>,
         model: Mat4,
         view: Mat4,
         proj: Mat4,
@@ -613,12 +541,6 @@ impl Quad {
             vk::DescriptorSetLayoutBinding::builder()
                 .binding(1)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(2)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
@@ -654,19 +576,7 @@ impl Quad {
             }
             .unwrap();
 
-            let ubo_mem = unsafe {
-                device.map_memory(
-                    buffer.memory,
-                    0,
-                    size_of::<ModelData>() as u64,
-                    vk::MemoryMapFlags::empty(),
-                )
-            }
-            .unwrap();
-
-            unsafe { memcpy(&model_data, ubo_mem.cast(), 1) };
-
-            unsafe { device.unmap_memory(buffer.memory) };
+            buffer.copy_data_into_buffer(device, &model_data);
 
             ubo_buffers.push(buffer);
         }
@@ -712,24 +622,9 @@ impl Quad {
                 .image_info(image_info)
                 .build();
 
-            let info = vk::DescriptorBufferInfo::builder()
-                .buffer(light[i].buffer)
-                .offset(0)
-                .range(size_of::<PointLight>() as u64)
-                .build();
-
-            let buffer_info = &[info];
-            let light_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
-
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write, light_write],
+                    &[ubo_write, texture_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -776,17 +671,7 @@ impl Quad {
         }
         .unwrap();
 
-        let vstage_mem = unsafe {
-            device.map_memory(
-                vertex_staging.memory,
-                0,
-                vertex_size,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-        unsafe { memcpy(vertices.as_ptr(), vstage_mem.cast(), vertices.len()) };
-        unsafe { device.unmap_memory(vertex_staging.memory) };
+        vertex_staging.copy_vec_into_buffer(device, &vertices);
 
         let vertex_buffer = unsafe {
             create_buffer(
@@ -832,17 +717,7 @@ impl Quad {
         }
         .unwrap();
 
-        let istage_mem = unsafe {
-            device.map_memory(
-                index_staging.memory,
-                0,
-                index_size,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-        unsafe { memcpy(indices.as_ptr(), istage_mem.cast(), indices.len()) };
-        unsafe { device.unmap_memory(index_staging.memory) };
+        index_staging.copy_vec_into_buffer(device, &indices);
 
         let index_buffer = unsafe {
             create_buffer(
@@ -881,7 +756,7 @@ impl Renderable for Quad {
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
-        camera_data: vk::DescriptorSet,
+        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
     ) {
         device.cmd_bind_pipeline(
             command_buffer,
@@ -896,14 +771,16 @@ impl Renderable for Quad {
             &[self.descriptor_sets[image_index]],
             &[],
         );
-        device.cmd_bind_descriptor_sets(
+        for (set, descriptor) in other_descriptors {    
+            device.cmd_bind_descriptor_sets(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.material.pipeline_layout,
-            1,
-            &[camera_data],
+            set,
+            &[descriptor],
             &[],
-        );
+            );
+        }
         device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
         device.cmd_bind_index_buffer(
             command_buffer,
@@ -931,19 +808,7 @@ impl Renderable for Quad {
     ) {
         let model_data = self.ubo.get_data(&view_proj);
 
-        let mem = unsafe {
-            device.map_memory(
-                self.ubo_buffers[index].memory,
-                0,
-                size_of::<ModelData>() as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-
-        unsafe { memcpy(&model_data, mem.cast(), 1) };
-
-        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
+        self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -999,24 +864,9 @@ impl Renderable for Quad {
                 .image_info(image_info)
                 .build();
 
-            let info = vk::DescriptorBufferInfo::builder()
-                .buffer(data.point_lights[0][set_index].buffer)
-                .offset(0)
-                .range(size_of::<PointLight>() as u64)
-                .build();
-
-            let buffer_info = &[info];
-            let light_write = vk::WriteDescriptorSet::builder()
-                .dst_set(*descriptor_set)
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
-
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write, light_write],
+                    &[ubo_write, texture_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -1063,7 +913,7 @@ impl Renderable for ObjectPrototype {
         device: &Device,
         command_buffer: vk::CommandBuffer,
         image_index: usize,
-        camera_data: vk::DescriptorSet,
+        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
     ) {
         device.cmd_bind_pipeline(
             command_buffer,
@@ -1078,14 +928,16 @@ impl Renderable for ObjectPrototype {
             &[self.descriptor_sets[image_index]],
             &[],
         );
-        device.cmd_bind_descriptor_sets(
+        for (set, descriptor) in other_descriptors {    
+            device.cmd_bind_descriptor_sets(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.material.pipeline_layout,
-            1,
-            &[camera_data],
+            set,
+            &[descriptor],
             &[],
-        );
+            );
+        }
         device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
         device.cmd_bind_index_buffer(
             command_buffer,
@@ -1155,24 +1007,9 @@ impl Renderable for ObjectPrototype {
                 .image_info(image_info)
                 .build();
 
-            let info = vk::DescriptorBufferInfo::builder()
-                .buffer(data.point_lights[0][set_index].buffer)
-                .offset(0)
-                .range(size_of::<PointLight>() as u64)
-                .build();
-
-            let buffer_info = &[info];
-            let light_write = vk::WriteDescriptorSet::builder()
-                .dst_set(*descriptor_set)
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
-
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write, light_write],
+                    &[ubo_write, texture_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -1205,19 +1042,7 @@ impl Renderable for ObjectPrototype {
 
         let model_data = self.ubo.get_data(&view_proj);
 
-        let mem = unsafe {
-            device.map_memory(
-                self.ubo_buffers[index].memory,
-                0,
-                size_of::<ModelData>() as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-
-        unsafe { memcpy(&model_data, mem.cast(), 1) };
-
-        unsafe { device.unmap_memory(self.ubo_buffers[index].memory) };
+        self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 }
 
@@ -1232,7 +1057,6 @@ impl ObjectPrototype {
         view: Mat4,
         proj: Mat4,
         image: (u64, u64),
-        light: Vec<BufferWrapper>,
         other_layouts: Vec<vk::DescriptorSetLayout>,
         name: String,
     ) -> Self {
@@ -1255,12 +1079,6 @@ impl ObjectPrototype {
             vk::DescriptorSetLayoutBinding::builder()
                 .binding(1)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(2)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
@@ -1296,19 +1114,7 @@ impl ObjectPrototype {
             }
             .unwrap();
 
-            let ubo_mem = unsafe {
-                device.map_memory(
-                    buffer.memory,
-                    0,
-                    size_of::<ModelData>() as u64,
-                    vk::MemoryMapFlags::empty(),
-                )
-            }
-            .unwrap();
-
-            unsafe { memcpy(&model_data, ubo_mem.cast(), 1) };
-
-            unsafe { device.unmap_memory(buffer.memory) };
+            buffer.copy_data_into_buffer(device, &model_data);
 
             ubo_buffers.push(buffer);
         }
@@ -1354,24 +1160,9 @@ impl ObjectPrototype {
                 .image_info(image_info)
                 .build();
 
-            let info = vk::DescriptorBufferInfo::builder()
-                .buffer(light[i].buffer)
-                .offset(0)
-                .range(size_of::<PointLight>() as u64)
-                .build();
-
-            let buffer_info = &[info];
-            let light_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
-
             unsafe {
                 device.update_descriptor_sets(
-                    &[ubo_write, texture_write, light_write],
+                    &[ubo_write, texture_write],
                     &[] as &[vk::CopyDescriptorSet],
                 )
             };
@@ -1415,13 +1206,7 @@ impl ObjectPrototype {
         )
         .unwrap();
 
-        let memory = device
-            .map_memory(staging_buffer.memory, 0, size, vk::MemoryMapFlags::empty())
-            .unwrap();
-
-        memcpy(self.vertices.as_ptr(), memory.cast(), self.vertices.len());
-
-        device.unmap_memory(staging_buffer.memory);
+        staging_buffer.copy_vec_into_buffer(device, &self.vertices);
 
         let vertex_buffer = create_buffer(
             instance,
@@ -1468,13 +1253,7 @@ impl ObjectPrototype {
         )
         .unwrap();
 
-        let memory = device
-            .map_memory(staging_buffer.memory, 0, size, vk::MemoryMapFlags::empty())
-            .unwrap();
-
-        memcpy(self.indices.as_ptr(), memory.cast(), self.indices.len());
-
-        device.unmap_memory(staging_buffer.memory);
+        staging_buffer.copy_vec_into_buffer(device, &self.indices);
 
         let index_buffer = create_buffer(
             instance,
