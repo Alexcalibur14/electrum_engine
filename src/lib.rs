@@ -6,15 +6,12 @@ use vulkanalia::vk::{AttachmentDescription, ExtDebugUtilsExtension};
 use vulkanalia::window as vk_window;
 
 use anyhow::{anyhow, Result};
-use glam::{vec3, Mat4, Quat, Vec3};
 use thiserror::Error;
 use tracing::*;
 use winit::window::Window;
 
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::PI;
 use std::ffi::CStr;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::os::raw::c_void;
 use std::time::{Duration, Instant};
 
@@ -127,122 +124,6 @@ impl Renderer {
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
         unsafe { create_sync_objects(&instance, &device, &mut data) }?;
-
-        let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
-
-        let projection = Projection::new(PI / 4.0, aspect, 0.1, 100.0);
-        let mut camera = SimpleCamera::new(
-            &instance,
-            &device,
-            &data,
-            vec3(0.0, 4.0, 4.0),
-            vec3(0.0, 0.0, 0.0),
-            projection,
-        );
-        camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
-
-        data.camera = Box::new(camera.clone());
-
-        let view = data.camera.view();
-        let proj = data.camera.proj();
-
-        let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
-        let red_light_hash = get_hash(&red_light);
-
-        data.point_light_data.insert(red_light_hash, red_light);
-
-        let blue_light = PointLight::new(vec3(-3.0, 3.0, 0.0), vec3(0.0, 0.0, 1.0), 5.0);
-        let blue_light_hash = get_hash(&blue_light);
-
-        data.point_light_data.insert(blue_light_hash, blue_light);
-
-
-        data.point_lights = PointLights::new(
-            &instance,
-            &device,
-            &data,
-            vec![red_light_hash, blue_light_hash],
-            10,
-        );
-
-        let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
-
-        let lit_shader = VFShader::builder(&instance, &device, "Lit".to_string())
-            .compile_vertex("res\\shaders\\vert.glsl")
-            .compile_fragment("res\\shaders\\frag.glsl")
-            .build();
-
-        let lit_shader_hash = lit_shader.hash();
-
-        data.shaders.insert(lit_shader_hash, Box::new(lit_shader));
-
-        let image = Image::from_path(
-            "res\\textures\\white.png",
-            MipLevels::Maximum,
-            &instance,
-            &device,
-            &data,
-            vk::Format::R8G8B8A8_SRGB,
-        );
-        
-        let sampler = unsafe {
-            create_texture_sampler(
-                &instance,
-                &device,
-                &image.mip_level,
-                "white sampler".to_string(),
-            )
-        }
-        .unwrap();
-
-        let sampler_hash = get_hash(&sampler);
-        data.samplers.insert(sampler_hash, sampler);
-
-        let image_hash = get_hash(&image);
-        data.textures.insert(image_hash, image);
-
-        let mut monkey = ObjectPrototype::load(
-            &instance,
-            &device,
-            &data,
-            "res\\models\\MONKEY.obj",
-            lit_shader_hash,
-            position,
-            view,
-            proj,
-            (image_hash, sampler_hash),
-            vec![camera.get_set_layout(), data.point_lights.get_set_layout()],
-            "monkey".to_string(),
-        );
-        unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
-        unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
-
-        data.objects.push(Box::new(monkey));
-
-        let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
-
-        let mut plane = Quad::new(
-            &instance,
-            &device,
-            &data,
-            [
-                vec3(-1.5, 0.0, -1.5),
-                vec3(1.5, 0.0, -1.5),
-                vec3(-1.5, 0.0, 1.5),
-                vec3(1.5, 0.0, 1.5),
-            ],
-            vec3(0.0, 1.0, 0.0),
-            lit_shader_hash,
-            (image_hash, sampler_hash),
-            position,
-            view,
-            proj,
-            vec![camera.get_set_layout(), data.point_lights.get_set_layout()],
-            "Quad".to_string(),
-        );
-        plane.generate(&instance, &device, &data);
-
-        data.objects.push(Box::new(plane));
 
         let stats = RenderStats {
             start: Instant::now(),
@@ -607,62 +488,62 @@ impl Renderer {
 #[derive(Default, Clone)]
 pub struct RendererData {
     // Debug
-    messenger: vk::DebugUtilsMessengerEXT,
+    pub messenger: vk::DebugUtilsMessengerEXT,
 
     // Surface
-    surface: vk::SurfaceKHR,
+    pub surface: vk::SurfaceKHR,
 
     // Physical Device / Logical Device
-    physical_device: vk::PhysicalDevice,
-    graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
+    pub physical_device: vk::PhysicalDevice,
+    pub graphics_queue: vk::Queue,
+    pub present_queue: vk::Queue,
 
     // Swapchain
-    swapchain_format: vk::Format,
-    swapchain_extent: vk::Extent2D,
-    swapchain: vk::SwapchainKHR,
-    swapchain_images_desc: Vec<(AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>,
-    swapchain_images: Vec<vk::Image>,
-    swapchain_image_views: Vec<vk::ImageView>,
+    pub swapchain_format: vk::Format,
+    pub swapchain_extent: vk::Extent2D,
+    pub swapchain: vk::SwapchainKHR,
+    pub swapchain_images_desc: Vec<(AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>,
+    pub swapchain_images: Vec<vk::Image>,
+    pub swapchain_image_views: Vec<vk::ImageView>,
 
     // Pipeline
-    render_pass: vk::RenderPass,
-    attachments: Vec<AttachmentDescription>,
-    subpass_data: Vec<SubpassData>,
+    pub render_pass: vk::RenderPass,
+    pub attachments: Vec<AttachmentDescription>,
+    pub subpass_data: Vec<SubpassData>,
 
     // Framebuffers
-    images: Vec<Image>,
-    framebuffers: Vec<vk::Framebuffer>,
+    pub images: Vec<Image>,
+    pub framebuffers: Vec<vk::Framebuffer>,
 
     // Command Buffers
-    command_pool: vk::CommandPool,
-    command_pools: Vec<vk::CommandPool>,
-    command_buffers: Vec<vk::CommandBuffer>,
-    secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
+    pub command_pool: vk::CommandPool,
+    pub command_pools: Vec<vk::CommandPool>,
+    pub command_buffers: Vec<vk::CommandBuffer>,
+    pub secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     // objects
-    shaders: HashMap<u64, Box<dyn Shader>>,
-    samplers: HashMap<u64, vk::Sampler>,
-    textures: HashMap<u64, Image>,
-    point_light_data: HashMap<u64, PointLight>,
-    point_lights: PointLights,
+    pub shaders: HashMap<u64, Box<dyn Shader>>,
+    pub samplers: HashMap<u64, vk::Sampler>,
+    pub textures: HashMap<u64, Image>,
+    pub point_light_data: HashMap<u64, PointLight>,
+    pub point_lights: PointLights,
 
-    objects: Vec<Box<dyn Renderable>>,
-    camera: Box<dyn Camera>,
+    pub objects: Vec<Box<dyn Renderable>>,
+    pub camera: Box<dyn Camera>,
     // point_lights: Vec<Vec<BufferWrapper>>,
 
     // Semaphores
-    image_available_semaphores: Vec<vk::Semaphore>,
-    render_finished_semaphores: Vec<vk::Semaphore>,
+    pub image_available_semaphores: Vec<vk::Semaphore>,
+    pub render_finished_semaphores: Vec<vk::Semaphore>,
 
     // Fences
-    in_flight_fences: Vec<vk::Fence>,
-    images_in_flight: Vec<vk::Fence>,
+    pub in_flight_fences: Vec<vk::Fence>,
+    pub images_in_flight: Vec<vk::Fence>,
 
     // MSAA
-    msaa_samples: vk::SampleCountFlags,
+    pub msaa_samples: vk::SampleCountFlags,
 
-    recreated: bool,
+    pub recreated: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1082,15 +963,6 @@ extern "system" fn debug_callback(
     }
 
     vk::FALSE
-}
-
-fn get_hash<T>(object: &T) -> u64
-where
-    T: Hash,
-{
-    let mut hasher = DefaultHasher::new();
-    object.hash(&mut hasher);
-    hasher.finish()
 }
 
 fn set_object_name(
