@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use std::{
-    collections::HashMap, fs::File, io::BufReader, mem::size_of, ptr::copy_nonoverlapping as memcpy,
+    collections::HashMap, fs::File, io::BufReader, mem::size_of,
 };
 
 use anyhow::Result;
@@ -114,19 +114,7 @@ impl Plane {
             }
             .unwrap();
 
-            let ubo_mem = unsafe {
-                device.map_memory(
-                    buffer.memory,
-                    0,
-                    size_of::<ModelData>() as u64,
-                    vk::MemoryMapFlags::empty(),
-                )
-            }
-            .unwrap();
-
-            unsafe { memcpy(&model_data, ubo_mem.cast(), 1) };
-
-            unsafe { device.unmap_memory(buffer.memory) };
+            buffer.copy_data_into_buffer(device, &model_data);
 
             ubo_buffers.push(buffer);
         }

@@ -1,4 +1,4 @@
-use std::{hash::{DefaultHasher, Hash, Hasher}, mem::size_of, ptr::copy_nonoverlapping as memcpy};
+use std::{hash::{DefaultHasher, Hash, Hasher}, mem::size_of};
 
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
@@ -112,19 +112,7 @@ impl SimpleCamera {
             }
             .unwrap();
 
-            let buffer_mem = unsafe {
-                device.map_memory(
-                    buffer.memory,
-                    0,
-                    size_of::<CameraData>() as u64,
-                    vk::MemoryMapFlags::empty(),
-                )
-            }
-            .unwrap();
-
-            unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
-
-            unsafe { device.unmap_memory(buffer.memory) };
+            buffer.copy_data_into_buffer(device, &camera_data);
 
             buffers.push(buffer);
         }
@@ -230,19 +218,7 @@ impl Camera for SimpleCamera {
 
         let buffer = self.buffers[image_index];
 
-        let buffer_mem = unsafe {
-            device.map_memory(
-                buffer.memory,
-                0,
-                size_of::<CameraData>() as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-        }
-        .unwrap();
-
-        unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
-
-        unsafe { device.unmap_memory(buffer.memory) };
+        buffer.copy_data_into_buffer(device, &camera_data);
     }
 
     fn calculate_proj(&mut self, device: &Device) {
@@ -256,19 +232,7 @@ impl Camera for SimpleCamera {
         };
 
         for buffer in self.buffers.clone() {
-            let buffer_mem = unsafe {
-                device.map_memory(
-                    buffer.memory,
-                    0,
-                    size_of::<CameraData>() as u64,
-                    vk::MemoryMapFlags::empty(),
-                )
-            }
-            .unwrap();
-
-            unsafe { memcpy(&camera_data, buffer_mem.cast(), 1) };
-
-            unsafe { device.unmap_memory(buffer.memory) };
+            buffer.copy_data_into_buffer(device, &camera_data);
         }
     }
 

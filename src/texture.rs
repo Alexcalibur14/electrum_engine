@@ -1,7 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::io::Read;
-use std::ptr::copy_nonoverlapping as memcpy;
 
 use vulkanalia::prelude::v1_2::*;
 
@@ -193,11 +192,7 @@ pub unsafe fn create_texture_image(
 
     // Copy (staging)
 
-    let memory = device.map_memory(staging_buffer.memory, 0, size, vk::MemoryMapFlags::empty())?;
-
-    memcpy(pixels.as_ptr(), memory.cast(), pixels.len());
-
-    device.unmap_memory(staging_buffer.memory);
+    staging_buffer.copy_vec_into_buffer(device, &pixels);
 
     // Create (image)
 
