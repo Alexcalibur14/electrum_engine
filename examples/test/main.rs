@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use glam::{vec3, Mat4, Quat, Vec3};
 
-use electrum_engine::{create_texture_sampler, Camera, Image, MipLevels, ObjectPrototype, PointLight, PointLights, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, VFShader};
+use electrum_engine::{create_texture_sampler, Camera, Image, MipLevels, ObjectPrototype, PointLight, LightGroup, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, VFShader};
 
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
@@ -134,7 +134,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     data.point_light_data.insert(blue_light_hash, blue_light);
 
 
-    data.point_lights = PointLights::new(
+    data.point_lights = LightGroup::new(
         &instance,
         &device,
         &data,
@@ -195,6 +195,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
 
     data.objects.push(Box::new(monkey));
+    
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 

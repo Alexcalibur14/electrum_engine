@@ -1,4 +1,4 @@
-use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
+use std::{hash::{DefaultHasher, Hash, Hasher}, mem::size_of, ptr::copy_nonoverlapping as memcpy};
 
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
@@ -30,6 +30,9 @@ pub trait Camera {
 
     /// Used to destroy all buffers associated with the camera
     fn destroy(&self, device: &Device);
+
+    /// 
+    fn hash(&self) -> u64;
 
     /// Used to implement Clone on the trait
     fn clone_dyn(&self) -> Box<dyn Camera>;
@@ -298,6 +301,14 @@ impl Camera for SimpleCamera {
 
     fn get_set_layout(&self) -> vk::DescriptorSetLayout {
         self.descriptor.descriptor_set_layout
+    }
+    
+    fn hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.view.to_string().as_bytes().hash(&mut hasher);
+        self.proj().to_string().as_bytes().hash(&mut hasher);
+        self.buffers[0].buffer.as_raw().hash(&mut hasher);
+        hasher.finish()
     }
 }
 

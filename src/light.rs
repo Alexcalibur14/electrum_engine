@@ -40,15 +40,15 @@ impl PointLight {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PointLights {
-    lights: Vec<u64>,
+pub struct LightGroup {
+    point_lights: Vec<u64>,
 
     pub descriptor: Descriptors,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub buffers: Vec<BufferWrapper>,
 }
 
-impl PointLights {
+impl LightGroup {
     pub fn new(
         instance: &Instance,
         device: &Device,
@@ -116,8 +116,8 @@ impl PointLights {
             unsafe { device.update_descriptor_sets(&[light_write], &[] as &[vk::CopyDescriptorSet]) };
         }
 
-        PointLights {
-            lights,
+        LightGroup {
+            point_lights: lights,
             descriptor,
             descriptor_sets,
             buffers,
@@ -125,8 +125,8 @@ impl PointLights {
     }
 
     pub fn add_light(&mut self, device: &Device, data: &RendererData, light: u64) {
-        let offset = (self.lights.len() * size_of::<PointLight>()) as u64;
-        self.lights.push(light);
+        let offset = (self.point_lights.len() * size_of::<PointLight>()) as u64;
+        self.point_lights.push(light);
 
         let light_data = data.point_light_data.get(&light).unwrap();
 
@@ -136,7 +136,7 @@ impl PointLights {
     }
 
     pub fn get_lights(&self) -> Vec<u64> {
-        self.lights.clone()
+        self.point_lights.clone()
     }
 
     pub fn get_set_layout(&self) -> vk::DescriptorSetLayout {

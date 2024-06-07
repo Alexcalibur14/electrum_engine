@@ -526,7 +526,7 @@ pub struct RendererData {
     pub samplers: HashMap<u64, vk::Sampler>,
     pub textures: HashMap<u64, Image>,
     pub point_light_data: HashMap<u64, PointLight>,
-    pub point_lights: PointLights,
+    pub point_lights: LightGroup,
 
     pub objects: Vec<Box<dyn Renderable>>,
     pub camera: Box<dyn Camera>,
