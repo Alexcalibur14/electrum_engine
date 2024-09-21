@@ -4,10 +4,11 @@ use glam::{vec3, Mat4, Quat, Vec3};
 
 use electrum_engine::{create_texture_sampler, Camera, Image, MipLevels, ObjectPrototype, PointLight, LightGroup, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, VFShader};
 
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Window, WindowBuilder};
+use winit::application::ApplicationHandler;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event_loop::EventLoop;
+use winit::keyboard::{Key, NamedKey};
+use winit::window::Window;
 
 use vulkanalia::prelude::v1_2::*;
 
@@ -16,91 +17,80 @@ fn main() {
 
     // Window
 
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("Electrum Engine")
-        .with_inner_size(LogicalSize::new(1024, 768))
-        .build(&event_loop)
-        .unwrap();
-
-    // App
-
-    let mut renderer = Renderer::create(&window).unwrap();
-
-    // load all objects
-    pre_load_objects(&renderer.instance, &renderer.device, &mut renderer.data);
-
-
-    let mut destroying = false;
-    let mut minimized = false;
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-        match event {
-            // Render a frame if our Vulkan app is not being destroyed.
-            Event::MainEventsCleared if !destroying && !minimized => {
-                unsafe { renderer.render(&window) }.unwrap()
-            }
-
-            Event::WindowEvent { event, .. } => {
-                (*control_flow, minimized, destroying) =
-                    window_event(&window, event, *control_flow, &mut renderer);
-            }
-            _ => {}
-        }
-    });
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+    let mut app = App { window: None, renderer: None, minimized: false };
+    event_loop.run_app(&mut app).unwrap();
 }
 
-fn window_event(
-    window: &Window,
-    event: WindowEvent,
-    mut control_flow: ControlFlow,
-    app: &mut Renderer,
-) -> (ControlFlow, bool, bool) {
-    let mut minimized = false;
-    let mut destroying = false;
-    match event {
-        WindowEvent::KeyboardInput {
-            input:
-                KeyboardInput {
-                    state: ElementState::Pressed,
-                    virtual_keycode,
-                    ..
-                },
-            ..
-        } => match virtual_keycode {
-            Some(VirtualKeyCode::F11) => {
-                if window.fullscreen().is_none() {
-                    window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(
-                        window.current_monitor(),
-                    )));
-                    app.resized = true;
+
+
+struct App {
+    window: Option<Window>,
+    renderer: Option<Renderer>,
+    minimized: bool,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        let window = event_loop.create_window(Window::default_attributes()).unwrap();
+        let mut renderer = Renderer::create(&window).unwrap();
+        pre_load_objects(&renderer.instance, &renderer.device, &mut renderer.data);
+
+        self.window = Some(window);
+        self.renderer = Some(renderer);
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        let window = self.window.as_ref().unwrap();
+        let renderer = self.renderer.as_mut().unwrap();
+        match event {
+            WindowEvent::KeyboardInput { event: KeyEvent { state: ElementState::Pressed, logical_key: key , .. }, .. } => {
+                match key {
+                    Key::Named(NamedKey::F11) => {
+                        if window.fullscreen().is_none() {
+                            window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(
+                                window.current_monitor(),
+                            )));
+                            renderer.resized = true;
+                        } else {
+                            window.set_fullscreen(None);
+                            renderer.resized = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            WindowEvent::Resized(size) => {
+                if size.width == 0 || size.height == 0 {
+                    self.minimized = true;
                 } else {
-                    window.set_fullscreen(None);
-                    app.resized = true;
+                    self.minimized = false;
+                    renderer.resized = true;
+                }
+            }
+            WindowEvent::CloseRequested => {
+                // Destroy the vulkan app
+                unsafe {
+                    renderer.device.device_wait_idle().unwrap();
+                }
+                unsafe { renderer.destroy() };
+                event_loop.exit();
+            }
+            WindowEvent::RedrawRequested => {
+                if !self.minimized {
+                    unsafe { renderer.render(&window) }.unwrap();
+                    window.request_redraw();
                 }
             }
             _ => {}
-        },
-        WindowEvent::Resized(size) => {
-            if size.width == 0 || size.height == 0 {
-                minimized = true;
-            } else {
-                minimized = false;
-                app.resized = true;
-            }
         }
-        WindowEvent::CloseRequested => {
-            // Destroy the vulkan app
-            destroying = true;
-            control_flow = ControlFlow::Exit;
-            unsafe {
-                app.device.device_wait_idle().unwrap();
-            }
-            unsafe { app.destroy() };
-        }
-        _ => {}
     }
-    (control_flow, minimized, destroying)
 }
 
 
@@ -145,8 +135,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
     let lit_shader = VFShader::builder(&instance, &device, "Lit".to_string())
-        .compile_vertex("res\\shaders\\vert.glsl")
-        .compile_fragment("res\\shaders\\frag.glsl")
+        .compile_vertex("res\\shaders\\test_lit.vert.glsl")
+        .compile_fragment("res\\shaders\\test_lit.frag.glsl")
         .build();
 
     let lit_shader_hash = lit_shader.hash();

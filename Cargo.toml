@@ -7,15 +7,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.79"
-glam = "0.25.0"
-vulkanalia = { version = "0.22.0", features = ["libloading", "window"] }
+anyhow = "1.0.89"
+glam = "0.29.0"
+vulkanalia = { version = "0.25.0", features = ["libloading", "window"] }
 shaderc = "0.8.3"
-thiserror = "1.0.56"
-tobj = { version = "4.0.0", features = ["log"] }
+thiserror = "1.0.63"
+tobj = { version = "4.0.2", features = ["log"] }
 tracing = "0.1.40"
-winit = "0.28.7"
-image = "0.24.9"
+winit = "0.30.5"
+image = "0.25.2"
 
 electrum_engine_macros = { path = "electrum_engine_macros"}
 

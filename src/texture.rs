@@ -5,7 +5,7 @@ use std::io::Read;
 use vulkanalia::prelude::v1_2::*;
 
 use anyhow::{anyhow, Result};
-use image::io::Reader;
+use image::ImageReader;
 
 use crate::{
     buffer::{
@@ -76,7 +76,7 @@ impl Image {
         data: &RendererData,
         format: vk::Format,
     ) -> Self {
-        let img = Reader::open(path).unwrap().decode().unwrap();
+        let img = ImageReader::open(path).unwrap().decode().unwrap();
         let bytes = img
             .to_rgba8()
             .bytes()
