@@ -15,7 +15,7 @@ struct PointLight {
     float strength;
 };
 
-layout(set = 2, binding = 0) buffer PointLights {
+layout(set = 2, binding = 0) readonly buffer PointLights {
     PointLight lights[];
 } point_lights;
 
