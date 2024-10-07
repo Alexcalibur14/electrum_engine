@@ -8,10 +8,16 @@ use glam::{vec2, vec3, Mat4, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{copy_buffer, create_buffer, BufferWrapper},
+    buffer::{create_buffer, BufferWrapper},
+    create_and_stage_buffer,
     insert_command_label,
     vertices::PCTVertex,
-    Image, Material, PipelineMeshSettings, RenderStats, Renderable, RendererData,
+    Image,
+    Material,
+    PipelineMeshSettings,
+    RenderStats,
+    Renderable,
+    RendererData,
     Vertex,
 };
 
@@ -219,90 +225,6 @@ impl Plane {
             }
         }
 
-        let vertex_buffer = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                (size_of::<PCTVertex>() * vertices.len()) as u64,
-                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                Some(format!("{} Vertex Buffer", self.name)),
-            )
-        }
-        .unwrap();
-
-        let vertex_staging = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                (size_of::<PCTVertex>() * vertices.len()) as u64,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                Some(format!("{} Vertex Staging Buffer", self.name)),
-            )
-        }
-        .unwrap();
-
-        vertex_staging.copy_vec_into_buffer(device, &vertices);
-
-        unsafe {
-            copy_buffer(
-                instance,
-                device,
-                vertex_staging.buffer,
-                vertex_buffer.buffer,
-                (size_of::<PCTVertex>() * vertices.len()) as u64,
-                data,
-            )
-        }
-        .unwrap();
-
-        vertex_staging.destroy(device);
-
-        let index_buffer = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                (size_of::<u32>() * indices.len()) as u64,
-                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                Some(format!("{} Index Buffer", self.name)),
-            )
-        }
-        .unwrap();
-
-        let index_staging = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                (size_of::<u32>() * indices.len()) as u64,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                Some(format!("{} Index Staging Buffer", self.name)),
-            )
-        }
-        .unwrap();
-
-        index_staging.copy_vec_into_buffer(device, &indices);
-
-        unsafe {
-            copy_buffer(
-                instance,
-                device,
-                index_staging.buffer,
-                index_buffer.buffer,
-                (size_of::<u32>() * indices.len()) as u64,
-                data,
-            )
-        }
-        .unwrap();
-
-        index_staging.destroy(device);
-
         vertices.iter().for_each(|v| println!("{:?}", v.pos));
 
         println!("{}", indices.len());
@@ -324,11 +246,28 @@ impl Plane {
             cursor += 1;
         }
 
+        self.vertex_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            (size_of::<PCTVertex>() * vertices.len()) as u64,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            Some(format!("{} Vertex Buffer", self.name)),
+            &vertices
+        ).unwrap();
+
+        self.index_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            (size_of::<u32>() * indices.len()) as u64,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            Some(format!("{} Index Buffer", self.name)),
+            &indices
+        ).unwrap();
+        
         self.vertices = vertices;
         self.indices = indices;
-
-        self.vertex_buffer = vertex_buffer;
-        self.index_buffer = index_buffer;
     }
 }
 
@@ -637,103 +576,24 @@ impl Quad {
     pub fn generate(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let mut vertices = vec![];
 
-        for point in self.points {
+        let uvs = vec![vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0)];
+
+        for (i, point) in self.points.iter().enumerate() {
             vertices.push(PCTVertex {
-                pos: point,
-                tex_coord: vec2(0.0, 0.0),
+                pos: *point,
+                tex_coord: uvs[i],
                 normal: self.normal,
             })
         }
 
         let vertex_size = (size_of::<PCTVertex>() * vertices.len()) as u64;
-        let vertex_staging = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                vertex_size,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                Some(format!("{} Vertex Staging Buffer", self.name)),
-            )
-        }
-        .unwrap();
 
-        vertex_staging.copy_vec_into_buffer(device, &vertices);
-
-        let vertex_buffer = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                vertex_size,
-                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                Some(format!("{} Vertex Buffer", self.name)),
-            )
-        }
-        .unwrap();
-
-        unsafe {
-            copy_buffer(
-                instance,
-                device,
-                vertex_staging.buffer,
-                vertex_buffer.buffer,
-                vertex_size,
-                data,
-            )
-        }
-        .unwrap();
-
-        self.vertex_buffer = vertex_buffer;
-        vertex_staging.destroy(device);
+        self.vertex_buffer = create_and_stage_buffer(instance, device, data, vertex_size, vk::BufferUsageFlags::VERTEX_BUFFER, Some(format!("{} Vertex Buffer", self.name)), &vertices).unwrap();
 
         let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
-
         let index_size = (size_of::<u32>() * indices.len()) as u64;
-        let index_staging = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                index_size,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                Some(format!("{} Index Staging Buffer", self.name)),
-            )
-        }
-        .unwrap();
 
-        index_staging.copy_vec_into_buffer(device, &indices);
-
-        let index_buffer = unsafe {
-            create_buffer(
-                instance,
-                device,
-                data,
-                index_size,
-                vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                Some(format!("{} Index Buffer", self.name)),
-            )
-        }
-        .unwrap();
-
-        unsafe {
-            copy_buffer(
-                instance,
-                device,
-                index_staging.buffer,
-                index_buffer.buffer,
-                index_size,
-                data,
-            )
-        }
-        .unwrap();
-
-        self.index_buffer = index_buffer;
-        index_staging.destroy(device);
+        self.index_buffer = create_and_stage_buffer(instance, device, data, index_size, vk::BufferUsageFlags::INDEX_BUFFER, Some(format!("{} Index Buffer", self.name)), &indices).unwrap();
     }
 }
 
@@ -1183,43 +1043,7 @@ impl ObjectPrototype {
     ) {
         let size = (size_of::<PCTVertex>() * self.vertices.len()) as u64;
 
-        let staging_buffer = create_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            Some(format!("{} Vertex Staging Buffer", self.name)),
-        )
-        .unwrap();
-
-        staging_buffer.copy_vec_into_buffer(device, &self.vertices);
-
-        let vertex_buffer = create_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some(format!("{} Vertex Buffer", self.name)),
-        )
-        .unwrap();
-
-        copy_buffer(
-            instance,
-            device,
-            staging_buffer.buffer,
-            vertex_buffer.buffer,
-            size,
-            data,
-        )
-        .unwrap();
-
-        staging_buffer.destroy(device);
-
-        self.vertex_buffer = vertex_buffer;
+        self.vertex_buffer = create_and_stage_buffer(instance, device, data, size, vk::BufferUsageFlags::VERTEX_BUFFER, Some(format!("{} Vertex Buffer", self.name)), &self.vertices).unwrap();
     }
 
     pub unsafe fn generate_index_buffer(
@@ -1230,44 +1054,7 @@ impl ObjectPrototype {
     ) {
         let size = (size_of::<u32>() * self.indices.len()) as u64;
 
-        let staging_buffer = create_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            Some(format!("{} Index Staging Buffer", self.name)),
-        )
-        .unwrap();
-
-        staging_buffer.copy_vec_into_buffer(device, &self.indices);
-
-        let index_buffer = create_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            Some(format!("{} Index Buffer", self.name)),
-        )
-        .unwrap();
-
-        copy_buffer(
-            instance,
-            device,
-            staging_buffer.buffer,
-            index_buffer.buffer,
-            size,
-            data,
-        )
-        .unwrap();
-
-        device.destroy_buffer(staging_buffer.buffer, None);
-        device.free_memory(staging_buffer.memory, None);
-
-        self.index_buffer = index_buffer;
+        self.index_buffer = create_and_stage_buffer(instance, device, data, size, vk::BufferUsageFlags::INDEX_BUFFER, Some(format!("{} Index Buffer", self.name)), &self.indices).unwrap();
     }
 }
 

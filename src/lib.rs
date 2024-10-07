@@ -146,7 +146,7 @@ impl Renderer {
     /// This function renders a frame
     ///
     /// # Safety
-    /// Do not call this function if the window is minimised
+    /// Do not call this function if the window is minimised or if `destroy` has been called
     pub unsafe fn render(&mut self, window: &Window) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
 
@@ -484,7 +484,7 @@ impl Renderer {
     }
 }
 
-/// The Vulkan handles and associated properties used by our Vulkan app.
+/// The Vulkan handles and associated properties used by the Vulkan app.
 #[derive(Default, Clone)]
 pub struct RendererData {
     // Debug
@@ -530,7 +530,6 @@ pub struct RendererData {
 
     pub objects: Vec<Box<dyn Renderable>>,
     pub camera: Box<dyn Camera>,
-    // point_lights: Vec<Vec<BufferWrapper>>,
 
     // Semaphores
     pub image_available_semaphores: Vec<vk::Semaphore>,

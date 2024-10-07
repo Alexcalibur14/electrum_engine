@@ -11,7 +11,7 @@ anyhow = "1.0.89"
 glam = "0.29.0"
 vulkanalia = { version = "0.25.0", features = ["libloading", "window"] }
 shaderc = "0.8.3"
-thiserror = "1.0.63"
+thiserror = "1.0.64"
 tobj = { version = "4.0.2", features = ["log"] }
 tracing = "0.1.40"
 winit = "0.30.5"

@@ -125,7 +125,7 @@ pub unsafe fn get_memory_type_index(
 }
 
 /// Copies the contents of one buffer into another buffer
-pub unsafe fn copy_buffer(
+pub fn copy_buffer(
     instance: &Instance,
     device: &Device,
     source: vk::Buffer,
@@ -133,18 +133,58 @@ pub unsafe fn copy_buffer(
     size: vk::DeviceSize,
     data: &RendererData,
 ) -> Result<()> {
-    let command_buffer =
-        begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
+    unsafe {
+        let command_buffer =
+            begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
 
-    let regions = vk::BufferCopy::builder()
-        .src_offset(0)
-        .dst_offset(0)
-        .size(size);
-    device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
+        let regions = vk::BufferCopy::builder()
+            .src_offset(0)
+            .dst_offset(0)
+            .size(size);
+        device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
 
-    end_single_time_commands(instance, device, data, command_buffer)?;
-
+        end_single_time_commands(instance, device, data, command_buffer)?;
+    }
+    
     Ok(())
+}
+
+pub fn create_and_stage_buffer<T>(
+    instance: &Instance,
+    device: &Device,
+    data: &RendererData,
+    size: vk::DeviceSize,
+    usage: vk::BufferUsageFlags,
+    name: Option<String>,
+    bytes: &Vec<T>,
+) -> Result<BufferWrapper> {
+    let staging_buffer = unsafe { create_buffer(
+        instance,
+        device,
+        data,
+        size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        None
+    ) }.unwrap();
+
+    staging_buffer.copy_vec_into_buffer(device, bytes);
+
+    let buffer = unsafe { create_buffer(
+        instance,
+        device,
+        data,
+        size,
+        vk::BufferUsageFlags::TRANSFER_DST | usage,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        name
+    ) }.unwrap();
+
+    copy_buffer(instance, device, staging_buffer.buffer, buffer.buffer, size.into(), data)?;
+
+    staging_buffer.destroy(device);
+
+    Ok(buffer)
 }
 
 #[derive(Debug, Clone, Copy, Default)]

@@ -24,7 +24,6 @@ fn main() {
 }
 
 
-
 struct App {
     window: Option<Window>,
     renderer: Option<Renderer>,
@@ -168,6 +167,31 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let image_hash = get_hash(&image);
     data.textures.insert(image_hash, image);
 
+    let image_2077 = Image::from_path(
+        "res\\textures\\photomode.png",
+        MipLevels::Maximum,
+        &instance,
+        &device,
+        &data,
+        vk::Format::R8G8B8A8_SRGB,
+    );
+    
+    let sampler_2077 = unsafe {
+        create_texture_sampler(
+            &instance,
+            &device,
+            &image_2077.mip_level,
+            "white sampler".to_string(),
+        )
+    }
+    .unwrap();
+
+    let sampler_2077_hash = get_hash(&sampler_2077);
+    data.samplers.insert(sampler_2077_hash, sampler_2077);
+
+    let image_2077_hash = get_hash(&image_2077);
+    data.textures.insert(image_2077_hash, image_2077);
+
     let mut monkey = ObjectPrototype::load(
         &instance,
         &device,
@@ -201,7 +225,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         ],
         vec3(0.0, 1.0, 0.0),
         lit_shader_hash,
-        (image_hash, sampler_hash),
+        (image_2077_hash, sampler_2077_hash),
         position,
         view,
         proj,
