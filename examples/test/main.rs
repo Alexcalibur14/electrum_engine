@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use glam::{vec3, Mat4, Quat, Vec3};
 
-use electrum_engine::{create_texture_sampler, Camera, Image, MipLevels, ObjectPrototype, PointLight, LightGroup, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, VFShader};
+use electrum_engine::{create_texture_sampler, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, VFShader};
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -117,19 +117,23 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     data.point_light_data.insert(red_light_hash, red_light);
 
-    let blue_light = PointLight::new(vec3(-3.0, 3.0, 0.0), vec3(0.0, 0.0, 1.0), 5.0);
+    let blue_light = PointLight::new(vec3(-3.0, 3.0, 0.0), vec3(0.0, 1.0, 1.0), 5.0);
     let blue_light_hash = get_hash(&blue_light);
 
     data.point_light_data.insert(blue_light_hash, blue_light);
 
 
-    data.point_lights = LightGroup::new(
+    let light_group = LightGroup::new(
         &instance,
         &device,
         &data,
         vec![red_light_hash, blue_light_hash],
         10,
     );
+
+    let light_group_hash = get_hash(&light_group);
+
+    data.light_groups.insert(light_group_hash, light_group.clone());
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -202,13 +206,14 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         view,
         proj,
         (image_hash, sampler_hash),
-        vec![camera.get_set_layout(), data.point_lights.get_set_layout()],
+        vec![camera.get_set_layout(), light_group.get_set_layout()],
         "monkey".to_string(),
     );
     unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
     unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
 
-    data.objects.push(Box::new(monkey));
+    let monkey_hash = get_hash(&monkey);
+    data.objects.insert(monkey_hash, Box::new(monkey));
     
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
@@ -229,12 +234,20 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         position,
         view,
         proj,
-        vec![camera.get_set_layout(), data.point_lights.get_set_layout()],
+        vec![camera.get_set_layout(), light_group.get_set_layout()],
         "Quad".to_string(),
     );
     plane.generate(&instance, &device, &data);
 
-    data.objects.push(Box::new(plane));
+    let plane_hash = get_hash(&plane);
+    data.objects.insert(plane_hash, Box::new(plane));
+
+    let render_data = SubPassRenderData::new(0, vec![plane_hash, monkey_hash], light_group_hash);
+    data.subpass_render_data = vec![render_data];
+
+    let mut render_data = data.subpass_render_data.clone();
+    render_data.iter_mut().for_each(|s| s.setup_command_buffers(&device, &data));
+    data.subpass_render_data = render_data;
 }
 
 fn get_hash<T>(object: &T) -> u64

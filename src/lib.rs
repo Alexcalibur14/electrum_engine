@@ -277,12 +277,20 @@ impl Renderer {
             vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
         );
 
-        let secondary_command_buffers = (0..self.data.objects.len())
-            .map(|i| self.update_secondary_command_buffer(image_index, i))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut render_data = self.data.subpass_render_data.clone();
+        render_data.iter_mut().for_each(|s| s.record_command_buffers(&self.instance, &self.device, &self.data, image_index).unwrap());
+        self.data.subpass_render_data = render_data;
 
-        self.device
-            .cmd_execute_commands(command_buffer, &secondary_command_buffers);
+        for (i, render_data) in self.data.subpass_render_data.iter().enumerate() {
+            if i > 0 {
+                self.device.cmd_next_subpass(command_buffer, vk::SubpassContents::SECONDARY_COMMAND_BUFFERS);
+            }
+
+            let secondary_command_buffers = vec![render_data.command_buffers[image_index]];
+    
+            self.device
+                .cmd_execute_commands(command_buffer, &secondary_command_buffers);
+        }
 
         self.device.cmd_end_render_pass(command_buffer);
 
@@ -293,51 +301,6 @@ impl Renderer {
         Ok(())
     }
 
-    unsafe fn update_secondary_command_buffer(
-        &mut self,
-        image_index: usize,
-        model_index: usize,
-    ) -> Result<vk::CommandBuffer> {
-        self.data
-            .secondary_command_buffers
-            .resize_with(image_index + 1, Vec::new);
-        let command_buffers = &mut self.data.secondary_command_buffers[image_index];
-        while model_index >= command_buffers.len() {
-            let allocate_info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(self.data.command_pools[image_index])
-                .level(vk::CommandBufferLevel::SECONDARY)
-                .command_buffer_count(1);
-
-            let command_buffer = self.device.allocate_command_buffers(&allocate_info)?[0];
-            command_buffers.push(command_buffer);
-        }
-
-        let command_buffer = command_buffers[model_index];
-
-        let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
-            .render_pass(self.data.render_pass)
-            .subpass(0)
-            .framebuffer(self.data.framebuffers[image_index]);
-
-        let info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
-            .inheritance_info(&inheritance_info);
-
-        self.device.begin_command_buffer(command_buffer, &info)?;
-
-        self.data.objects[model_index].draw(
-            &self.instance,
-            &self.device,
-            command_buffer,
-            image_index,
-            vec![(1, self.data.camera.get_descriptor_sets()[image_index]), (2, self.data.point_lights.get_descriptor_sets()[image_index])],
-        );
-
-        self.device.end_command_buffer(command_buffer)?;
-
-        Ok(command_buffer)
-    }
-
     fn update(&mut self, image_index: usize) {
         self.data.camera.calculate_view(&self.device, image_index);
 
@@ -345,7 +308,7 @@ impl Renderer {
 
         let mut objects = self.data.objects.clone();
 
-        objects.iter_mut().enumerate().for_each(|(id, o)| {
+        objects.iter_mut().enumerate().for_each(|(id, (_, o))| {
             o.update(&self.device, &self.data, &self.stats, image_index, vp, id)
         });
 
@@ -380,7 +343,7 @@ impl Renderer {
 
         objects
             .iter_mut()
-            .for_each(|o| o.recreate_swapchain(&self.device, &self.data));
+            .for_each(|(_, o)| o.recreate_swapchain(&self.device, &self.data));
 
         self.data.objects = objects;
 
@@ -412,7 +375,7 @@ impl Renderer {
         self.data
             .objects
             .iter()
-            .for_each(|o| o.destroy_swapchain(&self.device));
+            .for_each(|(_, o)| o.destroy_swapchain(&self.device));
 
         self.device.destroy_render_pass(self.data.render_pass, None);
 
@@ -439,19 +402,24 @@ impl Renderer {
             .destroy_command_pool(self.data.command_pool, None);
 
         let mut objects = self.data.objects.clone();
-        objects.iter_mut().for_each(|o| o.destroy(&self.device));
+        objects.iter_mut().for_each(|(_, o)| o.destroy(&self.device));
         self.data.objects = objects;
 
-        self.data.point_lights.destroy(&self.device);
+        self.data
+            .light_groups
+            .iter()
+            .for_each(|(_, l)| l.destroy(&self.device));
 
         self.data
             .shaders
             .iter()
             .for_each(|(_, s)| s.destroy(&self.device));
+
         self.data
             .samplers
             .iter()
             .for_each(|(_, s)| self.device.destroy_sampler(*s, None));
+
         self.data
             .textures
             .iter()
@@ -463,10 +431,12 @@ impl Renderer {
             .in_flight_fences
             .iter()
             .for_each(|f| self.device.destroy_fence(*f, None));
+
         self.data
             .render_finished_semaphores
             .iter()
             .for_each(|s| self.device.destroy_semaphore(*s, None));
+
         self.data
             .image_available_semaphores
             .iter()
@@ -510,6 +480,7 @@ pub struct RendererData {
     pub render_pass: vk::RenderPass,
     pub attachments: Vec<AttachmentDescription>,
     pub subpass_data: Vec<SubpassData>,
+    pub subpass_render_data: Vec<SubPassRenderData>,
 
     // Framebuffers
     pub images: Vec<Image>,
@@ -526,9 +497,9 @@ pub struct RendererData {
     pub samplers: HashMap<u64, vk::Sampler>,
     pub textures: HashMap<u64, Image>,
     pub point_light_data: HashMap<u64, PointLight>,
-    pub point_lights: LightGroup,
+    pub light_groups: HashMap<u64, LightGroup>,
 
-    pub objects: Vec<Box<dyn Renderable>>,
+    pub objects: HashMap<u64, Box<dyn Renderable>>,
     pub camera: Box<dyn Camera>,
 
     // Semaphores

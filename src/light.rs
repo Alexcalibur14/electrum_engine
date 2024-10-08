@@ -153,3 +153,10 @@ impl LightGroup {
         self.buffers.iter().for_each(|b| b.destroy(device));
     }
 }
+
+impl Hash for LightGroup {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.point_lights.hash(state);
+        self.descriptor_sets.hash(state);
+    }
+}

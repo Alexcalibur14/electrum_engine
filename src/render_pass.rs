@@ -1,6 +1,8 @@
 use vulkanalia::prelude::v1_2::*;
 use anyhow::{Ok, Result};
 
+use crate::RendererData;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
     pub flags: vk::AttachmentDescriptionFlags,
@@ -107,11 +109,6 @@ pub fn generate_render_pass(
         let mut preserve_attachments = vec![];
 
         for attachment in &subpass_data.attachments {
-            if attachment.2 == AttachmentType::Preserve {
-                preserve_attachments.push(attachment.0);
-                continue;
-            }
-
             let attachment_ref = vk::AttachmentReference::builder()
                 .attachment(attachment.0)
                 .layout(attachment.1)
@@ -122,7 +119,7 @@ pub fn generate_render_pass(
                 AttachmentType::Color => color_attachments.push(attachment_ref),
                 AttachmentType::Resolve => resolve_attachments.push(attachment_ref),
                 AttachmentType::DepthStencil => depth_stencil_attachment = attachment_ref,
-                AttachmentType::Preserve => panic!("This should not happen"),
+                AttachmentType::Preserve => preserve_attachments.push(attachment.0),
             }
         }
 
@@ -144,4 +141,63 @@ pub fn generate_render_pass(
         .dependencies(&dependencies);
 
     Ok(unsafe { device.create_render_pass(&info, None) }?)
+}
+
+
+#[derive(Debug, Clone)]
+pub struct SubPassRenderData {
+    pub subpass_id: usize,
+    pub objects: Vec<u64>,
+    pub light_group: u64,
+
+    pub command_buffers: Vec<vk::CommandBuffer>,
+}
+
+impl SubPassRenderData {
+    pub fn new(id: usize, objects: Vec<u64>, light_group: u64) -> Self {
+        SubPassRenderData {
+            subpass_id: id,
+            objects,
+            light_group,
+            command_buffers: vec![],
+        }
+    }
+
+    pub fn setup_command_buffers(&mut self, device: &Device, data: &RendererData) {
+        for i in 0..data.swapchain_images.len() {
+            let allocate_info = vk::CommandBufferAllocateInfo::builder()
+                .command_pool(data.command_pools[i])
+                .level(vk::CommandBufferLevel::SECONDARY)
+                .command_buffer_count(1);
+
+            self.command_buffers.push(unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0])
+        }
+    }
+
+    pub fn record_command_buffers(&mut self, instance: &Instance, device: &Device, data: &RendererData, image_index: usize) -> Result<()> {
+        let command_buffer = self.command_buffers[image_index];
+
+        let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
+            .render_pass(data.render_pass)
+            .subpass(self.subpass_id as u32)
+            .framebuffer(data.framebuffers[image_index])
+            .build();
+
+
+        let begin_info = vk::CommandBufferBeginInfo::builder()
+            .inheritance_info(&inheritance_info)
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+            .build();
+
+        unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
+
+        let light_group = data.light_groups.get(&self.light_group).unwrap();
+        let other_descriptors = vec![(1, data.camera.get_descriptor_sets()[image_index]), (2, light_group.get_descriptor_sets()[image_index])];
+
+        self.objects.iter().map(|k| data.objects.get(k).unwrap()).for_each(|o| unsafe { o.draw(instance, device, command_buffer, image_index, other_descriptors.clone()) });
+
+        unsafe { device.end_command_buffer(command_buffer) }?;
+
+        Ok(())
+    }
 }
