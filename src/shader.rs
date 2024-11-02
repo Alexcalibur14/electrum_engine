@@ -12,7 +12,7 @@ use crate::{set_object_name, Descriptors, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
-    unsafe fn destroy(&self, device: &Device);
+    fn destroy(&self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Shader>;
 
     fn hash(&self) -> u64;
@@ -52,9 +52,11 @@ impl Shader for VFShader {
         ]
     }
 
-    unsafe fn destroy(&self, device: &Device) {
-        device.destroy_shader_module(self.vertex, None);
-        device.destroy_shader_module(self.fragment, None);
+    fn destroy(&self, device: &Device) {
+        unsafe {
+            device.destroy_shader_module(self.vertex, None);
+            device.destroy_shader_module(self.fragment, None);
+        }
     }
 
     fn clone_dyn(&self) -> Box<dyn Shader> {
@@ -134,6 +136,8 @@ impl VFShaderBuilder {
 }
 
 /// Compiles a shader file
+/// # Safety
+/// field `entry_point_name` only seems to work with `main`
 pub unsafe fn compile_shader_module(
     device: &Device,
     path: &str,
@@ -418,8 +422,7 @@ pub struct VShader {
 impl VShader {
     pub fn new(instance: &Instance, device: &Device, name: String, path: &str) -> Self {
         let vertex =
-            unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }
-                .unwrap();
+            unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
 
         set_object_name(
             instance,
@@ -436,17 +439,15 @@ impl VShader {
 
 impl Shader for VShader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo> {
-        vec![
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(self.vertex)
-                .name(b"main\0")
-                .build(),
-        ]
+        vec![vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(self.vertex)
+            .name(b"main\0")
+            .build()]
     }
 
-    unsafe fn destroy(&self, device: &Device) {
-        device.destroy_shader_module(self.vertex, None);
+    fn destroy(&self, device: &Device) {
+        unsafe { device.destroy_shader_module(self.vertex, None) };
     }
 
     fn clone_dyn(&self) -> Box<dyn Shader> {

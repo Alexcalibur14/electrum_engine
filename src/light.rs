@@ -4,7 +4,8 @@ use glam::Vec3;
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, Descriptors, RendererData
+    buffer::{create_buffer, BufferWrapper},
+    Descriptors, RendererData,
 };
 
 #[repr(C)]
@@ -54,36 +55,40 @@ impl LightGroup {
         device: &Device,
         data: &RendererData,
         mut loaded_lights: Vec<u64>,
-        capacity: usize
+        capacity: usize,
     ) -> Self {
         let mut lights = Vec::with_capacity(capacity);
         lights.append(&mut loaded_lights);
 
-        let light_data = lights.iter().map(|i| data.point_light_data.get(i).unwrap().clone()).collect::<Vec<PointLight>>();
+        let light_data = lights
+            .iter()
+            .map(|i| *data.point_light_data.get(i).unwrap())
+            .collect::<Vec<PointLight>>();
 
-        let bindings = vec![
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .descriptor_count(capacity as u32)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build()
-        ];
+        let bindings = vec![vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(capacity as u32)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+            .build()];
 
         let descriptor = Descriptors::new(device, data, bindings);
 
         let mut buffers = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe { create_buffer(
-                &instance,
-                &device,
-                &data,
-                (size_of::<PointLight>() * capacity) as u64,
-                vk::BufferUsageFlags::STORAGE_BUFFER,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                Some(format!("Light Buffer {}", i)),
-            ) }.unwrap();
+            let buffer = unsafe {
+                create_buffer(
+                    instance,
+                    device,
+                    data,
+                    (size_of::<PointLight>() * capacity) as u64,
+                    vk::BufferUsageFlags::STORAGE_BUFFER,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    Some(format!("Light Buffer {}", i)),
+                )
+            }
+            .unwrap();
 
             buffer.copy_vec_into_buffer(device, &light_data);
 
@@ -113,7 +118,9 @@ impl LightGroup {
                 .buffer_info(buffer_info)
                 .build();
 
-            unsafe { device.update_descriptor_sets(&[light_write], &[] as &[vk::CopyDescriptorSet]) };
+            unsafe {
+                device.update_descriptor_sets(&[light_write], &[] as &[vk::CopyDescriptorSet])
+            };
         }
 
         LightGroup {
@@ -131,7 +138,12 @@ impl LightGroup {
         let light_data = data.point_light_data.get(&light).unwrap();
 
         for buffer in self.buffers.clone() {
-            buffer.copy_data_into_buffer_with_offset(device, &light_data, offset, size_of::<PointLight>() as u64);
+            buffer.copy_data_into_buffer_with_offset(
+                device,
+                &light_data,
+                offset,
+                size_of::<PointLight>() as u64,
+            );
         }
     }
 

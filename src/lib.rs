@@ -1,5 +1,5 @@
-pub use vulkanalia::prelude::v1_2::*;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
+pub use vulkanalia::prelude::v1_2::*;
 use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::vk::KhrSwapchainExtension;
 use vulkanalia::vk::{AttachmentDescription, ExtDebugUtilsExtension};
@@ -13,6 +13,7 @@ use winit::window::Window;
 use std::collections::{HashMap, HashSet};
 use std::ffi::CStr;
 use std::os::raw::c_void;
+use std::ptr;
 use std::time::{Duration, Instant};
 
 mod buffer;
@@ -21,20 +22,20 @@ mod command;
 mod light;
 mod model;
 mod present;
+mod render_pass;
 mod shader;
 mod texture;
-mod render_pass;
 
 pub use buffer::*;
 pub use camera::*;
-pub use command::*;
+use command::{create_command_buffers, create_command_pools};
 pub use light::*;
 pub use mesh::*;
 pub use model::*;
 pub use present::*;
+pub use render_pass::*;
 pub use shader::*;
 pub use texture::*;
-pub use render_pass::*;
 
 pub use electrum_engine_macros;
 
@@ -111,28 +112,76 @@ impl Renderer {
         data.attachments = attachments.iter().map(|a| a.attachment_desc).collect();
 
         data.subpass_data = vec![
-            SubpassData::new(vk::PipelineBindPoint::GRAPHICS, vec![
-                (0, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
-                (1, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
-            ]),
-            SubpassData::new(vk::PipelineBindPoint::GRAPHICS, vec![
-                (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
-                (3, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
-                (4, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
-            ])
+            SubpassData::new(
+                vk::PipelineBindPoint::GRAPHICS,
+                vec![
+                    (
+                        0,
+                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        AttachmentType::DepthStencil,
+                    ),
+                    (
+                        1,
+                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        AttachmentType::Color,
+                    ),
+                ],
+            ),
+            SubpassData::new(
+                vk::PipelineBindPoint::GRAPHICS,
+                vec![
+                    (
+                        2,
+                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        AttachmentType::Color,
+                    ),
+                    (
+                        3,
+                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        AttachmentType::DepthStencil,
+                    ),
+                    (
+                        4,
+                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        AttachmentType::Resolve,
+                    ),
+                ],
+            ),
         ];
-        
-        data.render_pass = generate_render_pass(&device, &data.subpass_data, &data.attachments, &data.dependencies).unwrap();
+
+        data.render_pass = generate_render_pass(
+            &device,
+            &data.subpass_data,
+            &data.attachments,
+            &data.dependencies,
+        )
+        .unwrap();
 
         data.swapchain_images_desc = vec![
-            (attachments[0].attachment_desc, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
-            (attachments[1].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
-            (attachments[2].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
-            (attachments[3].attachment_desc, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
+            (
+                attachments[0].attachment_desc,
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                vk::ImageAspectFlags::DEPTH,
+            ),
+            (
+                attachments[1].attachment_desc,
+                vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                vk::ImageAspectFlags::COLOR,
+            ),
+            (
+                attachments[2].attachment_desc,
+                vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                vk::ImageAspectFlags::COLOR,
+            ),
+            (
+                attachments[3].attachment_desc,
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                vk::ImageAspectFlags::DEPTH,
+            ),
         ];
 
-        data.images = generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
-
+        data.images =
+            generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
 
         data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
@@ -191,7 +240,9 @@ impl Renderer {
         self.data.images_in_flight[image_index] = in_flight_fence;
 
         let mut render_data = self.data.subpass_render_data.clone();
-        render_data.iter_mut().for_each(|s| s.update(&self.device, &mut self.data, &self.stats, image_index));
+        render_data
+            .iter_mut()
+            .for_each(|s| s.update(&self.device, &mut self.data, &self.stats, image_index));
         self.data.subpass_render_data = render_data;
 
         self.update_command_buffer(image_index)?;
@@ -276,7 +327,12 @@ impl Renderer {
             },
         };
 
-        let clear_values = &[depth_clear_value, color_clear_value, color_clear_value, depth_clear_value];
+        let clear_values = &[
+            depth_clear_value,
+            color_clear_value,
+            color_clear_value,
+            depth_clear_value,
+        ];
         let info = vk::RenderPassBeginInfo::builder()
             .render_pass(self.data.render_pass)
             .framebuffer(self.data.framebuffers[image_index])
@@ -297,16 +353,22 @@ impl Renderer {
         );
 
         let mut render_data = self.data.subpass_render_data.clone();
-        render_data.iter_mut().for_each(|s| s.record_command_buffers(&self.instance, &self.device, &self.data, image_index).unwrap());
+        render_data.iter_mut().for_each(|s| {
+            s.record_command_buffers(&self.instance, &self.device, &self.data, image_index)
+                .unwrap()
+        });
         self.data.subpass_render_data = render_data;
 
         for (i, render_data) in self.data.subpass_render_data.iter().enumerate() {
             if i > 0 {
-                self.device.cmd_next_subpass(command_buffer, vk::SubpassContents::SECONDARY_COMMAND_BUFFERS);
+                self.device.cmd_next_subpass(
+                    command_buffer,
+                    vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
+                );
             }
 
             let secondary_command_buffers = vec![render_data.command_buffers[image_index]];
-    
+
             self.device
                 .cmd_execute_commands(command_buffer, &secondary_command_buffers);
         }
@@ -337,10 +399,15 @@ impl Renderer {
             &self.data.subpass_data,
             &self.data.attachments,
             &self.data.dependencies,
-        ).unwrap();
+        )
+        .unwrap();
 
-        self.data.images =
-            generate_render_pass_images(&self.instance, &self.device, &self.data, &self.data.swapchain_images_desc);
+        self.data.images = generate_render_pass_images(
+            &self.instance,
+            &self.device,
+            &self.data,
+            &self.data.swapchain_images_desc,
+        );
 
         self.data.framebuffers = create_framebuffers(&self.data, &self.device)?;
 
@@ -355,8 +422,14 @@ impl Renderer {
         let aspect =
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
 
-        self.data.cameras.iter_mut().for_each(|(_, c)| c.set_aspect(aspect));
-        self.data.cameras.iter_mut().for_each(|(_, c)| c.calculate_proj(&self.device));
+        self.data
+            .cameras
+            .iter_mut()
+            .for_each(|(_, c)| c.set_aspect(aspect));
+        self.data
+            .cameras
+            .iter_mut()
+            .for_each(|(_, c)| c.calculate_proj(&self.device));
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -407,7 +480,9 @@ impl Renderer {
             .destroy_command_pool(self.data.command_pool, None);
 
         let mut objects = self.data.objects.clone();
-        objects.iter_mut().for_each(|(_, o)| o.destroy(&self.device));
+        objects
+            .iter_mut()
+            .for_each(|(_, o)| o.destroy(&self.device));
         self.data.objects = objects;
 
         self.data
@@ -480,7 +555,11 @@ pub struct RendererData {
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_images_desc: Vec<(AttachmentDescription, vk::ImageUsageFlags, vk::ImageAspectFlags)>,
+    pub swapchain_images_desc: Vec<(
+        AttachmentDescription,
+        vk::ImageUsageFlags,
+        vk::ImageAspectFlags,
+    )>,
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
 
@@ -1001,5 +1080,25 @@ fn insert_command_label(
             .build();
 
         unsafe { instance.cmd_insert_debug_utils_label_ext(command_buffer, &info) };
+    }
+}
+
+pub fn get_c_ptr_slice<T>(slice: &[T]) -> *const T {
+    if slice.is_empty() {
+        ptr::null()
+    } else {
+        slice.as_ptr()
+    }
+}
+
+pub fn get_c_ptr<T>(t: &T) -> *const T
+where
+    T: Default,
+    T: Eq,
+{
+    if t == &T::default() {
+        ptr::null()
+    } else {
+        t
     }
 }

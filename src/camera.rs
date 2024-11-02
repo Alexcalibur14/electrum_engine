@@ -1,4 +1,7 @@
-use std::{hash::{DefaultHasher, Hash, Hasher}, mem::size_of};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    mem::size_of,
+};
 
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
@@ -31,7 +34,6 @@ pub trait Camera {
     /// Used to destroy all buffers associated with the camera
     fn destroy(&self, device: &Device);
 
-    /// 
     fn hash(&self) -> u64;
 
     /// Used to implement Clone on the trait
@@ -84,8 +86,7 @@ impl SimpleCamera {
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .build()
-        ];
+            .build()];
 
         let descriptor = Descriptors::new(device, data, bindings);
 
@@ -266,7 +267,7 @@ impl Camera for SimpleCamera {
     fn get_set_layout(&self) -> vk::DescriptorSetLayout {
         self.descriptor.descriptor_set_layout
     }
-    
+
     fn hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.view.to_string().as_bytes().hash(&mut hasher);

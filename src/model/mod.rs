@@ -10,7 +10,7 @@ pub mod mesh;
 pub mod vertices;
 
 pub trait Renderable {
-    unsafe fn draw(
+    fn draw(
         &self,
         instance: &Instance,
         device: &Device,
@@ -65,8 +65,7 @@ impl Descriptors {
         let descriptor_set_layout =
             unsafe { device.create_descriptor_set_layout(&info, None) }.unwrap();
 
-        let descriptor_pool =
-            unsafe { Descriptors::create_descriptor_pool(device, data, &bindings) }.unwrap();
+        let descriptor_pool = Descriptors::create_descriptor_pool(device, data, &bindings).unwrap();
 
         Descriptors {
             descriptor_set_layout,
@@ -76,7 +75,7 @@ impl Descriptors {
         }
     }
 
-    pub unsafe fn create_descriptor_pool(
+    pub fn create_descriptor_pool(
         device: &Device,
         data: &RendererData,
         bindings: &Vec<vk::DescriptorSetLayoutBinding>,
@@ -98,7 +97,7 @@ impl Descriptors {
             .pool_sizes(sizes.as_slice())
             .max_sets(data.swapchain_images.len() as u32);
 
-        let descriptor_pool = device.create_descriptor_pool(&info, None)?;
+        let descriptor_pool = unsafe { device.create_descriptor_pool(&info, None)? };
 
         Ok(descriptor_pool)
     }
@@ -108,8 +107,7 @@ impl Descriptors {
     }
 
     pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
-        self.descriptor_pool =
-            unsafe { Self::create_descriptor_pool(device, data, &self.bindings) }.unwrap();
+        self.descriptor_pool = Self::create_descriptor_pool(device, data, &self.bindings).unwrap();
     }
 
     pub fn destroy(&self, device: &Device) {

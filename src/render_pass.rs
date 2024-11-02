@@ -1,9 +1,9 @@
 use std::ptr;
 
-use vulkanalia::prelude::v1_2::*;
 use anyhow::{Ok, Result};
+use vulkanalia::prelude::v1_2::*;
 
-use crate::{RenderStats, Renderable, RendererData};
+use crate::{get_c_ptr, get_c_ptr_slice, RenderStats, Renderable, RendererData};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
@@ -99,7 +99,10 @@ pub struct SubpassData {
 }
 
 impl SubpassData {
-    pub fn new(bind_point: vk::PipelineBindPoint, attachments: Vec<(u32, vk::ImageLayout, AttachmentType)>) -> Self {
+    pub fn new(
+        bind_point: vk::PipelineBindPoint,
+        attachments: Vec<(u32, vk::ImageLayout, AttachmentType)>,
+    ) -> Self {
         let mut input_attachments = vec![];
         let mut color_attachments = vec![];
         let mut resolve_attachments = vec![];
@@ -156,11 +159,9 @@ pub fn generate_render_pass(
     let mut subpasses = vec![];
 
     for subpass_data in subpass_datas {
-        subpasses.push(
-            subpass_data.description()
-        );
+        subpasses.push(subpass_data.description());
     }
-    
+
     let info = vk::RenderPassCreateInfo {
         s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
         next: ptr::null(),
@@ -175,18 +176,6 @@ pub fn generate_render_pass(
 
     Ok(unsafe { device.create_render_pass(&info, None) }?)
 }
-
-
-pub fn get_c_ptr_slice<T>(slice: &[T]) -> *const T {
-    if slice.len() == 0 { ptr::null() } else { slice.as_ptr() }
-}
-
-pub fn get_c_ptr<T>(t: &T) -> *const T 
-where T: Default,
-    T: Eq {
-    if t == &T::default() { ptr::null() } else { t }
-}
-
 
 #[derive(Debug, Clone)]
 pub struct SubPassRenderData {
@@ -216,11 +205,18 @@ impl SubPassRenderData {
                 .level(vk::CommandBufferLevel::SECONDARY)
                 .command_buffer_count(1);
 
-            self.command_buffers.push(unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0])
+            self.command_buffers
+                .push(unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0])
         }
     }
 
-    pub fn record_command_buffers(&mut self, instance: &Instance, device: &Device, data: &RendererData, image_index: usize) -> Result<()> {
+    pub fn record_command_buffers(
+        &mut self,
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        image_index: usize,
+    ) -> Result<()> {
         let command_buffer = self.command_buffers[image_index];
 
         let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
@@ -228,7 +224,6 @@ impl SubPassRenderData {
             .subpass(self.subpass_id as u32)
             .framebuffer(data.framebuffers[image_index])
             .build();
-
 
         let begin_info = vk::CommandBufferBeginInfo::builder()
             .inheritance_info(&inheritance_info)
@@ -239,27 +234,55 @@ impl SubPassRenderData {
 
         let light_group = data.light_groups.get(&self.light_group).unwrap();
         let camera = data.cameras.get(&self.camera).unwrap();
-        let other_descriptors = vec![(1, camera.get_descriptor_sets()[image_index]), (2, light_group.get_descriptor_sets()[image_index])];
+        let other_descriptors = vec![
+            (1, camera.get_descriptor_sets()[image_index]),
+            (2, light_group.get_descriptor_sets()[image_index]),
+        ];
 
-        self.objects.iter().map(|k| data.objects.get(k).unwrap()).for_each(|o| unsafe { o.draw(instance, device, command_buffer, image_index, other_descriptors.clone(), self.subpass_id) });
+        self.objects
+            .iter()
+            .map(|k| data.objects.get(k).unwrap())
+            .for_each(|o| {
+                o.draw(
+                    instance,
+                    device,
+                    command_buffer,
+                    image_index,
+                    other_descriptors.clone(),
+                    self.subpass_id,
+                )
+            });
 
         unsafe { device.end_command_buffer(command_buffer) }?;
 
         Ok(())
     }
 
-    pub fn update(&self, device: &Device, data: &mut RendererData, stats: &RenderStats, image_index: usize) {
+    pub fn update(
+        &self,
+        device: &Device,
+        data: &mut RendererData,
+        stats: &RenderStats,
+        image_index: usize,
+    ) {
         let camera = data.cameras.get_mut(&self.camera).unwrap();
-        camera.calculate_view(&device, image_index);
+        camera.calculate_view(device, image_index);
 
         let vp = camera.proj() * camera.view();
 
-        let mut objects = self.objects.iter().map(|k| data.objects.get_key_value(k).unwrap()).map(|(k, v)| (*k, v.clone())).collect::<Vec<(u64, Box<dyn Renderable>)>>();
+        let mut objects = self
+            .objects
+            .iter()
+            .map(|k| data.objects.get_key_value(k).unwrap())
+            .map(|(k, v)| (*k, v.clone()))
+            .collect::<Vec<(u64, Box<dyn Renderable>)>>();
 
-        objects.iter_mut().for_each(|(_, o)| {
-            o.update(&device, &data, &stats, image_index, vp)
+        objects
+            .iter_mut()
+            .for_each(|(_, o)| o.update(device, data, stats, image_index, vp));
+
+        objects.into_iter().for_each(|(k, v)| {
+            data.objects.insert(k, v).unwrap();
         });
-
-        objects.into_iter().for_each(|(k, v)| {data.objects.insert(k, v).unwrap();});
     }
 }

@@ -1,14 +1,16 @@
 #![allow(dead_code)]
-use std::{
-    collections::HashMap, fs::File, hash::Hash, io::BufReader, mem::size_of
-};
+use std::{collections::HashMap, fs::File, hash::Hash, io::BufReader, mem::size_of};
 
 use anyhow::Result;
 use glam::{vec2, vec3, Mat4, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, create_and_stage_buffer, insert_command_label, vertices::PCTVertex, Image, Material, PipelineMeshSettings, RenderStats, Renderable, RendererData, ShadowMaterial, Vertex
+    buffer::{create_buffer, BufferWrapper},
+    create_and_stage_buffer, insert_command_label,
+    vertices::PCTVertex,
+    Image, Material, PipelineMeshSettings, RenderStats, Renderable, RendererData, ShadowMaterial,
+    Vertex,
 };
 
 use super::{ModelData, ModelMVP};
@@ -243,8 +245,9 @@ impl Plane {
             (size_of::<PCTVertex>() * vertices.len()) as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             Some(format!("{} Vertex Buffer", self.name)),
-            &vertices
-        ).unwrap();
+            &vertices,
+        )
+        .unwrap();
 
         self.index_buffer = create_and_stage_buffer(
             instance,
@@ -253,16 +256,17 @@ impl Plane {
             (size_of::<u32>() * indices.len()) as u64,
             vk::BufferUsageFlags::INDEX_BUFFER,
             Some(format!("{} Index Buffer", self.name)),
-            &indices
-        ).unwrap();
-        
+            &indices,
+        )
+        .unwrap();
+
         self.vertices = vertices;
         self.indices = indices;
     }
 }
 
 impl Renderable for Plane {
-    unsafe fn draw(
+    fn draw(
         &self,
         instance: &Instance,
         device: &Device,
@@ -271,43 +275,45 @@ impl Renderable for Plane {
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         _subpass_id: usize,
     ) {
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline,
-        );
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            0,
-            &[self.descriptor_sets[image_index]],
-            &[],
-        );
-        for (set, descriptor) in other_descriptors {    
-            device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            set,
-            &[descriptor],
-            &[],
+        unsafe {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline,
             );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline_layout,
+                0,
+                &[self.descriptor_sets[image_index]],
+                &[],
+            );
+            for (set, descriptor) in other_descriptors {
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.material.pipeline_layout,
+                    set,
+                    &[descriptor],
+                    &[],
+                );
+            }
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                self.index_buffer.buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
+            insert_command_label(
+                instance,
+                command_buffer,
+                format!("Draw {}", self.name),
+                [0.0, 0.5, 0.1, 1.0],
+            );
+            device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
         }
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            self.index_buffer.buffer,
-            0,
-            vk::IndexType::UINT32,
-        );
-        insert_command_label(
-            instance,
-            command_buffer,
-            format!("Draw {}", self.name),
-            [0.0, 0.5, 0.1, 1.0],
-        );
-        device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
     }
 
     fn update(
@@ -566,7 +572,12 @@ impl Quad {
     pub fn generate(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let mut vertices = vec![];
 
-        let uvs = vec![vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0)];
+        let uvs = [
+            vec2(0.0, 0.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 1.0),
+        ];
 
         for (i, point) in self.points.iter().enumerate() {
             vertices.push(PCTVertex {
@@ -578,17 +589,35 @@ impl Quad {
 
         let vertex_size = (size_of::<PCTVertex>() * vertices.len()) as u64;
 
-        self.vertex_buffer = create_and_stage_buffer(instance, device, data, vertex_size, vk::BufferUsageFlags::VERTEX_BUFFER, Some(format!("{} Vertex Buffer", self.name)), &vertices).unwrap();
+        self.vertex_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            vertex_size,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            Some(format!("{} Vertex Buffer", self.name)),
+            &vertices,
+        )
+        .unwrap();
 
         let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
         let index_size = (size_of::<u32>() * indices.len()) as u64;
 
-        self.index_buffer = create_and_stage_buffer(instance, device, data, index_size, vk::BufferUsageFlags::INDEX_BUFFER, Some(format!("{} Index Buffer", self.name)), &indices).unwrap();
+        self.index_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            index_size,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            Some(format!("{} Index Buffer", self.name)),
+            &indices,
+        )
+        .unwrap();
     }
 }
 
 impl Renderable for Quad {
-    unsafe fn draw(
+    fn draw(
         &self,
         instance: &Instance,
         device: &Device,
@@ -597,43 +626,45 @@ impl Renderable for Quad {
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         _subpass_id: usize,
     ) {
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline,
-        );
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            0,
-            &[self.descriptor_sets[image_index]],
-            &[],
-        );
-        for (set, descriptor) in other_descriptors {    
-            device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            set,
-            &[descriptor],
-            &[],
+        unsafe {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline,
             );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline_layout,
+                0,
+                &[self.descriptor_sets[image_index]],
+                &[],
+            );
+            for (set, descriptor) in other_descriptors {
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.material.pipeline_layout,
+                    set,
+                    &[descriptor],
+                    &[],
+                );
+            }
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                self.index_buffer.buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
+            insert_command_label(
+                instance,
+                command_buffer,
+                format!("Draw {}", self.name),
+                [0.0, 0.5, 0.1, 1.0],
+            );
+            device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
         }
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            self.index_buffer.buffer,
-            0,
-            vk::IndexType::UINT32,
-        );
-        insert_command_label(
-            instance,
-            command_buffer,
-            format!("Draw {}", self.name),
-            [0.0, 0.5, 0.1, 1.0],
-        );
-        device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
     }
 
     fn update(
@@ -894,7 +925,7 @@ impl ObjectPrototype {
         }
     }
 
-    pub unsafe fn generate_vertex_buffer(
+    pub fn generate_vertex_buffer(
         &mut self,
         instance: &Instance,
         device: &Device,
@@ -902,10 +933,19 @@ impl ObjectPrototype {
     ) {
         let size = (size_of::<PCTVertex>() * self.vertices.len()) as u64;
 
-        self.vertex_buffer = create_and_stage_buffer(instance, device, data, size, vk::BufferUsageFlags::VERTEX_BUFFER, Some(format!("{} Vertex Buffer", self.name)), &self.vertices).unwrap();
+        self.vertex_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            Some(format!("{} Vertex Buffer", self.name)),
+            &self.vertices,
+        )
+        .unwrap();
     }
 
-    pub unsafe fn generate_index_buffer(
+    pub fn generate_index_buffer(
         &mut self,
         instance: &Instance,
         device: &Device,
@@ -913,12 +953,21 @@ impl ObjectPrototype {
     ) {
         let size = (size_of::<u32>() * self.indices.len()) as u64;
 
-        self.index_buffer = create_and_stage_buffer(instance, device, data, size, vk::BufferUsageFlags::INDEX_BUFFER, Some(format!("{} Index Buffer", self.name)), &self.indices).unwrap();
+        self.index_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            Some(format!("{} Index Buffer", self.name)),
+            &self.indices,
+        )
+        .unwrap();
     }
 }
 
 impl Renderable for ObjectPrototype {
-    unsafe fn draw(
+    fn draw(
         &self,
         instance: &Instance,
         device: &Device,
@@ -927,43 +976,45 @@ impl Renderable for ObjectPrototype {
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         _subpass_id: usize,
     ) {
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline,
-        );
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            0,
-            &[self.descriptor_sets[image_index]],
-            &[],
-        );
-        for (set, descriptor) in other_descriptors {    
-            device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            set,
-            &[descriptor],
-            &[],
+        unsafe {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline,
             );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline_layout,
+                0,
+                &[self.descriptor_sets[image_index]],
+                &[],
+            );
+            for (set, descriptor) in other_descriptors {
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.material.pipeline_layout,
+                    set,
+                    &[descriptor],
+                    &[],
+                );
+            }
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                self.index_buffer.buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
+            insert_command_label(
+                instance,
+                command_buffer,
+                format!("Draw {}", self.name),
+                [0.0, 0.5, 0.1, 1.0],
+            );
+            device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
         }
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            self.index_buffer.buffer,
-            0,
-            vk::IndexType::UINT32,
-        );
-        insert_command_label(
-            instance,
-            command_buffer,
-            format!("Draw {}", self.name),
-            [0.0, 0.5, 0.1, 1.0],
-        );
-        device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -1119,7 +1170,6 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
 
     Ok((vertices, indices))
 }
-
 
 #[derive(Clone)]
 pub struct ShadowQuad {
@@ -1288,7 +1338,12 @@ impl ShadowQuad {
     pub fn generate(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let mut vertices = vec![];
 
-        let uvs = vec![vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0)];
+        let uvs = [
+            vec2(0.0, 0.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 1.0),
+        ];
 
         for (i, point) in self.points.iter().enumerate() {
             vertices.push(PCTVertex {
@@ -1300,17 +1355,35 @@ impl ShadowQuad {
 
         let vertex_size = (size_of::<PCTVertex>() * vertices.len()) as u64;
 
-        self.vertex_buffer = create_and_stage_buffer(instance, device, data, vertex_size, vk::BufferUsageFlags::VERTEX_BUFFER, Some(format!("{} Vertex Buffer", self.name)), &vertices).unwrap();
+        self.vertex_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            vertex_size,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            Some(format!("{} Vertex Buffer", self.name)),
+            &vertices,
+        )
+        .unwrap();
 
         let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
         let index_size = (size_of::<u32>() * indices.len()) as u64;
 
-        self.index_buffer = create_and_stage_buffer(instance, device, data, index_size, vk::BufferUsageFlags::INDEX_BUFFER, Some(format!("{} Index Buffer", self.name)), &indices).unwrap();
+        self.index_buffer = create_and_stage_buffer(
+            instance,
+            device,
+            data,
+            index_size,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            Some(format!("{} Index Buffer", self.name)),
+            &indices,
+        )
+        .unwrap();
     }
 }
 
 impl Renderable for ShadowQuad {
-    unsafe fn draw(
+    fn draw(
         &self,
         instance: &Instance,
         device: &Device,
@@ -1319,43 +1392,45 @@ impl Renderable for ShadowQuad {
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         _subpass_id: usize,
     ) {
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline,
-        );
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            0,
-            &[self.descriptor_sets[image_index]],
-            &[],
-        );
-        for (set, descriptor) in other_descriptors {    
-            device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.material.pipeline_layout,
-            set,
-            &[descriptor],
-            &[],
+        unsafe {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline,
             );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.material.pipeline_layout,
+                0,
+                &[self.descriptor_sets[image_index]],
+                &[],
+            );
+            for (set, descriptor) in other_descriptors {
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.material.pipeline_layout,
+                    set,
+                    &[descriptor],
+                    &[],
+                );
+            }
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                self.index_buffer.buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
+            insert_command_label(
+                instance,
+                command_buffer,
+                format!("Draw {}", self.name),
+                [0.0, 0.5, 0.1, 1.0],
+            );
+            device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
         }
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            self.index_buffer.buffer,
-            0,
-            vk::IndexType::UINT32,
-        );
-        insert_command_label(
-            instance,
-            command_buffer,
-            format!("Draw {}", self.name),
-            [0.0, 0.5, 0.1, 1.0],
-        );
-        device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
     }
 
     fn update(
@@ -1454,4 +1529,3 @@ impl Hash for ShadowQuad {
         self.image.hash(state);
     }
 }
-

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::{QueueFamilyIndices, RendererData};
 
-pub unsafe fn create_command_pools(
+pub(crate) unsafe fn create_command_pools(
     instance: &Instance,
     device: &Device,
     data: &mut RendererData,
@@ -34,7 +34,10 @@ unsafe fn create_command_pool(
     Ok(device.create_command_pool(&info, None)?)
 }
 
-pub unsafe fn create_command_buffers(device: &Device, data: &mut RendererData) -> Result<()> {
+pub(crate) unsafe fn create_command_buffers(
+    device: &Device,
+    data: &mut RendererData,
+) -> Result<()> {
     let num_images = data.swapchain_images.len();
     for image_index in 0..num_images {
         let allocate_info = vk::CommandBufferAllocateInfo::builder()

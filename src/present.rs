@@ -43,7 +43,7 @@ pub fn generate_render_pass_images(
     images
 }
 
-pub unsafe fn create_framebuffers(
+pub(crate) unsafe fn create_framebuffers(
     data: &RendererData,
     device: &Device,
 ) -> Result<Vec<vk::Framebuffer>> {
@@ -70,7 +70,7 @@ pub unsafe fn create_framebuffers(
     Ok(framebuffers)
 }
 
-pub unsafe fn create_swapchain(
+pub(crate) unsafe fn create_swapchain(
     window: &Window,
     instance: &Instance,
     device: &Device,
@@ -171,7 +171,10 @@ fn get_swapchain_extent(window: &Window, capabilities: vk::SurfaceCapabilitiesKH
     }
 }
 
-pub unsafe fn create_swapchain_image_views(device: &Device, data: &mut RendererData) -> Result<()> {
+pub(crate) unsafe fn create_swapchain_image_views(
+    device: &Device,
+    data: &mut RendererData,
+) -> Result<()> {
     data.swapchain_image_views = data
         .swapchain_images
         .iter()
