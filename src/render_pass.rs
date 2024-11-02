@@ -1,7 +1,9 @@
+use std::ptr;
+
 use vulkanalia::prelude::v1_2::*;
 use anyhow::{Ok, Result};
 
-use crate::RendererData;
+use crate::{RenderStats, Renderable, RendererData};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
@@ -88,27 +90,23 @@ pub enum AttachmentType {
 
 #[derive(Debug, Clone)]
 pub struct SubpassData {
-    pub bind_point: vk::PipelineBindPoint,
-    pub attachments: Vec<(u32, vk::ImageLayout, AttachmentType)>,
+    bind_point: vk::PipelineBindPoint,
+    input_attachments: Vec<vk::AttachmentReference>,
+    color_attachments: Vec<vk::AttachmentReference>,
+    resolve_attachments: Vec<vk::AttachmentReference>,
+    depth_stencil_attachment: vk::AttachmentReference,
+    preserve_attachments: Vec<u32>,
 }
 
-pub fn generate_render_pass(
-    device: &Device,
-    subpass_datas: &[SubpassData],
-    attachments: &[vk::AttachmentDescription],
-    dependencies: Vec<vk::SubpassDependency>,
-) -> Result<vk::RenderPass> {
-    let mut subpasses = vec![];
-
-    for subpass_data in subpass_datas {
-
+impl SubpassData {
+    pub fn new(bind_point: vk::PipelineBindPoint, attachments: Vec<(u32, vk::ImageLayout, AttachmentType)>) -> Self {
         let mut input_attachments = vec![];
         let mut color_attachments = vec![];
         let mut resolve_attachments = vec![];
         let mut depth_stencil_attachment = vk::AttachmentReference::default();
         let mut preserve_attachments = vec![];
 
-        for attachment in &subpass_data.attachments {
+        for attachment in attachments {
             let attachment_ref = vk::AttachmentReference::builder()
                 .attachment(attachment.0)
                 .layout(attachment.1)
@@ -123,24 +121,70 @@ pub fn generate_render_pass(
             }
         }
 
-        let subpass = vk::SubpassDescription::builder()
-            .pipeline_bind_point(subpass_data.bind_point)
-            .input_attachments(&input_attachments)
-            .color_attachments(&color_attachments)
-            .resolve_attachments(&resolve_attachments)
-            .depth_stencil_attachment(&depth_stencil_attachment)
-            .preserve_attachments(&preserve_attachments)
-            .build();
-
-        subpasses.push(subpass);
+        SubpassData {
+            bind_point,
+            input_attachments,
+            color_attachments,
+            resolve_attachments,
+            depth_stencil_attachment,
+            preserve_attachments,
+        }
     }
 
-    let info = vk::RenderPassCreateInfo::builder()
-        .attachments(attachments)
-        .subpasses(&subpasses)
-        .dependencies(&dependencies);
+    pub fn description(&self) -> vk::SubpassDescription {
+        vk::SubpassDescription {
+            flags: vk::SubpassDescriptionFlags::empty(),
+            pipeline_bind_point: self.bind_point,
+            input_attachment_count: self.input_attachments.len() as u32,
+            input_attachments: get_c_ptr_slice(&self.input_attachments),
+            color_attachment_count: self.color_attachments.len() as u32,
+            color_attachments: get_c_ptr_slice(&self.color_attachments),
+            resolve_attachments: get_c_ptr_slice(&self.resolve_attachments),
+            depth_stencil_attachment: get_c_ptr(&self.depth_stencil_attachment),
+            preserve_attachment_count: self.preserve_attachments.len() as u32,
+            preserve_attachments: get_c_ptr_slice(&self.preserve_attachments),
+        }
+    }
+}
+
+pub fn generate_render_pass(
+    device: &Device,
+    subpass_datas: &[SubpassData],
+    attachments: &[vk::AttachmentDescription],
+    dependencies: &[vk::SubpassDependency],
+) -> Result<vk::RenderPass> {
+    let mut subpasses = vec![];
+
+    for subpass_data in subpass_datas {
+        subpasses.push(
+            subpass_data.description()
+        );
+    }
+    
+    let info = vk::RenderPassCreateInfo {
+        s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
+        next: ptr::null(),
+        flags: vk::RenderPassCreateFlags::empty(),
+        attachment_count: attachments.len() as u32,
+        attachments: get_c_ptr_slice(attachments),
+        subpass_count: subpasses.len() as u32,
+        subpasses: get_c_ptr_slice(&subpasses),
+        dependency_count: dependencies.len() as u32,
+        dependencies: get_c_ptr_slice(dependencies),
+    };
 
     Ok(unsafe { device.create_render_pass(&info, None) }?)
+}
+
+
+pub fn get_c_ptr_slice<T>(slice: &[T]) -> *const T {
+    if slice.len() == 0 { ptr::null() } else { slice.as_ptr() }
+}
+
+pub fn get_c_ptr<T>(t: &T) -> *const T 
+where T: Default,
+    T: Eq {
+    if t == &T::default() { ptr::null() } else { t }
 }
 
 
@@ -149,16 +193,18 @@ pub struct SubPassRenderData {
     pub subpass_id: usize,
     pub objects: Vec<u64>,
     pub light_group: u64,
+    pub camera: u64,
 
     pub command_buffers: Vec<vk::CommandBuffer>,
 }
 
 impl SubPassRenderData {
-    pub fn new(id: usize, objects: Vec<u64>, light_group: u64) -> Self {
+    pub fn new(id: usize, objects: Vec<u64>, camera: u64, light_group: u64) -> Self {
         SubPassRenderData {
             subpass_id: id,
             objects,
             light_group,
+            camera,
             command_buffers: vec![],
         }
     }
@@ -192,12 +238,28 @@ impl SubPassRenderData {
         unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
 
         let light_group = data.light_groups.get(&self.light_group).unwrap();
-        let other_descriptors = vec![(1, data.camera.get_descriptor_sets()[image_index]), (2, light_group.get_descriptor_sets()[image_index])];
+        let camera = data.cameras.get(&self.camera).unwrap();
+        let other_descriptors = vec![(1, camera.get_descriptor_sets()[image_index]), (2, light_group.get_descriptor_sets()[image_index])];
 
-        self.objects.iter().map(|k| data.objects.get(k).unwrap()).for_each(|o| unsafe { o.draw(instance, device, command_buffer, image_index, other_descriptors.clone()) });
+        self.objects.iter().map(|k| data.objects.get(k).unwrap()).for_each(|o| unsafe { o.draw(instance, device, command_buffer, image_index, other_descriptors.clone(), self.subpass_id) });
 
         unsafe { device.end_command_buffer(command_buffer) }?;
 
         Ok(())
+    }
+
+    pub fn update(&self, device: &Device, data: &mut RendererData, stats: &RenderStats, image_index: usize) {
+        let camera = data.cameras.get_mut(&self.camera).unwrap();
+        camera.calculate_view(&device, image_index);
+
+        let vp = camera.proj() * camera.view();
+
+        let mut objects = self.objects.iter().map(|k| data.objects.get_key_value(k).unwrap()).map(|(k, v)| (*k, v.clone())).collect::<Vec<(u64, Box<dyn Renderable>)>>();
+
+        objects.iter_mut().for_each(|(_, o)| {
+            o.update(&device, &data, &stats, image_index, vp)
+        });
+
+        objects.into_iter().for_each(|(k, v)| {data.objects.insert(k, v).unwrap();});
     }
 }

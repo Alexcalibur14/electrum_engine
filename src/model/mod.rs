@@ -17,6 +17,7 @@ pub trait Renderable {
         command_buffer: vk::CommandBuffer,
         image_index: usize,
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
+        subpass_id: usize,
     );
     fn update(
         &mut self,
@@ -25,7 +26,6 @@ pub trait Renderable {
         stats: &RenderStats,
         index: usize,
         view_proj: Mat4,
-        id: usize,
     );
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &RendererData);

@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use glam::{vec3, Mat4, Quat, Vec3};
 
-use electrum_engine::{create_texture_sampler, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, VFShader};
+use electrum_engine::{create_texture_sampler, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PointLight, Projection, Quad, Renderer, RendererData, Shader, ShadowQuad, SimpleCamera, SubPassRenderData, VFShader};
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -106,11 +106,13 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         projection,
     );
     camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
+    
+    let camera_hash = get_hash(&camera);
 
-    data.camera = Box::new(camera.clone());
+    data.cameras.insert(camera_hash, Box::new(camera.clone()));
 
-    let view = data.camera.view();
-    let proj = data.camera.proj();
+    let view = camera.view();
+    let proj = camera.proj();
 
     let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
     let red_light_hash = get_hash(&red_light);
@@ -185,7 +187,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             &instance,
             &device,
             &image_2077.mip_level,
-            "white sampler".to_string(),
+            "2077 sampler".to_string(),
         )
     }
     .unwrap();
@@ -242,8 +244,38 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let plane_hash = get_hash(&plane);
     data.objects.insert(plane_hash, Box::new(plane));
 
-    let render_data = SubPassRenderData::new(0, vec![plane_hash, monkey_hash], light_group_hash);
-    data.subpass_render_data = vec![render_data];
+
+    let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
+
+
+    let mut shadow_plane = ShadowQuad::new(
+        &instance,
+        &device,
+        &data,
+        [
+            vec3(-1.5, 0.0, -1.5),
+            vec3(1.5, 0.0, -1.5),
+            vec3(-1.5, 0.0, 1.5),
+            vec3(1.5, 0.0, 1.5),
+        ],
+        vec3(0.0, 1.0, 0.0),
+        lit_shader_hash,
+        (image_2077_hash, sampler_2077_hash),
+        shadow_position,
+        view,
+        proj,
+        vec![camera.get_set_layout(), light_group.get_set_layout()],
+        "Shadow Quad".to_string(),
+    );
+    shadow_plane.generate(&instance, &device, &data);
+
+    let shadow_plane_hash = get_hash(&shadow_plane);
+    data.objects.insert(shadow_plane_hash, Box::new(shadow_plane));
+
+
+    let render_data_0 = SubPassRenderData::new(0, vec![shadow_plane_hash], camera_hash, light_group_hash);
+    let render_data_1 = SubPassRenderData::new(1, vec![plane_hash, monkey_hash], camera_hash, light_group_hash);
+    data.subpass_render_data = vec![render_data_0, render_data_1];
 
     let mut render_data = data.subpass_render_data.clone();
     render_data.iter_mut().for_each(|s| s.setup_command_buffers(&device, &data));

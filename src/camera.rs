@@ -276,6 +276,13 @@ impl Camera for SimpleCamera {
     }
 }
 
+impl Hash for SimpleCamera {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.projection.hash(state);
+        self.descriptor_sets.hash(state);
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Projection {
     pub fov_y_rad: f32,
@@ -306,5 +313,14 @@ impl Projection {
 
         self.proj = proj;
         self.inv_proj = proj.inverse();
+    }
+}
+
+impl Hash for Projection {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.fov_y_rad as u32).hash(state);
+        (self.aspect_ratio as u32).hash(state);
+        (self.z_near as u32).hash(state);
+        (self.z_far as u32).hash(state);
     }
 }

@@ -81,6 +81,16 @@ impl Renderer {
         // generating subpasses, render passes and attachments
         let mut attachments = vec![
             Attachment {
+                format: unsafe { get_depth_format(&instance, &data) }?,
+                sample_count: data.msaa_samples,
+                ..Attachment::template_depth()
+            },
+            Attachment {
+                format: data.swapchain_format,
+                sample_count: data.msaa_samples,
+                ..Attachment::template_colour()
+            },
+            Attachment {
                 format: data.swapchain_format,
                 sample_count: data.msaa_samples,
                 ..Attachment::template_colour()
@@ -101,18 +111,24 @@ impl Renderer {
         data.attachments = attachments.iter().map(|a| a.attachment_desc).collect();
 
         data.subpass_data = vec![
-            SubpassData { bind_point: vk::PipelineBindPoint::GRAPHICS, attachments: vec![
-                (0, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
-                (1, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
-                (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
-            ] }
+            SubpassData::new(vk::PipelineBindPoint::GRAPHICS, vec![
+                (0, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
+                (1, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
+            ]),
+            SubpassData::new(vk::PipelineBindPoint::GRAPHICS, vec![
+                (2, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Color),
+                (3, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, AttachmentType::DepthStencil),
+                (4, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, AttachmentType::Resolve),
+            ])
         ];
         
-        data.render_pass = generate_render_pass(&device, &data.subpass_data, &data.attachments, vec![]).unwrap();
+        data.render_pass = generate_render_pass(&device, &data.subpass_data, &data.attachments, &data.dependencies).unwrap();
 
         data.swapchain_images_desc = vec![
-            (attachments[0].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
-            (attachments[1].attachment_desc, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
+            (attachments[0].attachment_desc, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
+            (attachments[1].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
+            (attachments[2].attachment_desc, vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageAspectFlags::COLOR),
+            (attachments[3].attachment_desc, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, vk::ImageAspectFlags::DEPTH),
         ];
 
         data.images = generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
@@ -174,7 +190,10 @@ impl Renderer {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
-        self.update(image_index);
+        let mut render_data = self.data.subpass_render_data.clone();
+        render_data.iter_mut().for_each(|s| s.update(&self.device, &mut self.data, &self.stats, image_index));
+        self.data.subpass_render_data = render_data;
+
         self.update_command_buffer(image_index)?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -257,7 +276,7 @@ impl Renderer {
             },
         };
 
-        let clear_values = &[color_clear_value, depth_clear_value];
+        let clear_values = &[depth_clear_value, color_clear_value, color_clear_value, depth_clear_value];
         let info = vk::RenderPassBeginInfo::builder()
             .render_pass(self.data.render_pass)
             .framebuffer(self.data.framebuffers[image_index])
@@ -301,20 +320,6 @@ impl Renderer {
         Ok(())
     }
 
-    fn update(&mut self, image_index: usize) {
-        self.data.camera.calculate_view(&self.device, image_index);
-
-        let vp = self.data.camera.proj() * self.data.camera.view();
-
-        let mut objects = self.data.objects.clone();
-
-        objects.iter_mut().enumerate().for_each(|(id, (_, o))| {
-            o.update(&self.device, &self.data, &self.stats, image_index, vp, id)
-        });
-
-        self.data.objects = objects;
-    }
-
     unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
         self.data.recreated = true;
 
@@ -331,7 +336,7 @@ impl Renderer {
             &self.device,
             &self.data.subpass_data,
             &self.data.attachments,
-            vec![],
+            &self.data.dependencies,
         ).unwrap();
 
         self.data.images =
@@ -350,8 +355,8 @@ impl Renderer {
         let aspect =
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
 
-        self.data.camera.set_aspect(aspect);
-        self.data.camera.calculate_proj(&self.device);
+        self.data.cameras.iter_mut().for_each(|(_, c)| c.set_aspect(aspect));
+        self.data.cameras.iter_mut().for_each(|(_, c)| c.calculate_proj(&self.device));
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -425,7 +430,10 @@ impl Renderer {
             .iter()
             .for_each(|(_, t)| t.destroy(&self.device));
 
-        self.data.camera.destroy(&self.device);
+        self.data
+            .cameras
+            .iter()
+            .for_each(|(_, c)| c.destroy(&self.device));
 
         self.data
             .in_flight_fences
@@ -480,6 +488,7 @@ pub struct RendererData {
     pub render_pass: vk::RenderPass,
     pub attachments: Vec<AttachmentDescription>,
     pub subpass_data: Vec<SubpassData>,
+    pub dependencies: Vec<vk::SubpassDependency>,
     pub subpass_render_data: Vec<SubPassRenderData>,
 
     // Framebuffers
@@ -500,7 +509,7 @@ pub struct RendererData {
     pub light_groups: HashMap<u64, LightGroup>,
 
     pub objects: HashMap<u64, Box<dyn Renderable>>,
-    pub camera: Box<dyn Camera>,
+    pub cameras: HashMap<u64, Box<dyn Camera>>,
 
     // Semaphores
     pub image_available_semaphores: Vec<vk::Semaphore>,
