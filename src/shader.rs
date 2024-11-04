@@ -1,3 +1,4 @@
+use std::fs;
 use std::hash::{DefaultHasher, Hasher};
 use std::io::Read;
 use std::{fs::File, hash::Hash};
@@ -90,10 +91,33 @@ impl VFShaderBuilder {
         }
     }
 
+    /// Compiles the vertex shader at the location from `path`
     pub fn compile_vertex(&mut self, path: &str) -> &mut Self {
         let vertex =
-            unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Vertex) }
+            compile_shader_module(&self.device, path, "main", ShaderKind::Vertex)
                 .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            self.name.clone() + " Vertex Shader",
+            vk::ObjectType::SHADER_MODULE,
+            vertex.as_raw(),
+        )
+        .unwrap();
+
+        self.vertex = vertex;
+        self
+    }
+
+    pub fn load_vertex(&mut self, path: &str) -> &mut Self {
+        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::builder()
+            .code_size(bytecode.code_size())
+            .code(bytecode.code())
+            .build();
+
+        let vertex = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
         set_object_name(
             &self.instance,
@@ -111,8 +135,30 @@ impl VFShaderBuilder {
     /// Compiles the fragment shader at the location from `path`
     pub fn compile_fragment(&mut self, path: &str) -> &mut Self {
         let fragment =
-            unsafe { compile_shader_module(&self.device, path, "main", ShaderKind::Fragment) }
+            compile_shader_module(&self.device, path, "main", ShaderKind::Fragment)
                 .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            self.name.clone() + " Fragment Shader",
+            vk::ObjectType::SHADER_MODULE,
+            fragment.as_raw(),
+        )
+        .unwrap();
+
+        self.fragment = fragment;
+        self
+    }
+
+    pub fn load_fragment(&mut self, path: &str) -> &mut Self {
+        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::builder()
+            .code_size(bytecode.code_size())
+            .code(bytecode.code())
+            .build();
+
+        let fragment = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
         set_object_name(
             &self.instance,
@@ -136,9 +182,7 @@ impl VFShaderBuilder {
 }
 
 /// Compiles a shader file
-/// # Safety
-/// field `entry_point_name` only seems to work with `main`
-pub unsafe fn compile_shader_module(
+pub fn compile_shader_module(
     device: &Device,
     path: &str,
     entry_point_name: &str,
@@ -166,7 +210,7 @@ pub unsafe fn compile_shader_module(
         .code_size(bytecode.code_size())
         .code(bytecode.code());
 
-    Ok(device.create_shader_module(&info, None)?)
+    Ok(unsafe { device.create_shader_module(&info, None) }?)
 }
 
 #[derive(Clone)]
@@ -220,7 +264,7 @@ impl Material {
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
         let pipeline = unsafe {
-            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout)
+            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout, 1)
         }
         .unwrap();
 
@@ -268,6 +312,7 @@ impl Material {
                 self.shader,
                 self.mesh_settings.clone(),
                 pipeline_layout,
+                1,
             )
         }
         .unwrap();
@@ -286,6 +331,7 @@ unsafe fn create_pipeline(
     shader: u64,
     mesh_settings: PipelineMeshSettings,
     pipeline_layout: vk::PipelineLayout,
+    subpass: u32,
 ) -> Result<vk::Pipeline> {
     // Vertex Input State
 
@@ -376,7 +422,7 @@ unsafe fn create_pipeline(
         .color_blend_state(&color_blend_state)
         .layout(pipeline_layout)
         .render_pass(data.render_pass)
-        .subpass(1);
+        .subpass(subpass);
 
     let pipeline = device
         .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
@@ -422,7 +468,7 @@ pub struct VShader {
 impl VShader {
     pub fn new(instance: &Instance, device: &Device, name: String, path: &str) -> Self {
         let vertex =
-            unsafe { compile_shader_module(device, path, "main", ShaderKind::Vertex) }.unwrap();
+            compile_shader_module(device, path, "main", ShaderKind::Vertex).unwrap();
 
         set_object_name(
             instance,

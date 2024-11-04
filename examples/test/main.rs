@@ -154,8 +154,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
     let lit_shader = VFShader::builder(&instance, &device, "Lit".to_string())
-        .compile_vertex("res\\shaders\\test_lit.vert.glsl")
-        .compile_fragment("res\\shaders\\test_lit.frag.glsl")
+        .load_vertex("res\\shaders\\test_lit.vert.spv")
+        .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
 
     let lit_shader_hash = lit_shader.hash();
