@@ -28,7 +28,6 @@ mod texture;
 
 pub use buffer::*;
 pub use camera::*;
-use command::{create_command_buffers, create_command_pools};
 pub use light::*;
 pub use mesh::*;
 pub use model::*;
@@ -36,6 +35,8 @@ pub use present::*;
 pub use render_pass::*;
 pub use shader::*;
 pub use texture::*;
+
+use command::{create_command_buffers, create_command_pools};
 
 pub use electrum_engine_macros;
 

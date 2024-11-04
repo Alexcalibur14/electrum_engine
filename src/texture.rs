@@ -96,7 +96,7 @@ impl Image {
 
         let (image, image_memory) = unsafe {
             create_texture_image(
-                instance, device, data, size, bytes, width, height, mips, format,
+                instance, device, data, size, &bytes, width, height, mips, format,
             )
         }
         .unwrap();
@@ -176,7 +176,7 @@ pub unsafe fn create_texture_image(
     device: &Device,
     data: &RendererData,
     size: vk::DeviceSize,
-    pixels: Vec<u8>,
+    pixels: &[u8],
     width: u32,
     height: u32,
     mip_levels: u32,
@@ -194,7 +194,7 @@ pub unsafe fn create_texture_image(
 
     // Copy (staging)
 
-    staging_buffer.copy_vec_into_buffer(device, &pixels);
+    staging_buffer.copy_vec_into_buffer(device, pixels);
 
     // Create (image)
 

@@ -225,8 +225,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec![camera.get_set_layout(), light_group.get_set_layout()],
         "monkey".to_string(),
     );
-    unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
-    unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
+    monkey.generate_vertex_buffer(&instance, &device, &data);
+    monkey.generate_index_buffer(&instance, &device, &data);
 
     let monkey_hash = get_hash(&monkey);
     data.objects.insert(monkey_hash, Box::new(monkey));
