@@ -35,6 +35,7 @@ pub use present::*;
 pub use render_pass::*;
 pub use shader::*;
 pub use texture::*;
+pub use record::*;
 
 use command::{create_command_buffers, create_command_pools};
 
@@ -1101,5 +1102,172 @@ where
         ptr::null()
     } else {
         t
+    }
+}
+
+mod record {
+    use thiserror::Error;
+
+    pub trait Loadable {
+        fn is_loaded(&self) -> bool;
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Record<T>(Vec<T>);
+
+    impl<T> Record<T>
+        where T: Loadable
+    {
+        pub fn new() -> Self {
+            Record(vec![])
+        }
+
+        pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
+            match self.0.get(index) {
+                Some(value) => {
+                    match value.is_loaded() {
+                        true => Ok(value),
+                        false => Err(RecordGetError::NotLoaded(index)),
+                    }
+                },
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn get_mut(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
+            match self.0.get_mut(index) {
+                Some(value) => {
+                    match value.is_loaded() {
+                        true => Ok(value),
+                        false => Err(RecordGetError::NotLoaded(index)),
+                    }
+                },
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn get_no_check(&self, index: usize) -> Result<&T, RecordGetError> {
+            match self.0.get(index) {
+                Some(value) => Ok(value),
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn get_mut_no_check(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
+            match self.0.get_mut(index) {
+                Some(value) => Ok(value),
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn push(&mut self, value: T) -> usize {
+            let index = self.0.len();
+            self.0.push(value);
+            index
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+    pub enum RecordGetError {
+        #[error("Element with index {0} is not in record")]
+        NotInRecord(usize),
+        #[error("Element with index {0} is not loaded")]
+        NotLoaded(usize),
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::record::RecordGetError;
+
+        use super::{Loadable, Record};
+
+        #[derive(Debug, PartialEq)]
+        struct Value(bool);
+
+        impl Loadable for Value {
+            fn is_loaded(&self) -> bool {
+                self.0
+            }
+        }
+
+        #[test]
+        fn empty() {
+            let record: Record<Value> = Record::new();
+            assert_eq!(record, Record::<Value>(vec![]))
+        }
+
+        #[test]
+        fn push_multiple() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record, Record::<Value>(vec![
+                Value(true),
+                Value(false),
+                Value(true),
+                Value(false),
+                Value(true),
+            ]));
+        }
+
+        #[test]
+        fn get() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get(0), Result::Ok(&Value(true)));
+            assert_eq!(record.get(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get(1), Result::Err(RecordGetError::NotLoaded(1)));
+        }
+
+        #[test]
+        fn get_mut() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get_mut(0), Result::Ok(&mut Value(true)));
+            assert_eq!(record.get_mut(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_mut(1), Result::Err(RecordGetError::NotLoaded(1)));
+        }
+
+        #[test]
+        fn get_no_check() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get_no_check(0), Result::Ok(&Value(true)));
+            assert_eq!(record.get_no_check(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_no_check(1), Result::Ok(&Value(false)));
+        }
+
+        #[test]
+        fn get_mut_no_check() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get_mut_no_check(0), Result::Ok(&mut Value(true)));
+            assert_eq!(record.get_mut_no_check(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_mut_no_check(1), Result::Ok(&mut Value(false)));
+        }
     }
 }
