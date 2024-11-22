@@ -9,7 +9,7 @@ use shaderc::{CompileOptions, Compiler, ShaderKind};
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{set_object_name, Descriptors, RendererData};
+use crate::{set_object_name, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
@@ -218,28 +218,25 @@ pub struct Material {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
-    pub descriptor: Descriptors,
-
     pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
     shader: u64,
     mesh_settings: PipelineMeshSettings,
 
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
 }
 
 impl Material {
     pub fn new(
         device: &Device,
-        data: &RendererData,
+        data: &mut RendererData,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
         shader: u64,
         mesh_settings: PipelineMeshSettings,
         other_layouts: Vec<vk::DescriptorSetLayout>,
     ) -> Self {
-        let descriptor = Descriptors::new(device, data, bindings);
-
         let mut push_constant_ranges = vec![];
         let mut offset = 0u32;
         for (size, stage_flag) in &push_constant_sizes {
@@ -253,7 +250,9 @@ impl Material {
             push_constant_ranges.push(range);
         }
 
-        let mut set_layouts = vec![descriptor.descriptor_set_layout];
+        let descriptor_set_layout = data.global_layout_cache.create_descriptor_set_layout(device, &bindings);
+
+        let mut set_layouts = vec![descriptor_set_layout];
         set_layouts.append(&mut other_layouts.clone());
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
@@ -272,13 +271,12 @@ impl Material {
             pipeline,
             pipeline_layout,
 
-            descriptor,
-
             push_constant_ranges,
 
             shader,
             mesh_settings,
 
+            descriptor_set_layout,
             other_set_layouts: other_layouts.clone(),
         }
     }
@@ -287,14 +285,11 @@ impl Material {
         unsafe {
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.descriptor.destroy_swapchain(device);
         }
     }
 
     pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
-        self.descriptor.recreate_swapchain(device, data);
-
-        let mut set_layouts = vec![self.descriptor.descriptor_set_layout];
+        let mut set_layouts = vec![self.descriptor_set_layout];
 
         set_layouts.append(&mut self.other_set_layouts.clone());
 
@@ -318,10 +313,6 @@ impl Material {
         .unwrap();
 
         self.pipeline_layout = pipeline_layout;
-    }
-
-    pub fn destroy(&mut self, device: &Device) {
-        self.descriptor.destroy(device);
     }
 }
 
@@ -512,29 +503,26 @@ pub struct ShadowMaterial {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
-    pub descriptor: Descriptors,
 
     pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
     shader: u64,
     mesh_settings: PipelineMeshSettings,
 
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
 }
 
 impl ShadowMaterial {
     pub fn new(
         device: &Device,
-        data: &RendererData,
+        data: &mut RendererData,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
         shader: u64,
         mesh_settings: PipelineMeshSettings,
         other_layouts: Vec<vk::DescriptorSetLayout>,
-    ) -> Self {
-        let descriptor = Descriptors::new(device, data, bindings);
-
-        let mut push_constant_ranges = vec![];
+    ) -> Self {let mut push_constant_ranges = vec![];
         let mut offset = 0u32;
         for (size, stage_flag) in &push_constant_sizes {
             let range = vk::PushConstantRange::builder()
@@ -547,7 +535,8 @@ impl ShadowMaterial {
             push_constant_ranges.push(range);
         }
 
-        let mut set_layouts = vec![descriptor.descriptor_set_layout];
+        let descriptor_set_layout = data.global_layout_cache.create_descriptor_set_layout(device, &bindings);
+        let mut set_layouts = vec![descriptor_set_layout];
         set_layouts.append(&mut other_layouts.clone());
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
@@ -566,13 +555,12 @@ impl ShadowMaterial {
             pipeline,
             pipeline_layout,
 
-            descriptor,
-
             push_constant_ranges,
 
             shader,
             mesh_settings,
 
+            descriptor_set_layout,
             other_set_layouts: other_layouts.clone(),
         }
     }
@@ -581,14 +569,11 @@ impl ShadowMaterial {
         unsafe {
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.descriptor.destroy_swapchain(device);
         }
     }
 
     pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
-        self.descriptor.recreate_swapchain(device, data);
-
-        let mut set_layouts = vec![self.descriptor.descriptor_set_layout];
+        let mut set_layouts = vec![self.descriptor_set_layout];
 
         set_layouts.append(&mut self.other_set_layouts.clone());
 
@@ -611,10 +596,6 @@ impl ShadowMaterial {
         .unwrap();
 
         self.pipeline_layout = pipeline_layout;
-    }
-
-    pub fn destroy(&mut self, device: &Device) {
-        self.descriptor.destroy(device);
     }
 }
 

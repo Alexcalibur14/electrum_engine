@@ -7,8 +7,7 @@ use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper},
-    Descriptors, RendererData,
+    buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, RendererData
 };
 
 pub trait Camera {
@@ -62,7 +61,7 @@ pub struct SimpleCamera {
     pub view: Mat4,
     pub projection: Projection,
 
-    pub descriptor: Descriptors,
+    descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub buffers: Vec<BufferWrapper>,
 }
@@ -71,7 +70,7 @@ impl SimpleCamera {
     pub fn new(
         instance: &Instance,
         device: &Device,
-        data: &RendererData,
+        data: &mut RendererData,
         position: Vec3,
         rotation: Vec3,
         projection: Projection,
@@ -80,15 +79,6 @@ impl SimpleCamera {
             Quat::from_euler(glam::EulerRot::XYZ, rotation.x, rotation.y, rotation.z),
             position,
         );
-
-        let bindings = vec![vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .build()];
-
-        let descriptor = Descriptors::new(device, data, bindings);
 
         let camera_data = CameraData {
             position,
@@ -118,30 +108,22 @@ impl SimpleCamera {
             buffers.push(buffer);
         }
 
-        let layouts = vec![descriptor.descriptor_set_layout; data.swapchain_images.len()];
-        let info = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor.descriptor_pool)
-            .set_layouts(&layouts);
-
-        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
+        let mut descriptor_sets = vec![];
+        let mut descriptor_set_layout = Default::default();
 
         for i in 0..data.swapchain_images.len() {
-            let info = vk::DescriptorBufferInfo::builder()
+            let buffer_info = vk::DescriptorBufferInfo::builder()
                 .buffer(buffers[i].buffer)
                 .offset(0)
                 .range(size_of::<CameraData>() as u64)
                 .build();
 
-            let buffer_info = &[info];
-            let cam_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
-                .dst_binding(0)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
+            let (descriptor_set, new_set_layout) = DescriptorBuilder::new()
+                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
-            unsafe { device.update_descriptor_sets(&[cam_write], &[] as &[vk::CopyDescriptorSet]) };
+            descriptor_sets.push(descriptor_set);
+            descriptor_set_layout = new_set_layout;
         }
 
         SimpleCamera {
@@ -150,7 +132,7 @@ impl SimpleCamera {
             view,
             projection,
 
-            descriptor,
+            descriptor_set_layout,
             descriptor_sets,
             buffers,
         }
@@ -162,7 +144,8 @@ impl SimpleCamera {
             rotation: Vec3::default(),
             view: Mat4::default(),
             projection: Projection::default(),
-            descriptor: Descriptors::default(),
+            
+            descriptor_set_layout: Default::default(),
             descriptor_sets: vec![],
             buffers: vec![],
         }
@@ -242,8 +225,6 @@ impl Camera for SimpleCamera {
     }
 
     fn destroy(&self, device: &Device) {
-        self.descriptor.destroy_swapchain(device);
-        self.descriptor.destroy(device);
         self.buffers.iter().for_each(|b| b.destroy(device));
     }
 
@@ -265,7 +246,7 @@ impl Camera for SimpleCamera {
     }
 
     fn get_set_layout(&self) -> vk::DescriptorSetLayout {
-        self.descriptor.descriptor_set_layout
+        self.descriptor_set_layout
     }
 
     fn hash(&self) -> u64 {

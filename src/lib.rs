@@ -25,6 +25,7 @@ mod present;
 mod render_pass;
 mod shader;
 mod texture;
+mod descriptor;
 
 pub use buffer::*;
 pub use camera::*;
@@ -36,6 +37,7 @@ pub use render_pass::*;
 pub use shader::*;
 pub use texture::*;
 pub use record::*;
+pub use descriptor::*;
 
 use command::{create_command_buffers, create_command_pools};
 
@@ -276,6 +278,7 @@ impl Renderer {
             .queue_present_khr(self.data.present_queue, &present_info);
         let changed = result == Ok(vk::SuccessCode::SUBOPTIMAL_KHR)
             || result == Err(vk::ErrorCode::OUT_OF_DATE_KHR);
+
         if self.resized || changed {
             self.resized = false;
             self.recreate_swapchain(window)?;
@@ -417,7 +420,7 @@ impl Renderer {
 
         objects
             .iter_mut()
-            .for_each(|(_, o)| o.recreate_swapchain(&self.device, &self.data));
+            .for_each(|(_, o)| o.recreate_swapchain(&self.device, &mut self.data));
 
         self.data.objects = objects;
 
@@ -512,6 +515,9 @@ impl Renderer {
             .iter()
             .for_each(|(_, c)| c.destroy(&self.device));
 
+        self.data.global_descriptor_pools.destroy(&self.device);
+        self.data.global_layout_cache.destroy(&self.device);
+
         self.data
             .in_flight_fences
             .iter()
@@ -591,6 +597,9 @@ pub struct RendererData {
 
     pub objects: HashMap<u64, Box<dyn Renderable>>,
     pub cameras: HashMap<u64, Box<dyn Camera>>,
+
+    pub global_descriptor_pools: DescriptorAllocator,
+    pub global_layout_cache: DescriptorLayoutCache,
 
     // Semaphores
     pub image_available_semaphores: Vec<vk::Semaphore>,

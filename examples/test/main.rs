@@ -114,7 +114,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut camera = SimpleCamera::new(
         &instance,
         &device,
-        &data,
+        data,
         vec3(0.0, 4.0, 4.0),
         vec3(0.0, 0.0, 0.0),
         projection,
@@ -141,7 +141,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let light_group = LightGroup::new(
         &instance,
         &device,
-        &data,
+        data,
         vec![red_light_hash, blue_light_hash],
         10,
     );
@@ -215,7 +215,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut monkey = ObjectPrototype::load(
         &instance,
         &device,
-        &data,
+        data,
         "res\\models\\MONKEY.obj",
         lit_shader_hash,
         position,
@@ -236,7 +236,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut plane = Quad::new(
         &instance,
         &device,
-        &data,
+        data,
         [
             vec3(-1.5, 0.0, -1.5),
             vec3(1.5, 0.0, -1.5),
@@ -262,7 +262,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut shadow_plane = ShadowQuad::new(
         &instance,
         &device,
-        &data,
+        data,
         [
             vec3(-1.5, 0.0, -1.5),
             vec3(1.5, 0.0, -1.5),
