@@ -269,34 +269,6 @@ impl Renderable for Quad {
 
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData) {
         self.material.recreate_swapchain(device, data);
-
-        let sampler = data.samplers.get(&self.image.1).unwrap();
-        let texture = data.textures.get(&self.image.0).unwrap();
-
-        let mut descriptor_sets = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
-                .buffer(self.ubo_buffers[i].buffer)
-                .offset(0)
-                .range(size_of::<ModelData>() as u64)
-                .build();
-            
-            let image_info = vk::DescriptorImageInfo::builder()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(texture.view)
-                .sampler(*sampler)
-                .build();
-
-            let (set, _) = DescriptorBuilder::new()
-                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .bind_image(1, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
-
-            descriptor_sets.push(set);
-        }
-
-        self.descriptor_sets = descriptor_sets;
     }
 
     fn destroy(&mut self, device: &Device) {
@@ -555,34 +527,6 @@ impl Renderable for ObjectPrototype {
 
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData) {
         self.material.recreate_swapchain(device, data);
-
-        let sampler = data.samplers.get(&self.image.1).unwrap();
-        let texture = data.textures.get(&self.image.0).unwrap();
-
-        let mut descriptor_sets = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
-                .buffer(self.ubo_buffers[i].buffer)
-                .offset(0)
-                .range(size_of::<ModelData>() as u64)
-                .build();
-            
-            let image_info = vk::DescriptorImageInfo::builder()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(texture.view)
-                .sampler(*sampler)
-                .build();
-
-            let (set, _) = DescriptorBuilder::new()
-                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .bind_image(1, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
-
-            descriptor_sets.push(set);
-        }
-
-        self.descriptor_sets = descriptor_sets;
     }
 
     fn destroy(&mut self, device: &Device) {
@@ -933,34 +877,6 @@ impl Renderable for ShadowQuad {
 
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData) {
         self.material.recreate_swapchain(device, data);
-
-        let sampler = data.samplers.get(&self.image.1).unwrap();
-        let texture = data.textures.get(&self.image.0).unwrap();
-
-        let mut descriptor_sets = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
-                .buffer(self.ubo_buffers[i].buffer)
-                .offset(0)
-                .range(size_of::<ModelData>() as u64)
-                .build();
-            
-            let image_info = vk::DescriptorImageInfo::builder()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(texture.view)
-                .sampler(*sampler)
-                .build();
-
-            let (set, _) = DescriptorBuilder::new()
-                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .bind_image(1, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
-
-            descriptor_sets.push(set);
-        }
-        
-        self.descriptor_sets = descriptor_sets;
     }
 
     fn destroy(&mut self, device: &Device) {

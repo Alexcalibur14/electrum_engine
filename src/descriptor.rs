@@ -142,7 +142,7 @@ impl Default for DescriptorAllocator {
 pub enum DescriptorAllocateError {
     #[error("Unable to create another pool")]
     UnableToCreate,
-    #[error("Desccriptor set allocation failed due to error: {0}")]
+    #[error("Descriptor set allocation failed due to error: {0}")]
     AllocationFailed(vk::ErrorCode),
 }
 
