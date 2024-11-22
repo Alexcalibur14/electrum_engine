@@ -9,7 +9,7 @@ use shaderc::{CompileOptions, Compiler, ShaderKind};
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{set_object_name, RendererData};
+use crate::{insert_command_label, set_object_name, BufferWrapper, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
@@ -213,7 +213,7 @@ pub fn compile_shader_module(
     Ok(unsafe { device.create_shader_module(&info, None) }?)
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct Material {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
@@ -225,6 +225,8 @@ pub struct Material {
 
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
+
+    subpass: u32,
 }
 
 impl Material {
@@ -236,6 +238,7 @@ impl Material {
         shader: u64,
         mesh_settings: PipelineMeshSettings,
         other_layouts: Vec<vk::DescriptorSetLayout>,
+        subpass: u32,
     ) -> Self {
         let mut push_constant_ranges = vec![];
         let mut offset = 0u32;
@@ -263,7 +266,7 @@ impl Material {
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
         let pipeline = unsafe {
-            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout, 1)
+            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout, subpass)
         }
         .unwrap();
 
@@ -278,6 +281,7 @@ impl Material {
 
             descriptor_set_layout,
             other_set_layouts: other_layouts.clone(),
+            subpass,
         }
     }
 
@@ -307,12 +311,65 @@ impl Material {
                 self.shader,
                 self.mesh_settings.clone(),
                 pipeline_layout,
-                1,
+                self.subpass,
             )
         }
         .unwrap();
 
         self.pipeline_layout = pipeline_layout;
+    }
+
+    pub fn draw(
+        &self,
+        instance: &Instance,
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        descriptor_set: vk::DescriptorSet,
+        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
+        vertex_buffer: BufferWrapper,
+        index_buffer: BufferWrapper,
+        index_len: u32,
+        name: &str,
+    ) {
+        unsafe {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[descriptor_set],
+                &[],
+            );
+            for (set, descriptor) in other_descriptors {
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    set,
+                    &[descriptor],
+                    &[],
+                );
+            }
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer.buffer], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                index_buffer.buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
+            insert_command_label(
+                instance,
+                command_buffer,
+                format!("Draw {}", name),
+                [0.0, 0.5, 0.1, 1.0],
+            );
+            device.cmd_draw_indexed(command_buffer, index_len, 1, 0, 0, 0);
+        }
     }
 }
 
@@ -435,6 +492,18 @@ pub struct PipelineMeshSettings {
     pub front_face: vk::FrontFace,
 }
 
+impl Hash for PipelineMeshSettings {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.binding_descriptions.hash(state);
+        self.attribute_descriptions.hash(state);
+        self.topology.hash(state);
+        self.polygon_mode.hash(state);
+        self.line_width.to_bits().hash(state);
+        self.cull_mode.hash(state);
+        self.front_face.hash(state);
+    }
+}
+
 impl Default for PipelineMeshSettings {
     fn default() -> Self {
         PipelineMeshSettings {
@@ -547,7 +616,7 @@ impl ShadowMaterial {
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
         let pipeline = unsafe {
-            create_shadow_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout)
+            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout, 0)
         }
         .unwrap();
 
@@ -585,12 +654,13 @@ impl ShadowMaterial {
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
         self.pipeline = unsafe {
-            create_shadow_pipeline(
+            create_pipeline(
                 device,
                 data,
                 self.shader,
                 self.mesh_settings.clone(),
                 pipeline_layout,
+                0,
             )
         }
         .unwrap();
@@ -599,107 +669,107 @@ impl ShadowMaterial {
     }
 }
 
-unsafe fn create_shadow_pipeline(
-    device: &Device,
-    data: &RendererData,
-    shader: u64,
-    mesh_settings: PipelineMeshSettings,
-    pipeline_layout: vk::PipelineLayout,
-) -> Result<vk::Pipeline> {
-    // Vertex Input State
+// unsafe fn create_shadow_pipeline(
+//     device: &Device,
+//     data: &RendererData,
+//     shader: u64,
+//     mesh_settings: PipelineMeshSettings,
+//     pipeline_layout: vk::PipelineLayout,
+// ) -> Result<vk::Pipeline> {
+//     // Vertex Input State
 
-    let binding_descriptions = mesh_settings.binding_descriptions;
-    let attribute_descriptions = mesh_settings.attribute_descriptions;
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-        .vertex_binding_descriptions(&binding_descriptions)
-        .vertex_attribute_descriptions(&attribute_descriptions);
+//     let binding_descriptions = mesh_settings.binding_descriptions;
+//     let attribute_descriptions = mesh_settings.attribute_descriptions;
+//     let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
+//         .vertex_binding_descriptions(&binding_descriptions)
+//         .vertex_attribute_descriptions(&attribute_descriptions);
 
-    // Input Assembly State
+//     // Input Assembly State
 
-    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
-        .topology(mesh_settings.topology)
-        .primitive_restart_enable(false);
+//     let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
+//         .topology(mesh_settings.topology)
+//         .primitive_restart_enable(false);
 
-    // Viewport State
+//     // Viewport State
 
-    let viewport = vk::Viewport::builder()
-        .x(0.0)
-        .y(0.0)
-        .width(data.swapchain_extent.width as f32)
-        .height(data.swapchain_extent.height as f32)
-        .min_depth(0.0)
-        .max_depth(1.0);
+//     let viewport = vk::Viewport::builder()
+//         .x(0.0)
+//         .y(0.0)
+//         .width(data.swapchain_extent.width as f32)
+//         .height(data.swapchain_extent.height as f32)
+//         .min_depth(0.0)
+//         .max_depth(1.0);
 
-    let scissor = vk::Rect2D::builder()
-        .offset(vk::Offset2D { x: 0, y: 0 })
-        .extent(data.swapchain_extent);
+//     let scissor = vk::Rect2D::builder()
+//         .offset(vk::Offset2D { x: 0, y: 0 })
+//         .extent(data.swapchain_extent);
 
-    let viewports = &[viewport];
-    let scissors = &[scissor];
-    let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
-        .viewports(viewports)
-        .scissors(scissors);
+//     let viewports = &[viewport];
+//     let scissors = &[scissor];
+//     let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
+//         .viewports(viewports)
+//         .scissors(scissors);
 
-    // Rasterization State
+//     // Rasterization State
 
-    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
-        .depth_clamp_enable(false)
-        .rasterizer_discard_enable(false)
-        .polygon_mode(mesh_settings.polygon_mode)
-        .line_width(mesh_settings.line_width)
-        .cull_mode(mesh_settings.cull_mode)
-        .front_face(mesh_settings.front_face)
-        .depth_bias_enable(false);
+//     let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
+//         .depth_clamp_enable(false)
+//         .rasterizer_discard_enable(false)
+//         .polygon_mode(mesh_settings.polygon_mode)
+//         .line_width(mesh_settings.line_width)
+//         .cull_mode(mesh_settings.cull_mode)
+//         .front_face(mesh_settings.front_face)
+//         .depth_bias_enable(false);
 
-    // Multisample State
+//     // Multisample State
 
-    let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
-        .sample_shading_enable(false)
-        .rasterization_samples(data.msaa_samples);
+//     let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
+//         .sample_shading_enable(false)
+//         .rasterization_samples(data.msaa_samples);
 
-    // Color Blend State
+//     // Color Blend State
 
-    let attachment = vk::PipelineColorBlendAttachmentState::builder()
-        .color_write_mask(vk::ColorComponentFlags::all())
-        .blend_enable(false);
+//     let attachment = vk::PipelineColorBlendAttachmentState::builder()
+//         .color_write_mask(vk::ColorComponentFlags::all())
+//         .blend_enable(false);
 
-    let attachments = &[attachment];
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-        .logic_op_enable(false)
-        .logic_op(vk::LogicOp::COPY)
-        .attachments(attachments)
-        .blend_constants([0.0, 0.0, 0.0, 0.0]);
+//     let attachments = &[attachment];
+//     let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+//         .logic_op_enable(false)
+//         .logic_op(vk::LogicOp::COPY)
+//         .attachments(attachments)
+//         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    // Depth state
+//     // Depth state
 
-    let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::builder()
-        .depth_test_enable(true)
-        .depth_write_enable(true)
-        .depth_compare_op(vk::CompareOp::LESS)
-        .depth_bounds_test_enable(false)
-        .stencil_test_enable(false);
+//     let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::builder()
+//         .depth_test_enable(true)
+//         .depth_write_enable(true)
+//         .depth_compare_op(vk::CompareOp::LESS)
+//         .depth_bounds_test_enable(false)
+//         .stencil_test_enable(false);
 
-    // Create
+//     // Create
 
-    let shader_stages = data.shaders.get(&shader).unwrap().stages();
+//     let shader_stages = data.shaders.get(&shader).unwrap().stages();
 
-    let stages = shader_stages.as_slice();
-    let info = vk::GraphicsPipelineCreateInfo::builder()
-        .stages(stages)
-        .vertex_input_state(&vertex_input_state)
-        .input_assembly_state(&input_assembly_state)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterization_state)
-        .multisample_state(&multisample_state)
-        .depth_stencil_state(&depth_stencil_state)
-        .color_blend_state(&color_blend_state)
-        .layout(pipeline_layout)
-        .render_pass(data.render_pass)
-        .subpass(0);
+//     let stages = shader_stages.as_slice();
+//     let info = vk::GraphicsPipelineCreateInfo::builder()
+//         .stages(stages)
+//         .vertex_input_state(&vertex_input_state)
+//         .input_assembly_state(&input_assembly_state)
+//         .viewport_state(&viewport_state)
+//         .rasterization_state(&rasterization_state)
+//         .multisample_state(&multisample_state)
+//         .depth_stencil_state(&depth_stencil_state)
+//         .color_blend_state(&color_blend_state)
+//         .layout(pipeline_layout)
+//         .render_pass(data.render_pass)
+//         .subpass(0);
 
-    let pipeline = device
-        .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
-        .0[0];
+//     let pipeline = device
+//         .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
+//         .0[0];
 
-    Ok(pipeline)
-}
+//     Ok(pipeline)
+// }

@@ -1,11 +1,10 @@
+use electrum_engine::vertices::PCTVertex;
 use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use electrum_engine::{
-    create_texture_sampler, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PointLight,
-    Projection, Quad, Renderer, RendererData, Shader, ShadowQuad, SimpleCamera, SubPassRenderData,
-    VFShader,
+    create_texture_sampler, Camera, Image, LightGroup, Material, MipLevels, ObjectPrototype, PipelineMeshSettings, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -217,12 +216,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         &device,
         data,
         "res\\models\\MONKEY.obj",
-        lit_shader_hash,
         position,
         view,
         proj,
         (image_hash, sampler_hash),
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
         "monkey".to_string(),
     );
     monkey.generate_vertex_buffer(&instance, &device, &data);
@@ -244,12 +241,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             vec3(1.5, 0.0, 1.5),
         ],
         vec3(0.0, 1.0, 0.0),
-        lit_shader_hash,
         (image_2077_hash, sampler_2077_hash),
         position,
         view,
         proj,
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
         "Quad".to_string(),
     );
     plane.generate(&instance, &device, &data);
@@ -259,7 +254,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let mut shadow_plane = ShadowQuad::new(
+    let mut shadow_plane = Quad::new(
         &instance,
         &device,
         data,
@@ -270,12 +265,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             vec3(1.5, 0.0, 1.5),
         ],
         vec3(0.0, 1.0, 0.0),
-        lit_shader_hash,
         (image_2077_hash, sampler_2077_hash),
         shadow_position,
         view,
         proj,
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
         "Shadow Quad".to_string(),
     );
     shadow_plane.generate(&instance, &device, &data);
@@ -284,11 +277,53 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     data.objects
         .insert(shadow_plane_hash, Box::new(shadow_plane));
 
+
+    let quad_mesh_settings = PipelineMeshSettings {
+        binding_descriptions: PCTVertex::binding_descriptions(),
+        attribute_descriptions: PCTVertex::attribute_descriptions(),
+        front_face: vk::FrontFace::CLOCKWISE,
+        ..Default::default()
+    };
+
+    let monk_mesh_settings = PipelineMeshSettings {
+        binding_descriptions: PCTVertex::binding_descriptions(),
+        attribute_descriptions: PCTVertex::attribute_descriptions(),
+        front_face: vk::FrontFace::CLOCKWISE,
+        ..Default::default()
+    };
+
+    let bindings = vec![
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(1)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+            .build(),
+    ];
+
+    let shadow_material = Material::new(device, data, bindings.clone(), vec![], lit_shader_hash, quad_mesh_settings.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
+    let shadow_mat_hash = get_hash(&shadow_material);
+    data.materials.insert(shadow_mat_hash, shadow_material);
+
+    let quad_material = Material::new(device, data, bindings.clone(), vec![], lit_shader_hash, quad_mesh_settings, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
+    let quad_mat_hash = get_hash(&quad_material);
+    data.materials.insert(quad_mat_hash, quad_material);
+
+    let monk_material = Material::new(device, data, bindings, vec![], lit_shader_hash, monk_mesh_settings, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
+    let monk_mat_hash = get_hash(&monk_material);
+    data.materials.insert(monk_mat_hash, monk_material);
+
     let render_data_0 =
-        SubPassRenderData::new(0, vec![shadow_plane_hash], camera_hash, light_group_hash);
+        SubPassRenderData::new(0, vec![(shadow_plane_hash, shadow_mat_hash)], camera_hash, light_group_hash);
     let render_data_1 = SubPassRenderData::new(
         1,
-        vec![plane_hash, monkey_hash],
+        vec![(plane_hash, quad_mat_hash), (monkey_hash, monk_mat_hash)],
         camera_hash,
         light_group_hash,
     );

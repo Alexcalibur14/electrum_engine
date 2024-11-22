@@ -3,21 +3,12 @@
 use glam::Mat4;
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{RenderStats, RendererData};
+use crate::{BufferWrapper, RenderStats, RendererData};
 
 pub mod mesh;
 pub mod vertices;
 
 pub trait Renderable {
-    fn draw(
-        &self,
-        instance: &Instance,
-        device: &Device,
-        command_buffer: vk::CommandBuffer,
-        image_index: usize,
-        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
-        subpass_id: usize,
-    );
     fn update(
         &mut self,
         device: &Device,
@@ -30,6 +21,12 @@ pub trait Renderable {
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData);
     fn destroy(&mut self, device: &Device);
     fn clone_dyn(&self) -> Box<dyn Renderable>;
+
+    fn descriptor_set(&self, image_index: usize) -> vk::DescriptorSet;
+    fn vertex_buffer(&self) -> BufferWrapper;
+    fn index_buffer(&self) -> BufferWrapper;
+    fn index_len(&self) -> u32;
+    fn name(&self) -> String;
 }
 
 impl Clone for Box<dyn Renderable> {

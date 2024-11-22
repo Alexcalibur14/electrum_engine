@@ -180,7 +180,7 @@ pub fn generate_render_pass(
 #[derive(Debug, Clone)]
 pub struct SubPassRenderData {
     pub subpass_id: usize,
-    pub objects: Vec<u64>,
+    pub objects: Vec<(u64, u64)>,
     pub light_group: u64,
     pub camera: u64,
 
@@ -188,7 +188,7 @@ pub struct SubPassRenderData {
 }
 
 impl SubPassRenderData {
-    pub fn new(id: usize, objects: Vec<u64>, camera: u64, light_group: u64) -> Self {
+    pub fn new(id: usize, objects: Vec<(u64, u64)>, camera: u64, light_group: u64) -> Self {
         SubPassRenderData {
             subpass_id: id,
             objects,
@@ -241,15 +241,26 @@ impl SubPassRenderData {
 
         self.objects
             .iter()
-            .map(|k| data.objects.get(k).unwrap())
-            .for_each(|o| {
-                o.draw(
+            .map(|(k_o, k_m)| (data.objects.get(k_o).unwrap(), data.materials.get(k_m).unwrap()))
+            .for_each(|(o, m)| {
+                // o.draw(
+                //     instance,
+                //     device,
+                //     command_buffer,
+                //     image_index,
+                //     other_descriptors.clone(),
+                // )
+
+                m.draw(
                     instance,
                     device,
                     command_buffer,
-                    image_index,
+                    o.descriptor_set(image_index),
                     other_descriptors.clone(),
-                    self.subpass_id,
+                    o.vertex_buffer(),
+                    o.index_buffer(),
+                    o.index_len(),
+                    &o.name(),
                 )
             });
 
@@ -273,7 +284,7 @@ impl SubPassRenderData {
         let mut objects = self
             .objects
             .iter()
-            .map(|k| data.objects.get_key_value(k).unwrap())
+            .map(|(k, _)| data.objects.get_key_value(k).unwrap())
             .map(|(k, v)| (*k, v.clone()))
             .collect::<Vec<(u64, Box<dyn Renderable>)>>();
 

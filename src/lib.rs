@@ -424,6 +424,14 @@ impl Renderer {
 
         self.data.objects = objects;
 
+        let mut materials = self.data.materials.clone();
+
+        materials
+            .iter_mut()
+            .for_each(|(_, m)| m.recreate_swapchain(&self.device, &mut self.data));
+
+        self.data.materials = materials;
+
         let aspect =
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
 
@@ -459,6 +467,11 @@ impl Renderer {
             .objects
             .iter()
             .for_each(|(_, o)| o.destroy_swapchain(&self.device));
+
+        self.data
+            .materials
+            .iter()
+            .for_each(|(_, m)| m.destroy_swapchain(&self.device));
 
         self.device.destroy_render_pass(self.data.render_pass, None);
 
@@ -596,6 +609,7 @@ pub struct RendererData {
     pub light_groups: HashMap<u64, LightGroup>,
 
     pub objects: HashMap<u64, Box<dyn Renderable>>,
+    pub materials: HashMap<u64, Material>,
     pub cameras: HashMap<u64, Box<dyn Camera>>,
 
     pub global_descriptor_pools: DescriptorAllocator,

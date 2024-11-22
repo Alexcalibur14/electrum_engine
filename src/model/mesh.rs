@@ -6,7 +6,7 @@ use glam::{vec2, vec3, Mat4, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, create_and_stage_buffer, insert_command_label, vertices::PCTVertex, DescriptorBuilder, Material, PipelineMeshSettings, RenderStats, Renderable, RendererData, ShadowMaterial, Vertex
+    buffer::{create_buffer, BufferWrapper}, create_and_stage_buffer, vertices::PCTVertex, DescriptorBuilder, RenderStats, Renderable, RendererData
 };
 
 use super::{ModelData, ModelMVP};
@@ -26,8 +26,6 @@ pub struct Quad {
 
     image: (u64, u64),
 
-    material: Material,
-
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
@@ -43,48 +41,14 @@ impl Quad {
         points: [Vec3; 4],
         normal: Vec3,
 
-        shader: u64,
         image: (u64, u64),
 
         model: Mat4,
         view: Mat4,
         proj: Mat4,
-        other_layouts: Vec<vk::DescriptorSetLayout>,
 
         name: String,
     ) -> Self {
-        let mesh_settings = PipelineMeshSettings {
-            binding_descriptions: PCTVertex::binding_descriptions(),
-            attribute_descriptions: PCTVertex::attribute_descriptions(),
-            front_face: vk::FrontFace::CLOCKWISE,
-            ..Default::default()
-        };
-
-        let bindings = vec![
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-        ];
-
-        let material = Material::new(
-            device,
-            data,
-            bindings,
-            vec![],
-            shader,
-            mesh_settings,
-            other_layouts,
-        );
-
         let ubo = ModelMVP { model, view, proj };
 
         let model_data = ubo.get_data(&(proj * view));
@@ -143,7 +107,6 @@ impl Quad {
             vertex_buffer: BufferWrapper::default(),
             index_buffer: BufferWrapper::default(),
             image,
-            material,
             ubo,
             ubo_buffers,
             descriptor_sets,
@@ -200,56 +163,6 @@ impl Quad {
 }
 
 impl Renderable for Quad {
-    fn draw(
-        &self,
-        instance: &Instance,
-        device: &Device,
-        command_buffer: vk::CommandBuffer,
-        image_index: usize,
-        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
-        _subpass_id: usize,
-    ) {
-        unsafe {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.material.pipeline,
-            );
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.material.pipeline_layout,
-                0,
-                &[self.descriptor_sets[image_index]],
-                &[],
-            );
-            for (set, descriptor) in other_descriptors {
-                device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.material.pipeline_layout,
-                    set,
-                    &[descriptor],
-                    &[],
-                );
-            }
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-            device.cmd_bind_index_buffer(
-                command_buffer,
-                self.index_buffer.buffer,
-                0,
-                vk::IndexType::UINT32,
-            );
-            insert_command_label(
-                instance,
-                command_buffer,
-                format!("Draw {}", self.name),
-                [0.0, 0.5, 0.1, 1.0],
-            );
-            device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
-        }
-    }
-
     fn update(
         &mut self,
         device: &Device,
@@ -263,12 +176,10 @@ impl Renderable for Quad {
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
-    fn destroy_swapchain(&self, device: &Device) {
-        self.material.destroy_swapchain(device);
+    fn destroy_swapchain(&self, _device: &Device) {
     }
 
-    fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData) {
-        self.material.recreate_swapchain(device, data);
+    fn recreate_swapchain(&mut self, _device: &Device, _data: &mut RendererData) {
     }
 
     fn destroy(&mut self, device: &Device) {
@@ -279,6 +190,26 @@ impl Renderable for Quad {
 
     fn clone_dyn(&self) -> Box<dyn Renderable> {
         Box::new(self.clone())
+    }
+    
+    fn descriptor_set(&self, image_index: usize) -> vk::DescriptorSet {
+        self.descriptor_sets[image_index]
+    }
+    
+    fn vertex_buffer(&self) -> BufferWrapper {
+        self.vertex_buffer
+    }
+    
+    fn index_buffer(&self) -> BufferWrapper {
+        self.index_buffer
+    }
+
+    fn index_len(&self) -> u32 {
+        6
+    }
+    
+    fn name(&self) -> String {
+        self.name.clone()
     }
 }
 
@@ -301,8 +232,6 @@ pub struct ObjectPrototype {
     vertex_buffer: BufferWrapper,
     index_buffer: BufferWrapper,
 
-    material: Material,
-
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
@@ -317,47 +246,13 @@ impl ObjectPrototype {
         device: &Device,
         data: &mut RendererData,
         path: &str,
-        shader: u64,
         model: Mat4,
         view: Mat4,
         proj: Mat4,
         image: (u64, u64),
-        other_layouts: Vec<vk::DescriptorSetLayout>,
         name: String,
     ) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
-
-        let mesh_settings = PipelineMeshSettings {
-            binding_descriptions: PCTVertex::binding_descriptions(),
-            attribute_descriptions: PCTVertex::attribute_descriptions(),
-            front_face: vk::FrontFace::CLOCKWISE,
-            ..Default::default()
-        };
-
-        let bindings = vec![
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-        ];
-
-        let material = Material::new(
-            device,
-            data,
-            bindings,
-            vec![],
-            shader,
-            mesh_settings,
-            other_layouts,
-        );
 
         let ubo = ModelMVP { model, view, proj };
 
@@ -419,8 +314,6 @@ impl ObjectPrototype {
             vertex_buffer: BufferWrapper::default(),
             index_buffer: BufferWrapper::default(),
 
-            material,
-
             ubo,
             ubo_buffers,
 
@@ -471,62 +364,10 @@ impl ObjectPrototype {
 }
 
 impl Renderable for ObjectPrototype {
-    fn draw(
-        &self,
-        instance: &Instance,
-        device: &Device,
-        command_buffer: vk::CommandBuffer,
-        image_index: usize,
-        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
-        _subpass_id: usize,
-    ) {
-        unsafe {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.material.pipeline,
-            );
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.material.pipeline_layout,
-                0,
-                &[self.descriptor_sets[image_index]],
-                &[],
-            );
-            for (set, descriptor) in other_descriptors {
-                device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.material.pipeline_layout,
-                    set,
-                    &[descriptor],
-                    &[],
-                );
-            }
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-            device.cmd_bind_index_buffer(
-                command_buffer,
-                self.index_buffer.buffer,
-                0,
-                vk::IndexType::UINT32,
-            );
-            insert_command_label(
-                instance,
-                command_buffer,
-                format!("Draw {}", self.name),
-                [0.0, 0.5, 0.1, 1.0],
-            );
-            device.cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0);
-        }
+    fn destroy_swapchain(&self, _device: &Device) {
     }
 
-    fn destroy_swapchain(&self, device: &Device) {
-        self.material.destroy_swapchain(device);
-    }
-
-    fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData) {
-        self.material.recreate_swapchain(device, data);
+    fn recreate_swapchain(&mut self, _device: &Device, _data: &mut RendererData) {
     }
 
     fn destroy(&mut self, device: &Device) {
@@ -553,6 +394,26 @@ impl Renderable for ObjectPrototype {
         let model_data = self.ubo.get_data(&view_proj);
 
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
+    }
+
+    fn descriptor_set(&self, image_index: usize) -> vk::DescriptorSet {
+        self.descriptor_sets[image_index]
+    }
+    
+    fn vertex_buffer(&self) -> BufferWrapper {
+        self.vertex_buffer
+    }
+    
+    fn index_buffer(&self) -> BufferWrapper {
+        self.index_buffer
+    }
+
+    fn index_len(&self) -> u32 {
+        self.indices.len() as u32
+    }
+    
+    fn name(&self) -> String {
+        self.name.clone()
     }
 }
 
@@ -617,284 +478,4 @@ fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
     }
 
     Ok((vertices, indices))
-}
-
-#[derive(Clone)]
-pub struct ShadowQuad {
-    name: String,
-
-    points: [Vec3; 4],
-    normal: Vec3,
-
-    vertices: Vec<PCTVertex>,
-    indices: Vec<u32>,
-
-    vertex_buffer: BufferWrapper,
-    index_buffer: BufferWrapper,
-
-    image: (u64, u64),
-
-    material: ShadowMaterial,
-
-    ubo: ModelMVP,
-    ubo_buffers: Vec<BufferWrapper>,
-
-    descriptor_sets: Vec<vk::DescriptorSet>,
-}
-
-impl ShadowQuad {
-    pub fn new(
-        instance: &Instance,
-        device: &Device,
-        data: &mut RendererData,
-
-        points: [Vec3; 4],
-        normal: Vec3,
-
-        shader: u64,
-        image: (u64, u64),
-
-        model: Mat4,
-        view: Mat4,
-        proj: Mat4,
-        other_layouts: Vec<vk::DescriptorSetLayout>,
-
-        name: String,
-    ) -> Self {
-        let mesh_settings = PipelineMeshSettings {
-            binding_descriptions: PCTVertex::binding_descriptions(),
-            attribute_descriptions: PCTVertex::attribute_descriptions(),
-            front_face: vk::FrontFace::CLOCKWISE,
-            ..Default::default()
-        };
-
-        let bindings = vec![
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-        ];
-
-        let material = ShadowMaterial::new(
-            device,
-            data,
-            bindings,
-            vec![],
-            shader,
-            mesh_settings,
-            other_layouts,
-        );
-
-        let ubo = ModelMVP { model, view, proj };
-
-        let model_data = ubo.get_data(&(proj * view));
-
-        let mut ubo_buffers = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    size_of::<ModelData>() as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("{} UBO {}", name, i)),
-                )
-            }
-            .unwrap();
-
-            buffer.copy_data_into_buffer(device, &model_data);
-
-            ubo_buffers.push(buffer);
-        }
-
-        let sampler = data.samplers.get(&image.1).unwrap();
-        let texture = data.textures.get(&image.0).unwrap();
-
-        let mut descriptor_sets = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
-                .buffer(ubo_buffers[i].buffer)
-                .offset(0)
-                .range(size_of::<ModelData>() as u64)
-                .build();
-            
-            let image_info = vk::DescriptorImageInfo::builder()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(texture.view)
-                .sampler(*sampler)
-                .build();
-
-            let (set, _) = DescriptorBuilder::new()
-                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .bind_image(1, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
-
-            descriptor_sets.push(set);
-        }
-
-        ShadowQuad {
-            name,
-            vertices: vec![],
-            indices: vec![],
-            vertex_buffer: BufferWrapper::default(),
-            index_buffer: BufferWrapper::default(),
-            image,
-            material,
-            ubo,
-            ubo_buffers,
-            descriptor_sets,
-            points,
-            normal,
-        }
-    }
-
-    pub fn generate(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
-        let mut vertices = vec![];
-
-        let uvs = [
-            vec2(0.0, 0.0),
-            vec2(1.0, 0.0),
-            vec2(0.0, 1.0),
-            vec2(1.0, 1.0),
-        ];
-
-        for (i, point) in self.points.iter().enumerate() {
-            vertices.push(PCTVertex {
-                pos: *point,
-                tex_coord: uvs[i],
-                normal: self.normal,
-            })
-        }
-
-        let vertex_size = (size_of::<PCTVertex>() * vertices.len()) as u64;
-
-        self.vertex_buffer = create_and_stage_buffer(
-            instance,
-            device,
-            data,
-            vertex_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            Some(format!("{} Vertex Buffer", self.name)),
-            &vertices,
-        )
-        .unwrap();
-
-        let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
-        let index_size = (size_of::<u32>() * indices.len()) as u64;
-
-        self.index_buffer = create_and_stage_buffer(
-            instance,
-            device,
-            data,
-            index_size,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            Some(format!("{} Index Buffer", self.name)),
-            &indices,
-        )
-        .unwrap();
-    }
-}
-
-impl Renderable for ShadowQuad {
-    fn draw(
-        &self,
-        instance: &Instance,
-        device: &Device,
-        command_buffer: vk::CommandBuffer,
-        image_index: usize,
-        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
-        _subpass_id: usize,
-    ) {
-        unsafe {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.material.pipeline,
-            );
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.material.pipeline_layout,
-                0,
-                &[self.descriptor_sets[image_index]],
-                &[],
-            );
-            for (set, descriptor) in other_descriptors {
-                device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.material.pipeline_layout,
-                    set,
-                    &[descriptor],
-                    &[],
-                );
-            }
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer.buffer], &[0]);
-            device.cmd_bind_index_buffer(
-                command_buffer,
-                self.index_buffer.buffer,
-                0,
-                vk::IndexType::UINT32,
-            );
-            insert_command_label(
-                instance,
-                command_buffer,
-                format!("Draw {}", self.name),
-                [0.0, 0.5, 0.1, 1.0],
-            );
-            device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
-        }
-    }
-
-    fn update(
-        &mut self,
-        device: &Device,
-        _data: &RendererData,
-        _stats: &RenderStats,
-        index: usize,
-        view_proj: Mat4,
-    ) {
-        let model_data = self.ubo.get_data(&view_proj);
-
-        self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
-    }
-
-    fn destroy_swapchain(&self, device: &Device) {
-        self.material.destroy_swapchain(device);
-    }
-
-    fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData) {
-        self.material.recreate_swapchain(device, data);
-    }
-
-    fn destroy(&mut self, device: &Device) {
-        self.vertex_buffer.destroy(device);
-        self.index_buffer.destroy(device);
-        self.ubo_buffers.iter().for_each(|b| b.destroy(device));
-    }
-
-    fn clone_dyn(&self) -> Box<dyn Renderable> {
-        Box::new(self.clone())
-    }
-}
-
-impl Hash for ShadowQuad {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.vertices.hash(state);
-        self.indices.hash(state);
-        self.image.hash(state);
-    }
 }
