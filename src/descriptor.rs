@@ -76,7 +76,7 @@ impl DescriptorAllocator {
         }
     }
 
-    pub fn allocate(&mut self, device: &Device, set_layout: vk::DescriptorSetLayout) -> Result<vk::DescriptorSet, DescriptorAllocateError> {
+    pub fn allocate(&mut self, device: &Device, set_layout: &vk::DescriptorSetLayout) -> Result<vk::DescriptorSet, DescriptorAllocateError> {
         if self.current_pool.is_none() {
             let pool = self.get_pool(device).unwrap();
             self.current_pool = Some(pool);
@@ -85,9 +85,10 @@ impl DescriptorAllocator {
 
         let pool = self.current_pool.unwrap();
 
+        let layouts = vec![*set_layout];
         let allocate_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(pool)
-            .set_layouts(&[set_layout])
+            .set_layouts(&layouts)
             .build();
 
         let result = unsafe { device.allocate_descriptor_sets(&allocate_info) };
@@ -255,7 +256,7 @@ impl<'a> DescriptorBuilder<'a> {
 
     pub fn build(&'a mut self, device: &Device, layout_cache: &mut DescriptorLayoutCache, allocator: &mut DescriptorAllocator) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
         let layout = layout_cache.create_descriptor_set_layout(device, &self.bindings);
-        let set = allocator.allocate(device, layout)?;
+        let set = allocator.allocate(device, &layout)?;
 
         for write in self.writes.iter_mut() {
             write.dst_set = set;
