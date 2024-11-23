@@ -1,10 +1,10 @@
-use std::{hash::Hash, mem::size_of};
+use std::mem::size_of;
 
 use glam::Vec3;
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, RendererData
+    buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
 };
 
 #[repr(C)]
@@ -16,15 +16,9 @@ pub struct PointLight {
     pub strength: f32,
 }
 
-impl Hash for PointLight {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.position[0].to_bits().hash(state);
-        self.position[1].to_bits().hash(state);
-        self.position[2].to_bits().hash(state);
-        self.colour[0].to_bits().hash(state);
-        self.colour[1].to_bits().hash(state);
-        self.colour[2].to_bits().hash(state);
-        self.strength.to_bits().hash(state);
+impl Loadable for PointLight {
+    fn is_loaded(&self) -> bool {
+        true
     }
 }
 
@@ -41,11 +35,13 @@ impl PointLight {
 
 #[derive(Debug, Clone, Default)]
 pub struct LightGroup {
-    point_lights: Vec<u64>,
+    point_lights: Vec<usize>,
 
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub buffers: Vec<BufferWrapper>,
+
+    loaded: bool,
 }
 
 impl LightGroup {
@@ -53,7 +49,7 @@ impl LightGroup {
         instance: &Instance,
         device: &Device,
         data: &mut RendererData,
-        mut loaded_lights: Vec<u64>,
+        mut loaded_lights: Vec<usize>,
         capacity: usize,
     ) -> Self {
         let mut lights = Vec::with_capacity(capacity);
@@ -61,7 +57,7 @@ impl LightGroup {
 
         let light_data = lights
             .iter()
-            .map(|i| *data.point_light_data.get(i).unwrap())
+            .map(|i| *data.point_light_data.get(*i).unwrap())
             .collect::<Vec<PointLight>>();
 
         let mut buffers = vec![];
@@ -108,14 +104,15 @@ impl LightGroup {
             descriptor_set_layout,
             descriptor_sets,
             buffers,
+            loaded: true,
         }
     }
 
-    pub fn add_light(&mut self, device: &Device, data: &RendererData, light: u64) {
+    pub fn add_light(&mut self, device: &Device, data: &RendererData, light: usize) {
         let offset = (self.point_lights.len() * size_of::<PointLight>()) as u64;
         self.point_lights.push(light);
 
-        let light_data = data.point_light_data.get(&light).unwrap();
+        let light_data = data.point_light_data.get(light).unwrap();
 
         for buffer in self.buffers.clone() {
             buffer.copy_data_into_buffer_with_offset(
@@ -127,7 +124,7 @@ impl LightGroup {
         }
     }
 
-    pub fn get_lights(&self) -> Vec<u64> {
+    pub fn get_lights(&self) -> Vec<usize> {
         self.point_lights.clone()
     }
 
@@ -144,9 +141,8 @@ impl LightGroup {
     }
 }
 
-impl Hash for LightGroup {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.point_lights.hash(state);
-        self.descriptor_sets.hash(state);
+impl Loadable for LightGroup {
+    fn is_loaded(&self) -> bool {
+        self.loaded
     }
 }

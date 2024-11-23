@@ -37,6 +37,7 @@ pub fn generate_render_pass_images(
             attachment.1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             attachment.2,
+            false,
         ))
     }
 

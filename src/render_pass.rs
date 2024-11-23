@@ -180,15 +180,15 @@ pub fn generate_render_pass(
 #[derive(Debug, Clone)]
 pub struct SubPassRenderData {
     pub subpass_id: usize,
-    pub objects: Vec<(u64, u64)>,
-    pub light_group: u64,
-    pub camera: u64,
+    pub objects: Vec<(usize, usize)>,
+    pub light_group: usize,
+    pub camera: usize,
 
     pub command_buffers: Vec<vk::CommandBuffer>,
 }
 
 impl SubPassRenderData {
-    pub fn new(id: usize, objects: Vec<(u64, u64)>, camera: u64, light_group: u64) -> Self {
+    pub fn new(id: usize, objects: Vec<(usize, usize)>, camera: usize, light_group: usize) -> Self {
         SubPassRenderData {
             subpass_id: id,
             objects,
@@ -232,8 +232,8 @@ impl SubPassRenderData {
 
         unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
 
-        let light_group = data.light_groups.get(&self.light_group).unwrap();
-        let camera = data.cameras.get(&self.camera).unwrap();
+        let light_group = data.light_groups.get(self.light_group).unwrap();
+        let camera = data.cameras.get(self.camera).unwrap();
         let other_descriptors = vec![
             (1, camera.get_descriptor_sets()[image_index]),
             (2, light_group.get_descriptor_sets()[image_index]),
@@ -241,16 +241,8 @@ impl SubPassRenderData {
 
         self.objects
             .iter()
-            .map(|(k_o, k_m)| (data.objects.get(k_o).unwrap(), data.materials.get(k_m).unwrap()))
+            .map(|(k_o, k_m)| (data.objects.get(*k_o).unwrap(), data.materials.get(*k_m).unwrap()))
             .for_each(|(o, m)| {
-                // o.draw(
-                //     instance,
-                //     device,
-                //     command_buffer,
-                //     image_index,
-                //     other_descriptors.clone(),
-                // )
-
                 m.draw(
                     instance,
                     device,
@@ -276,24 +268,22 @@ impl SubPassRenderData {
         stats: &RenderStats,
         image_index: usize,
     ) {
-        let camera = data.cameras.get_mut(&self.camera).unwrap();
+        let camera = data.cameras.get_mut(self.camera).unwrap();
         camera.calculate_view(device, image_index);
 
         let vp = camera.proj() * camera.view();
 
-        let mut objects = self
+        let objects = self
             .objects
             .iter()
-            .map(|(k, _)| data.objects.get_key_value(k).unwrap())
-            .map(|(k, v)| (*k, v.clone()))
-            .collect::<Vec<(u64, Box<dyn Renderable>)>>();
+            .map(|(k, _)| (*k, data.objects.get(*k).unwrap().clone()))
+            .collect::<Vec<(usize, Box<dyn Renderable>)>>();
 
         objects
-            .iter_mut()
-            .for_each(|(_, o)| o.update(device, data, stats, image_index, vp));
-
-        objects.into_iter().for_each(|(k, v)| {
-            data.objects.insert(k, v).unwrap();
-        });
+            .into_iter()
+            .for_each(|(id, mut o)| {
+                o.update(device, data, stats, image_index, vp);
+                data.objects.replace(id, o);
+            });
     }
 }

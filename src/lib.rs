@@ -10,7 +10,7 @@ use thiserror::Error;
 use tracing::*;
 use winit::window::Window;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::ptr;
@@ -420,7 +420,7 @@ impl Renderer {
 
         objects
             .iter_mut()
-            .for_each(|(_, o)| o.recreate_swapchain(&self.device, &mut self.data));
+            .for_each(|o| o.recreate_swapchain(&self.device, &mut self.data));
 
         self.data.objects = objects;
 
@@ -428,7 +428,7 @@ impl Renderer {
 
         materials
             .iter_mut()
-            .for_each(|(_, m)| m.recreate_swapchain(&self.device, &mut self.data));
+            .for_each(|m| m.recreate_swapchain(&self.device, &mut self.data));
 
         self.data.materials = materials;
 
@@ -438,11 +438,11 @@ impl Renderer {
         self.data
             .cameras
             .iter_mut()
-            .for_each(|(_, c)| c.set_aspect(aspect));
+            .for_each(|c| c.set_aspect(aspect));
         self.data
             .cameras
             .iter_mut()
-            .for_each(|(_, c)| c.calculate_proj(&self.device));
+            .for_each(|c| c.calculate_proj(&self.device));
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -466,12 +466,12 @@ impl Renderer {
         self.data
             .objects
             .iter()
-            .for_each(|(_, o)| o.destroy_swapchain(&self.device));
+            .for_each(|o| o.destroy_swapchain(&self.device));
 
         self.data
             .materials
             .iter()
-            .for_each(|(_, m)| m.destroy_swapchain(&self.device));
+            .for_each(|m| m.destroy_swapchain(&self.device));
 
         self.device.destroy_render_pass(self.data.render_pass, None);
 
@@ -500,33 +500,28 @@ impl Renderer {
         let mut objects = self.data.objects.clone();
         objects
             .iter_mut()
-            .for_each(|(_, o)| o.destroy(&self.device));
+            .for_each(|o| o.destroy(&self.device));
         self.data.objects = objects;
 
         self.data
             .light_groups
             .iter()
-            .for_each(|(_, l)| l.destroy(&self.device));
+            .for_each(|l| l.destroy(&self.device));
 
         self.data
             .shaders
             .iter()
-            .for_each(|(_, s)| s.destroy(&self.device));
-
-        self.data
-            .samplers
-            .iter()
-            .for_each(|(_, s)| self.device.destroy_sampler(*s, None));
+            .for_each(|s| s.destroy(&self.device));
 
         self.data
             .textures
             .iter()
-            .for_each(|(_, t)| t.destroy(&self.device));
+            .for_each(|t| t.destroy(&self.device));
 
         self.data
             .cameras
             .iter()
-            .for_each(|(_, c)| c.destroy(&self.device));
+            .for_each(|c| c.destroy(&self.device));
 
         self.data.global_descriptor_pools.destroy(&self.device);
         self.data.global_layout_cache.destroy(&self.device);
@@ -602,15 +597,14 @@ pub struct RendererData {
     pub secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     // objects
-    pub shaders: HashMap<u64, Box<dyn Shader>>,
-    pub samplers: HashMap<u64, vk::Sampler>,
-    pub textures: HashMap<u64, Image>,
-    pub point_light_data: HashMap<u64, PointLight>,
-    pub light_groups: HashMap<u64, LightGroup>,
+    pub shaders: Record<Box<dyn Shader>>,
+    pub textures: Record<Image>,
+    pub point_light_data: Record<PointLight>,
+    pub light_groups: Record<LightGroup>,
 
-    pub objects: HashMap<u64, Box<dyn Renderable>>,
-    pub materials: HashMap<u64, Material>,
-    pub cameras: HashMap<u64, Box<dyn Camera>>,
+    pub objects: Record<Box<dyn Renderable>>,
+    pub materials: Record<Material>,
+    pub cameras: Record<Box<dyn Camera>>,
 
     pub global_descriptor_pools: DescriptorAllocator,
     pub global_layout_cache: DescriptorLayoutCache,
@@ -1129,6 +1123,8 @@ where
 }
 
 mod record {
+    use std::{slice::{Iter, IterMut}, vec::IntoIter};
+
     use thiserror::Error;
 
     pub trait Loadable {
@@ -1143,6 +1139,10 @@ mod record {
     {
         pub fn new() -> Self {
             Record(vec![])
+        }
+
+        pub fn from_vec(vec: Vec<T>) -> Self {
+            Record(vec)
         }
 
         pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
@@ -1187,6 +1187,41 @@ mod record {
             let index = self.0.len();
             self.0.push(value);
             index
+        }
+
+        pub fn replace(&mut self, index: usize, value: T) {
+            let old = self.0.get_mut(index).unwrap();
+            *old = value;
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn iter(&self) -> Iter<T> {
+            self.0.iter()
+        }
+
+        pub fn iter_mut(&mut self) -> IterMut<T> {
+            self.0.iter_mut()
+        }
+    }
+
+    impl<T> Default for Record<T>
+    where T: Loadable
+    {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl<T> IntoIterator for Record<T> {
+        type Item = T;
+    
+        type IntoIter = IntoIter<T>;
+    
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.into_iter()
         }
     }
 

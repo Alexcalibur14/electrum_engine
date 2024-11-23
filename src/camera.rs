@@ -1,13 +1,10 @@
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    mem::size_of,
-};
+use std::mem::size_of;
 
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, RendererData
+    buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
 };
 
 pub trait Camera {
@@ -33,10 +30,10 @@ pub trait Camera {
     /// Used to destroy all buffers associated with the camera
     fn destroy(&self, device: &Device);
 
-    fn hash(&self) -> u64;
-
     /// Used to implement Clone on the trait
     fn clone_dyn(&self) -> Box<dyn Camera>;
+
+    fn loaded(&self) -> bool;
 }
 
 #[repr(C)]
@@ -54,6 +51,18 @@ impl Clone for Box<dyn Camera> {
     }
 }
 
+impl Default for Box<dyn Camera> {
+    fn default() -> Self {
+        Box::new(SimpleCamera::blank())
+    }
+}
+
+impl Loadable for Box<dyn Camera> {
+    fn is_loaded(&self) -> bool {
+        self.loaded()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SimpleCamera {
     pub position: Vec3,
@@ -64,6 +73,8 @@ pub struct SimpleCamera {
     descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub buffers: Vec<BufferWrapper>,
+
+    loaded: bool,
 }
 
 impl SimpleCamera {
@@ -135,6 +146,8 @@ impl SimpleCamera {
             descriptor_set_layout,
             descriptor_sets,
             buffers,
+
+            loaded: true,
         }
     }
 
@@ -148,6 +161,8 @@ impl SimpleCamera {
             descriptor_set_layout: Default::default(),
             descriptor_sets: vec![],
             buffers: vec![],
+
+            loaded: false,
         }
     }
 
@@ -160,12 +175,6 @@ impl SimpleCamera {
             .to_euler(glam::EulerRot::XYZ)
             .into();
         self.position = self.view.to_scale_rotation_translation().2;
-    }
-}
-
-impl Default for Box<dyn Camera> {
-    fn default() -> Self {
-        Box::new(SimpleCamera::blank())
     }
 }
 
@@ -248,20 +257,9 @@ impl Camera for SimpleCamera {
     fn get_set_layout(&self) -> vk::DescriptorSetLayout {
         self.descriptor_set_layout
     }
-
-    fn hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.view.to_string().as_bytes().hash(&mut hasher);
-        self.proj().to_string().as_bytes().hash(&mut hasher);
-        self.buffers[0].buffer.as_raw().hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-impl Hash for SimpleCamera {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.projection.hash(state);
-        self.descriptor_sets.hash(state);
+    
+    fn loaded(&self) -> bool {
+        self.loaded
     }
 }
 
@@ -295,14 +293,5 @@ impl Projection {
 
         self.proj = proj;
         self.inv_proj = proj.inverse();
-    }
-}
-
-impl Hash for Projection {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (self.fov_y_rad as u32).hash(state);
-        (self.aspect_ratio as u32).hash(state);
-        (self.z_near as u32).hash(state);
-        (self.z_far as u32).hash(state);
     }
 }

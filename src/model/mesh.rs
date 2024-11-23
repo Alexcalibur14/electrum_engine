@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::{collections::HashMap, fs::File, hash::Hash, io::BufReader, mem::size_of};
+use std::{collections::HashMap, fs::File, io::BufReader, mem::size_of};
 
 use anyhow::Result;
 use glam::{vec2, vec3, Mat4, Vec3};
@@ -24,12 +24,14 @@ pub struct Quad {
     vertex_buffer: BufferWrapper,
     index_buffer: BufferWrapper,
 
-    image: (u64, u64),
+    image: usize,
 
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
     descriptor_sets: Vec<vk::DescriptorSet>,
+
+    loaded: bool,
 }
 
 impl Quad {
@@ -41,7 +43,7 @@ impl Quad {
         points: [Vec3; 4],
         normal: Vec3,
 
-        image: (u64, u64),
+        image: usize,
 
         model: Mat4,
         view: Mat4,
@@ -74,8 +76,8 @@ impl Quad {
             ubo_buffers.push(buffer);
         }
         
-        let sampler = data.samplers.get(&image.1).unwrap();
-        let texture = data.textures.get(&image.0).unwrap();
+        let texture = data.textures.get(image).unwrap();
+        let sampler = texture.sampler.unwrap();
 
         let mut descriptor_sets = vec![];
 
@@ -89,7 +91,7 @@ impl Quad {
             let image_info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(*sampler)
+                .sampler(sampler)
                 .build();
 
             let (set, _) = DescriptorBuilder::new()
@@ -112,6 +114,7 @@ impl Quad {
             descriptor_sets,
             points,
             normal,
+            loaded: true,
         }
     }
 
@@ -211,14 +214,9 @@ impl Renderable for Quad {
     fn name(&self) -> String {
         self.name.clone()
     }
-}
-
-impl Hash for Quad {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.vertices.hash(state);
-        self.indices.hash(state);
-        self.image.hash(state);
+    
+    fn loaded(&self) -> bool {
+        self.loaded
     }
 }
 
@@ -235,9 +233,11 @@ pub struct ObjectPrototype {
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
-    image: (u64, u64),
+    image: usize,
 
     descriptor_sets: Vec<vk::DescriptorSet>,
+
+    loaded: bool,
 }
 
 impl ObjectPrototype {
@@ -249,7 +249,7 @@ impl ObjectPrototype {
         model: Mat4,
         view: Mat4,
         proj: Mat4,
-        image: (u64, u64),
+        image: usize,
         name: String,
     ) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
@@ -279,8 +279,8 @@ impl ObjectPrototype {
             ubo_buffers.push(buffer);
         }
 
-        let sampler = data.samplers.get(&image.1).unwrap();
-        let texture = data.textures.get(&image.0).unwrap();
+        let texture = data.textures.get(image).unwrap();
+        let sampler = texture.sampler.unwrap();
 
         let mut descriptor_sets = vec![];
 
@@ -294,7 +294,7 @@ impl ObjectPrototype {
             let image_info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(*sampler)
+                .sampler(sampler)
                 .build();
 
             let (set, _) = DescriptorBuilder::new()
@@ -319,6 +319,8 @@ impl ObjectPrototype {
 
             descriptor_sets,
             image,
+
+            loaded: true,
         }
     }
 
@@ -415,14 +417,9 @@ impl Renderable for ObjectPrototype {
     fn name(&self) -> String {
         self.name.clone()
     }
-}
-
-impl Hash for ObjectPrototype {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.vertices.hash(state);
-        self.indices.hash(state);
-        self.image.hash(state);
+    
+    fn loaded(&self) -> bool {
+        self.loaded
     }
 }
 

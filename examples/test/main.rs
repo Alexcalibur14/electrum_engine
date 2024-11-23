@@ -1,10 +1,9 @@
 use electrum_engine::vertices::PCTVertex;
 use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 use electrum_engine::{
-    create_texture_sampler, Camera, Image, LightGroup, Material, MipLevels, ObjectPrototype, PipelineMeshSettings, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, VFShader, Vertex
+    Camera, Image, LightGroup, Material, MipLevels, ObjectPrototype, PipelineMeshSettings, PointLight, Projection, Quad, Renderer, RendererData, SimpleCamera, SubPassRenderData, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -120,35 +119,26 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     );
     camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
-    let camera_hash = get_hash(&camera);
-
-    data.cameras.insert(camera_hash, Box::new(camera.clone()));
+    let camera_id = data.cameras.push(Box::new(camera.clone()));
 
     let view = camera.view();
     let proj = camera.proj();
 
     let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
-    let red_light_hash = get_hash(&red_light);
-
-    data.point_light_data.insert(red_light_hash, red_light);
+    let red_light_id = data.point_light_data.push(red_light);
 
     let blue_light = PointLight::new(vec3(-3.0, 3.0, 0.0), vec3(0.0, 1.0, 1.0), 5.0);
-    let blue_light_hash = get_hash(&blue_light);
-
-    data.point_light_data.insert(blue_light_hash, blue_light);
+    let blue_light_id = data.point_light_data.push(blue_light);
 
     let light_group = LightGroup::new(
         &instance,
         &device,
         data,
-        vec![red_light_hash, blue_light_hash],
+        vec![red_light_id, blue_light_id],
         10,
     );
 
-    let light_group_hash = get_hash(&light_group);
-
-    data.light_groups
-        .insert(light_group_hash, light_group.clone());
+    let light_group_id = data.light_groups.push(light_group.clone());
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -157,9 +147,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
 
-    let lit_shader_hash = lit_shader.hash();
-
-    data.shaders.insert(lit_shader_hash, Box::new(lit_shader));
+    let lit_shader_id = data.shaders.push(Box::new(lit_shader));
 
     let image = Image::from_path(
         "res\\textures\\white.png",
@@ -168,23 +156,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         &device,
         &data,
         vk::Format::R8G8B8A8_SRGB,
+        true,
     );
 
-    let sampler = unsafe {
-        create_texture_sampler(
-            &instance,
-            &device,
-            &image.mip_level,
-            "white sampler".to_string(),
-        )
-    }
-    .unwrap();
-
-    let sampler_hash = get_hash(&sampler);
-    data.samplers.insert(sampler_hash, sampler);
-
-    let image_hash = get_hash(&image);
-    data.textures.insert(image_hash, image);
+    let image_id = data.textures.push(image);
 
     let image_2077 = Image::from_path(
         "res\\textures\\photomode.png",
@@ -193,23 +168,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         &device,
         &data,
         vk::Format::R8G8B8A8_SRGB,
+        true,
     );
 
-    let sampler_2077 = unsafe {
-        create_texture_sampler(
-            &instance,
-            &device,
-            &image_2077.mip_level,
-            "2077 sampler".to_string(),
-        )
-    }
-    .unwrap();
-
-    let sampler_2077_hash = get_hash(&sampler_2077);
-    data.samplers.insert(sampler_2077_hash, sampler_2077);
-
-    let image_2077_hash = get_hash(&image_2077);
-    data.textures.insert(image_2077_hash, image_2077);
+    let image_2077_id = data.textures.push(image_2077);
 
     let mut monkey = ObjectPrototype::load(
         &instance,
@@ -219,14 +181,13 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         position,
         view,
         proj,
-        (image_hash, sampler_hash),
+        image_id,
         "monkey".to_string(),
     );
     monkey.generate_vertex_buffer(&instance, &device, &data);
     monkey.generate_index_buffer(&instance, &device, &data);
 
-    let monkey_hash = get_hash(&monkey);
-    data.objects.insert(monkey_hash, Box::new(monkey));
+    let monkey_id = data.objects.push(Box::new(monkey));
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -241,7 +202,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             vec3(1.5, 0.0, 1.5),
         ],
         vec3(0.0, 1.0, 0.0),
-        (image_2077_hash, sampler_2077_hash),
+        image_2077_id,
         position,
         view,
         proj,
@@ -249,8 +210,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     );
     plane.generate(&instance, &device, &data);
 
-    let plane_hash = get_hash(&plane);
-    data.objects.insert(plane_hash, Box::new(plane));
+    let plane_id = data.objects.push(Box::new(plane));
 
     let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -265,7 +225,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             vec3(1.5, 0.0, 1.5),
         ],
         vec3(0.0, 1.0, 0.0),
-        (image_2077_hash, sampler_2077_hash),
+        image_2077_id,
         shadow_position,
         view,
         proj,
@@ -273,19 +233,9 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     );
     shadow_plane.generate(&instance, &device, &data);
 
-    let shadow_plane_hash = get_hash(&shadow_plane);
-    data.objects
-        .insert(shadow_plane_hash, Box::new(shadow_plane));
-
+    let shadow_plane_id = data.objects.push(Box::new(shadow_plane));
 
     let quad_mesh_settings = PipelineMeshSettings {
-        binding_descriptions: PCTVertex::binding_descriptions(),
-        attribute_descriptions: PCTVertex::attribute_descriptions(),
-        front_face: vk::FrontFace::CLOCKWISE,
-        ..Default::default()
-    };
-
-    let monk_mesh_settings = PipelineMeshSettings {
         binding_descriptions: PCTVertex::binding_descriptions(),
         attribute_descriptions: PCTVertex::attribute_descriptions(),
         front_face: vk::FrontFace::CLOCKWISE,
@@ -307,26 +257,26 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             .build(),
     ];
 
-    let shadow_material = Material::new(device, data, bindings.clone(), vec![], lit_shader_hash, quad_mesh_settings.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
-    let shadow_mat_hash = get_hash(&shadow_material);
-    data.materials.insert(shadow_mat_hash, shadow_material);
+    let shadow_material = Material::new(device, data, bindings.clone(), vec![], lit_shader_id, quad_mesh_settings.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
+    let shadow_mat_id = data.materials.push(shadow_material);
 
-    let quad_material = Material::new(device, data, bindings.clone(), vec![], lit_shader_hash, quad_mesh_settings, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
-    let quad_mat_hash = get_hash(&quad_material);
-    data.materials.insert(quad_mat_hash, quad_material);
+    let material = Material::new(device, data, bindings.clone(), vec![], lit_shader_id, quad_mesh_settings, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
+    let mat_id = data.materials.push(material);
 
-    let monk_material = Material::new(device, data, bindings, vec![], lit_shader_hash, monk_mesh_settings, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
-    let monk_mat_hash = get_hash(&monk_material);
-    data.materials.insert(monk_mat_hash, monk_material);
+    let render_data_0 = SubPassRenderData::new(
+        0,
+        vec![(shadow_plane_id, shadow_mat_id)],
+        camera_id,
+        light_group_id
+    );
 
-    let render_data_0 =
-        SubPassRenderData::new(0, vec![(shadow_plane_hash, shadow_mat_hash)], camera_hash, light_group_hash);
     let render_data_1 = SubPassRenderData::new(
         1,
-        vec![(plane_hash, quad_mat_hash), (monkey_hash, monk_mat_hash)],
-        camera_hash,
-        light_group_hash,
+        vec![(plane_id, mat_id), (monkey_id, mat_id)],
+        camera_id,
+        light_group_id,
     );
+    
     data.subpass_render_data = vec![render_data_0, render_data_1];
 
     let mut render_data = data.subpass_render_data.clone();
@@ -334,13 +284,4 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         .iter_mut()
         .for_each(|s| s.setup_command_buffers(&device, &data));
     data.subpass_render_data = render_data;
-}
-
-fn get_hash<T>(object: &T) -> u64
-where
-    T: Hash,
-{
-    let mut hasher = DefaultHasher::new();
-    object.hash(&mut hasher);
-    hasher.finish()
 }

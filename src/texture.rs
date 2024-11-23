@@ -10,8 +10,7 @@ use image::ImageReader;
 use crate::{
     buffer::{
         begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index,
-    },
-    set_object_name, RendererData,
+    }, set_object_name, Loadable, RendererData
 };
 
 #[allow(dead_code)]
@@ -21,12 +20,14 @@ pub enum MipLevels {
     Maximum,
 }
 
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Debug, Clone, Default)]
 pub struct Image {
     pub image: vk::Image,
     pub image_memory: vk::DeviceMemory,
     pub view: vk::ImageView,
     pub mip_level: u32,
+    pub sampler: Option<vk::Sampler>,
+    loaded: bool,
 }
 
 impl Image {
@@ -43,6 +44,7 @@ impl Image {
         usage: vk::ImageUsageFlags,
         properties: vk::MemoryPropertyFlags,
         aspects: vk::ImageAspectFlags,
+        generate_sampler: bool,
     ) -> Self {
         let mips = match mip_levels {
             MipLevels::One => 1,
@@ -60,11 +62,21 @@ impl Image {
 
         let view = unsafe { create_image_view(device, image, format, aspects, mips) }.unwrap();
 
+        let sampler = if generate_sampler {
+            Some(
+                unsafe { create_texture_sampler(instance, device, &mips, String::new()) }.unwrap()
+            )
+        } else {
+            None
+        };
+
         Image {
             image,
             image_memory,
             view,
             mip_level: mips,
+            sampler,
+            loaded: true,
         }
     }
 
@@ -75,6 +87,7 @@ impl Image {
         device: &Device,
         data: &RendererData,
         format: vk::Format,
+        generate_sampler: bool,
     ) -> Self {
         let img = ImageReader::open(path).unwrap().decode().unwrap();
         let bytes = img
@@ -105,20 +118,39 @@ impl Image {
             unsafe { create_image_view(device, image, format, vk::ImageAspectFlags::COLOR, mips) }
                 .unwrap();
 
+        let sampler = if generate_sampler {
+            Some(
+                unsafe { create_texture_sampler(instance, device, &mips, String::new()) }.unwrap()
+            )
+        } else {
+            None
+        };
+
         Image {
             image,
             image_memory,
             view,
             mip_level: mips,
+            sampler,
+            loaded: true,
         }
     }
 
     pub fn destroy(&self, device: &Device) {
         unsafe {
+            if let Some(sampler) = self.sampler {
+                device.destroy_sampler(sampler, None);
+            }
             device.destroy_image_view(self.view, None);
             device.destroy_image(self.image, None);
             device.free_memory(self.image_memory, None);
         }
+    }
+}
+
+impl Loadable for Image {
+    fn is_loaded(&self) -> bool {
+        self.loaded
     }
 }
 
