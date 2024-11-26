@@ -173,7 +173,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let image_2077_id = data.textures.push(image_2077);
 
-    let mut monkey = ObjectPrototype::load(
+    let monkey = ObjectPrototype::load(
         &instance,
         &device,
         data,
@@ -184,14 +184,12 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         image_id,
         "monkey".to_string(),
     );
-    monkey.generate_vertex_buffer(&instance, &device, &data);
-    monkey.generate_index_buffer(&instance, &device, &data);
 
     let monkey_id = data.objects.push(Box::new(monkey));
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let mut plane = Quad::new(
+    let plane = Quad::new(
         &instance,
         &device,
         data,
@@ -208,13 +206,12 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         proj,
         "Quad".to_string(),
     );
-    plane.generate(&instance, &device, &data);
 
     let plane_id = data.objects.push(Box::new(plane));
 
     let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let mut shadow_plane = Quad::new(
+    let shadow_plane = Quad::new(
         &instance,
         &device,
         data,
@@ -231,7 +228,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         proj,
         "Shadow Quad".to_string(),
     );
-    shadow_plane.generate(&instance, &device, &data);
 
     let shadow_plane_id = data.objects.push(Box::new(shadow_plane));
 

@@ -8,7 +8,7 @@ use shaderc::{CompileOptions, Compiler, ShaderKind};
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::prelude::v1_2::*;
 
-use crate::{insert_command_label, set_object_name, BufferWrapper, Loadable, RendererData};
+use crate::{insert_command_label, set_object_name, Loadable, MeshData, RendererData};
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
@@ -332,9 +332,7 @@ impl Material {
         command_buffer: vk::CommandBuffer,
         descriptor_set: vk::DescriptorSet,
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
-        vertex_buffer: BufferWrapper,
-        index_buffer: BufferWrapper,
-        index_len: u32,
+        mesh_data: &MeshData,
         name: &str,
     ) {
         unsafe {
@@ -361,10 +359,10 @@ impl Material {
                     &[],
                 );
             }
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer.buffer], &[0]);
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh_data.vertex_buffer.buffer], &[0]);
             device.cmd_bind_index_buffer(
                 command_buffer,
-                index_buffer.buffer,
+                mesh_data.index_buffer.buffer,
                 0,
                 vk::IndexType::UINT32,
             );
@@ -374,7 +372,7 @@ impl Material {
                 format!("Draw {}", name),
                 [0.0, 0.5, 0.1, 1.0],
             );
-            device.cmd_draw_indexed(command_buffer, index_len, 1, 0, 0, 0);
+            device.cmd_draw_indexed(command_buffer, mesh_data.index_count, 1, 0, 0, 0);
         }
     }
 }

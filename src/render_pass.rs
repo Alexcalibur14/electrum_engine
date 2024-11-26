@@ -249,9 +249,7 @@ impl SubPassRenderData {
                     command_buffer,
                     o.descriptor_set(image_index),
                     other_descriptors.clone(),
-                    o.vertex_buffer(),
-                    o.index_buffer(),
-                    o.index_len(),
+                    o.mesh_data(),
                     &o.name(),
                 )
             });

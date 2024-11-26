@@ -6,10 +6,10 @@ use glam::{vec2, vec3, Mat4, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, create_and_stage_buffer, vertices::PCTVertex, DescriptorBuilder, RenderStats, Renderable, RendererData
+    buffer::{create_buffer, BufferWrapper}, vertices::PCTVertex, DescriptorBuilder, RenderStats, Renderable, RendererData
 };
 
-use super::{ModelData, ModelMVP};
+use super::{MeshData, ModelData, ModelMVP};
 
 #[derive(Clone)]
 pub struct Quad {
@@ -18,11 +18,7 @@ pub struct Quad {
     points: [Vec3; 4],
     normal: Vec3,
 
-    vertices: Vec<PCTVertex>,
-    indices: Vec<u32>,
-
-    vertex_buffer: BufferWrapper,
-    index_buffer: BufferWrapper,
+    mesh_data: MeshData,
 
     image: usize,
 
@@ -51,6 +47,27 @@ impl Quad {
 
         name: String,
     ) -> Self {
+        let mut vertices = vec![];
+
+        let uvs = [
+            vec2(0.0, 0.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 1.0),
+        ];
+
+        for (i, point) in points.iter().enumerate() {
+            vertices.push(PCTVertex {
+                pos: *point,
+                tex_coord: uvs[i],
+                normal,
+            })
+        }
+
+        let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
+
+        let mesh_data = MeshData::new(instance, device, data, &vertices, &indices, &name);
+
         let ubo = ModelMVP { model, view, proj };
 
         let model_data = ubo.get_data(&(proj * view));
@@ -104,10 +121,7 @@ impl Quad {
 
         Quad {
             name,
-            vertices: vec![],
-            indices: vec![],
-            vertex_buffer: BufferWrapper::default(),
-            index_buffer: BufferWrapper::default(),
+            mesh_data,
             image,
             ubo,
             ubo_buffers,
@@ -116,52 +130,6 @@ impl Quad {
             normal,
             loaded: true,
         }
-    }
-
-    pub fn generate(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
-        let mut vertices = vec![];
-
-        let uvs = [
-            vec2(0.0, 0.0),
-            vec2(1.0, 0.0),
-            vec2(0.0, 1.0),
-            vec2(1.0, 1.0),
-        ];
-
-        for (i, point) in self.points.iter().enumerate() {
-            vertices.push(PCTVertex {
-                pos: *point,
-                tex_coord: uvs[i],
-                normal: self.normal,
-            })
-        }
-
-        let vertex_size = (size_of::<PCTVertex>() * vertices.len()) as u64;
-
-        self.vertex_buffer = create_and_stage_buffer(
-            instance,
-            device,
-            data,
-            vertex_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            Some(format!("{} Vertex Buffer", self.name)),
-            &vertices,
-        )
-        .unwrap();
-
-        let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
-        let index_size = (size_of::<u32>() * indices.len()) as u64;
-
-        self.index_buffer = create_and_stage_buffer(
-            instance,
-            device,
-            data,
-            index_size,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            Some(format!("{} Index Buffer", self.name)),
-            &indices,
-        )
-        .unwrap();
     }
 }
 
@@ -186,8 +154,7 @@ impl Renderable for Quad {
     }
 
     fn destroy(&mut self, device: &Device) {
-        self.vertex_buffer.destroy(device);
-        self.index_buffer.destroy(device);
+        self.mesh_data.destroy(device);
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
     }
 
@@ -199,18 +166,10 @@ impl Renderable for Quad {
         self.descriptor_sets[image_index]
     }
     
-    fn vertex_buffer(&self) -> BufferWrapper {
-        self.vertex_buffer
-    }
-    
-    fn index_buffer(&self) -> BufferWrapper {
-        self.index_buffer
+    fn mesh_data(&self) -> &MeshData {
+        &self.mesh_data
     }
 
-    fn index_len(&self) -> u32 {
-        6
-    }
-    
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -224,11 +183,7 @@ impl Renderable for Quad {
 pub struct ObjectPrototype {
     name: String,
 
-    vertices: Vec<PCTVertex>,
-    indices: Vec<u32>,
-
-    vertex_buffer: BufferWrapper,
-    index_buffer: BufferWrapper,
+    mesh_data: MeshData,
 
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
@@ -253,6 +208,8 @@ impl ObjectPrototype {
         name: String,
     ) -> Self {
         let (vertices, indices) = load_model_temp(path).unwrap();
+
+        let mesh_data = MeshData::new(instance, device, data, &vertices, &indices, &name);
 
         let ubo = ModelMVP { model, view, proj };
 
@@ -308,11 +265,7 @@ impl ObjectPrototype {
         ObjectPrototype {
             name,
 
-            vertices,
-            indices,
-
-            vertex_buffer: BufferWrapper::default(),
-            index_buffer: BufferWrapper::default(),
+            mesh_data,
 
             ubo,
             ubo_buffers,
@@ -322,46 +275,6 @@ impl ObjectPrototype {
 
             loaded: true,
         }
-    }
-
-    pub fn generate_vertex_buffer(
-        &mut self,
-        instance: &Instance,
-        device: &Device,
-        data: &RendererData,
-    ) {
-        let size = (size_of::<PCTVertex>() * self.vertices.len()) as u64;
-
-        self.vertex_buffer = create_and_stage_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            Some(format!("{} Vertex Buffer", self.name)),
-            &self.vertices,
-        )
-        .unwrap();
-    }
-
-    pub fn generate_index_buffer(
-        &mut self,
-        instance: &Instance,
-        device: &Device,
-        data: &RendererData,
-    ) {
-        let size = (size_of::<u32>() * self.indices.len()) as u64;
-
-        self.index_buffer = create_and_stage_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            Some(format!("{} Index Buffer", self.name)),
-            &self.indices,
-        )
-        .unwrap();
     }
 }
 
@@ -373,8 +286,7 @@ impl Renderable for ObjectPrototype {
     }
 
     fn destroy(&mut self, device: &Device) {
-        self.vertex_buffer.destroy(device);
-        self.index_buffer.destroy(device);
+        self.mesh_data.destroy(device);
         self.ubo_buffers.iter().for_each(|b| b.destroy(device));
     }
 
@@ -402,18 +314,10 @@ impl Renderable for ObjectPrototype {
         self.descriptor_sets[image_index]
     }
     
-    fn vertex_buffer(&self) -> BufferWrapper {
-        self.vertex_buffer
-    }
-    
-    fn index_buffer(&self) -> BufferWrapper {
-        self.index_buffer
+    fn mesh_data(&self) -> &MeshData {
+        &self.mesh_data
     }
 
-    fn index_len(&self) -> u32 {
-        self.indices.len() as u32
-    }
-    
     fn name(&self) -> String {
         self.name.clone()
     }
