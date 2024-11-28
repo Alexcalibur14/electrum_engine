@@ -3,7 +3,7 @@ use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 
 use electrum_engine::{
-    Camera, Image, LightGroup, Material, MipLevels, ObjectPrototype, PipelineMeshSettings, PointLight, Projection, Quad, Renderer, RendererData, SimpleCamera, SubPassRenderData, VFShader, Vertex
+    Camera, Image, LightGroup, Material, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, SubpassPipelineState, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -147,7 +147,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
 
-    let lit_shader_id = data.shaders.push(Box::new(lit_shader));
+    data.shaders.push(Box::new(lit_shader));
 
     let image = Image::from_path(
         "res\\textures\\white.png",
@@ -231,12 +231,43 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let shadow_plane_id = data.objects.push(Box::new(shadow_plane));
 
-    let quad_mesh_settings = PipelineMeshSettings {
-        binding_descriptions: PCTVertex::binding_descriptions(),
-        attribute_descriptions: PCTVertex::attribute_descriptions(),
-        front_face: vk::FrontFace::CLOCKWISE,
-        ..Default::default()
-    };
+    let mesh_state = PipelineMeshState::new(
+        PCTVertex::binding_descriptions(),
+        PCTVertex::attribute_descriptions(),
+        false,
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+    );
+
+    let subpass_state = SubpassPipelineState::new(
+        vec![
+            vk::Viewport::builder()
+                .x(0.0)
+                .y(0.0)
+                .width(data.swapchain_extent.width as f32)
+                .height(data.swapchain_extent.height as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .build(),
+        ],
+        vec![
+            vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
+            }
+        ],
+        data.msaa_samples,
+        true,
+        true,
+        vec![
+            vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)
+                .build()
+        ],
+        false,
+        vk::LogicOp::COPY,
+        [0.0, 0.0, 0.0, 0.0],
+    );
 
     let bindings = vec![
         vk::DescriptorSetLayoutBinding::builder()
@@ -253,10 +284,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             .build(),
     ];
 
-    let shadow_material = Material::new(device, data, bindings.clone(), vec![], lit_shader_id, quad_mesh_settings.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
+    let shadow_material = Material::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state.clone(), mesh_state.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
     let shadow_mat_id = data.materials.push(shadow_material);
 
-    let material = Material::new(device, data, bindings.clone(), vec![], lit_shader_id, quad_mesh_settings, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
+    let material = Material::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state, mesh_state, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
     let mat_id = data.materials.push(material);
 
     let render_data_0 = SubPassRenderData::new(

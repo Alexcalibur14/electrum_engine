@@ -390,6 +390,8 @@ impl Renderer {
     unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
         self.data.recreated = true;
 
+        info!("Recreating swapchain");
+
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
 
@@ -424,13 +426,9 @@ impl Renderer {
 
         self.data.objects = objects;
 
-        let mut materials = self.data.materials.clone();
-
-        materials
-            .iter_mut()
-            .for_each(|m| m.recreate_swapchain(&self.device, &mut self.data));
-
-        self.data.materials = materials;
+        let subpass_render_data = self.data.subpass_render_data.clone();
+        subpass_render_data.iter().for_each(|s| s.recreate_swapchain(&self.instance, &self.device, &mut self.data));
+        self.data.subpass_render_data = subpass_render_data;
 
         let aspect =
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
@@ -468,10 +466,7 @@ impl Renderer {
             .iter()
             .for_each(|o| o.destroy_swapchain(&self.device));
 
-        self.data
-            .materials
-            .iter()
-            .for_each(|m| m.destroy_swapchain(&self.device));
+        self.data.subpass_render_data.iter().for_each(|s| s.destroy_swapchain(&self.device, &self.data));
 
         self.device.destroy_render_pass(self.data.render_pass, None);
 

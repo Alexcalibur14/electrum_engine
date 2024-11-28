@@ -12,7 +12,27 @@ use crate::{insert_command_label, set_object_name, Loadable, MeshData, RendererD
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
+    fn states(&self) -> PipelineShaderState {
+        PipelineShaderState {
+            stages: self.stages(),
+            rasterisation: vk::PipelineRasterizationStateCreateInfo::builder()
+                .depth_clamp_enable(false)
+                .rasterizer_discard_enable(false)
+                .polygon_mode(vk::PolygonMode::FILL)
+                .cull_mode(vk::CullModeFlags::BACK)
+                .front_face(vk::FrontFace::CLOCKWISE)
+                .depth_bias_enable(false)
+                .build(),
+
+            tessalation: vk::PipelineTessellationStateCreateInfo::builder()
+                .build(),
+
+            dynamic: vk::PipelineDynamicStateCreateInfo::builder()
+                .build(),
+        }
+    }
     fn destroy(&self, device: &Device);
+
     fn clone_dyn(&self) -> Box<dyn Shader>;
     fn loaded(&self) -> bool;
 }
@@ -224,11 +244,12 @@ pub struct Material {
 
     pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
-    shader: usize,
-    mesh_settings: PipelineMeshSettings,
-
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
+
+    pub mesh_state: PipelineMeshState,
+    pub shader_state: PipelineShaderState,
+    pub subpass_state: SubpassPipelineState,
 
     loaded: bool,
     subpass: u32,
@@ -236,12 +257,14 @@ pub struct Material {
 
 impl Material {
     pub fn new(
+        instance: &Instance,
         device: &Device,
         data: &mut RendererData,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
-        shader: usize,
-        mesh_settings: PipelineMeshSettings,
+        shader_state: PipelineShaderState,
+        subpass_state: SubpassPipelineState,
+        mesh_state: PipelineMeshState,
         other_layouts: Vec<vk::DescriptorSetLayout>,
         subpass: u32,
     ) -> Self {
@@ -270,10 +293,7 @@ impl Material {
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
-        let pipeline = unsafe {
-            create_pipeline(device, data, shader, mesh_settings.clone(), pipeline_layout, subpass)
-        }
-        .unwrap();
+        let pipeline = create_pipeline_from_states(instance, device, pipeline_layout, &subpass_state, &shader_state, &mesh_state, subpass, data.render_pass, "").unwrap();
 
         Material {
             pipeline,
@@ -281,13 +301,15 @@ impl Material {
 
             push_constant_ranges,
 
-            shader,
-            mesh_settings,
+            mesh_state: mesh_state.clone(),
+            shader_state: shader_state.clone(),
+            subpass_state: subpass_state.clone(),
 
             descriptor_set_layout,
             other_set_layouts: other_layouts.clone(),
-            loaded: true,
+            
             subpass,
+            loaded: true,
         }
     }
 
@@ -298,7 +320,7 @@ impl Material {
         }
     }
 
-    pub fn recreate_swapchain(&mut self, device: &Device, data: &RendererData) {
+    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let mut set_layouts = vec![self.descriptor_set_layout];
 
         set_layouts.append(&mut self.other_set_layouts.clone());
@@ -310,16 +332,17 @@ impl Material {
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
-        self.pipeline = unsafe {
-            create_pipeline(
-                device,
-                data,
-                self.shader,
-                self.mesh_settings.clone(),
-                pipeline_layout,
-                self.subpass,
-            )
-        }
+        self.pipeline = create_pipeline_from_states(
+            instance,
+            device,
+            pipeline_layout,
+            &self.subpass_state,
+            &self.shader_state,
+            &self.mesh_state,
+            self.subpass,
+            data.render_pass,
+            "",
+        )
         .unwrap();
 
         self.pipeline_layout = pipeline_layout;
@@ -383,111 +406,6 @@ impl Loadable for Material {
     }
 }
 
-unsafe fn create_pipeline(
-    device: &Device,
-    data: &RendererData,
-    shader: usize,
-    mesh_settings: PipelineMeshSettings,
-    pipeline_layout: vk::PipelineLayout,
-    subpass: u32,
-) -> Result<vk::Pipeline> {
-    // Vertex Input State
-
-    let binding_descriptions = mesh_settings.binding_descriptions;
-    let attribute_descriptions = mesh_settings.attribute_descriptions;
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-        .vertex_binding_descriptions(&binding_descriptions)
-        .vertex_attribute_descriptions(&attribute_descriptions);
-
-    // Input Assembly State
-
-    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
-        .topology(mesh_settings.topology)
-        .primitive_restart_enable(false);
-
-    // Viewport State
-
-    let viewport = vk::Viewport::builder()
-        .x(0.0)
-        .y(0.0)
-        .width(data.swapchain_extent.width as f32)
-        .height(data.swapchain_extent.height as f32)
-        .min_depth(0.0)
-        .max_depth(1.0);
-
-    let scissor = vk::Rect2D::builder()
-        .offset(vk::Offset2D { x: 0, y: 0 })
-        .extent(data.swapchain_extent);
-
-    let viewports = &[viewport];
-    let scissors = &[scissor];
-    let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
-        .viewports(viewports)
-        .scissors(scissors);
-
-    // Rasterization State
-
-    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
-        .depth_clamp_enable(false)
-        .rasterizer_discard_enable(false)
-        .polygon_mode(mesh_settings.polygon_mode)
-        .line_width(mesh_settings.line_width)
-        .cull_mode(mesh_settings.cull_mode)
-        .front_face(mesh_settings.front_face)
-        .depth_bias_enable(false);
-
-    // Multisample State
-
-    let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
-        .sample_shading_enable(false)
-        .rasterization_samples(data.msaa_samples);
-
-    // Color Blend State
-
-    let attachment = vk::PipelineColorBlendAttachmentState::builder()
-        .color_write_mask(vk::ColorComponentFlags::all())
-        .blend_enable(false);
-
-    let attachments = &[attachment];
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-        .logic_op_enable(false)
-        .logic_op(vk::LogicOp::COPY)
-        .attachments(attachments)
-        .blend_constants([0.0, 0.0, 0.0, 0.0]);
-
-    // Depth state
-
-    let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::builder()
-        .depth_test_enable(true)
-        .depth_write_enable(true)
-        .depth_compare_op(vk::CompareOp::LESS)
-        .depth_bounds_test_enable(false)
-        .stencil_test_enable(false);
-
-    // Create
-
-    let shader_stages = data.shaders.get(shader).unwrap().stages();
-
-    let stages = shader_stages.as_slice();
-    let info = vk::GraphicsPipelineCreateInfo::builder()
-        .stages(stages)
-        .vertex_input_state(&vertex_input_state)
-        .input_assembly_state(&input_assembly_state)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterization_state)
-        .multisample_state(&multisample_state)
-        .depth_stencil_state(&depth_stencil_state)
-        .color_blend_state(&color_blend_state)
-        .layout(pipeline_layout)
-        .render_pass(data.render_pass)
-        .subpass(subpass);
-
-    let pipeline = device
-        .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
-        .0[0];
-
-    Ok(pipeline)
-}
 
 #[derive(Debug, Clone)]
 pub struct PipelineMeshSettings {
@@ -516,4 +434,165 @@ impl Default for PipelineMeshSettings {
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
         }
     }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct SubpassPipelineState {
+    pub viewports: Vec<vk::Viewport>,
+    pub scissors: Vec<vk::Rect2D>,
+
+    pub rasterisation_samples: vk::SampleCountFlags,
+ 
+    pub depth_test: bool,
+    pub depth_write: bool,
+
+    pub attachments: Vec<vk::PipelineColorBlendAttachmentState>,
+    pub logic_op_enable: bool,
+    pub logic_op: vk::LogicOp,
+    pub blend_constants: [f32; 4],
+}
+
+impl SubpassPipelineState {
+    pub fn new(
+        viewports: Vec<vk::Viewport>,
+        scissors: Vec<vk::Rect2D>,
+
+        rasterisation_samples: vk::SampleCountFlags,
+
+        depth_test: bool,
+        depth_write: bool,
+
+        attachments: Vec<vk::PipelineColorBlendAttachmentState>,
+        logic_op_enable: bool,
+        logic_op: vk::LogicOp,
+        blend_constants: [f32; 4],
+    ) -> Self {
+        SubpassPipelineState {
+            viewports,
+            scissors,
+            rasterisation_samples,
+            depth_test,
+            depth_write,
+            attachments,
+            logic_op_enable,
+            logic_op,
+            blend_constants,
+        }
+    }
+
+    pub fn viewport(&self) -> vk::PipelineViewportStateCreateInfo {
+        vk::PipelineViewportStateCreateInfo::builder()
+            .viewports(&self.viewports)
+            .scissors(&self.scissors)
+            .build()
+    }
+
+    pub fn multisample(&self) -> vk::PipelineMultisampleStateCreateInfo {
+        vk::PipelineMultisampleStateCreateInfo::builder()
+            .rasterization_samples(self.rasterisation_samples)
+            .sample_shading_enable(false)
+            .build()
+    }
+
+    pub fn depth_stencil(&self) -> vk::PipelineDepthStencilStateCreateInfo {
+        vk::PipelineDepthStencilStateCreateInfo::builder()
+            .depth_test_enable(self.depth_test)
+            .depth_write_enable(self.depth_write)
+            .depth_compare_op(vk::CompareOp::LESS)
+            .depth_bounds_test_enable(false)
+            .stencil_test_enable(false)
+            .build()
+    }
+
+    pub fn color_blend(&self) -> vk::PipelineColorBlendStateCreateInfo {
+        vk::PipelineColorBlendStateCreateInfo::builder()
+            .logic_op_enable(self.logic_op_enable)
+            .logic_op(self.logic_op)
+            .attachments(&self.attachments)
+            .blend_constants(self.blend_constants)
+            .build()
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct PipelineShaderState {
+    pub stages: Vec<vk::PipelineShaderStageCreateInfo>,
+    pub rasterisation: vk::PipelineRasterizationStateCreateInfo,
+    pub tessalation: vk::PipelineTessellationStateCreateInfo,
+    pub dynamic: vk::PipelineDynamicStateCreateInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct PipelineMeshState {
+    pub bindings: Vec<vk::VertexInputBindingDescription>,
+    pub attributes: Vec<vk::VertexInputAttributeDescription>,
+    pub primitive_restart: bool,
+    pub topology: vk::PrimitiveTopology,
+}
+
+impl PipelineMeshState {
+    pub fn new(
+        binding_descriptions: Vec<vk::VertexInputBindingDescription>,
+        attribute_descriptions: Vec<vk::VertexInputAttributeDescription>,
+        primitive_restart: bool,
+        topology: vk::PrimitiveTopology,
+    ) -> Self {
+        Self {
+            bindings: binding_descriptions,
+            attributes: attribute_descriptions,
+            primitive_restart,
+            topology,
+        }
+    }
+
+    pub fn vertex_input(&self) -> vk::PipelineVertexInputStateCreateInfo {
+        vk::PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(&self.bindings)
+            .vertex_attribute_descriptions(&self.attributes)
+            .build()
+    }
+
+    pub fn input_assembly(&self) -> vk::PipelineInputAssemblyStateCreateInfo {
+        vk::PipelineInputAssemblyStateCreateInfo::builder()
+            .primitive_restart_enable(self.primitive_restart)
+            .topology(self.topology)
+            .build()
+    }
+}
+
+
+pub fn create_pipeline_from_states(
+    instance: &Instance,
+    device: &Device,
+    layout: vk::PipelineLayout,
+    subpass_state: &SubpassPipelineState,
+    shader_state: &PipelineShaderState,
+    mesh_state: &PipelineMeshState,
+    subpass: u32,
+    render_pass: vk::RenderPass,
+    material_name: &str,
+) -> Result<vk::Pipeline> {
+    let create_info = vk::GraphicsPipelineCreateInfo::builder()
+        .render_pass(render_pass)
+        .subpass(subpass)
+        .stages(&shader_state.stages)
+        .vertex_input_state(&mesh_state.vertex_input())
+        .input_assembly_state(&mesh_state.input_assembly())
+        .tessellation_state(&shader_state.tessalation)
+        .viewport_state(&subpass_state.viewport())
+        .rasterization_state(&shader_state.rasterisation)
+        .multisample_state(&subpass_state.multisample())
+        .depth_stencil_state(&subpass_state.depth_stencil())
+        .color_blend_state(&subpass_state.color_blend())
+        .dynamic_state(&shader_state.dynamic)
+        .layout(layout)
+        .build();
+    
+    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None) }?.0[0];
+
+    set_object_name(instance, device, format!("{} Material Pipeline", material_name), vk::ObjectType::PIPELINE, pipeline.as_raw())?;
+
+    Ok(pipeline)
 }

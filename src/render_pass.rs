@@ -259,6 +259,19 @@ impl SubPassRenderData {
         Ok(())
     }
 
+    pub fn destroy_swapchain(&self, device: &Device, data: &RendererData) {
+        data.materials.get(self.objects[0].1).unwrap().destroy_swapchain(device);
+    }
+
+    pub fn recreate_swapchain(&self, instance: &Instance, device: &Device, data: &mut RendererData) {
+        let mut mat = data.materials.get_mut(self.objects[0].1).unwrap().clone();
+        mat.subpass_state.viewports[0].width = data.swapchain_extent.width as f32;
+        mat.subpass_state.viewports[0].height = data.swapchain_extent.height as f32;
+        mat.subpass_state.scissors[0].extent = data.swapchain_extent;
+        mat.recreate_swapchain(instance, device, data);
+        data.materials.replace(self.objects[0].1, mat);
+    }
+
     pub fn update(
         &self,
         device: &Device,
