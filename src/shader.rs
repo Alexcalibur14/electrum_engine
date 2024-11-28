@@ -237,8 +237,42 @@ pub fn compile_shader_module(
     Ok(unsafe { device.create_shader_module(&info, None) }?)
 }
 
+
+pub trait Material {
+    fn draw(
+        &self,
+        instance: &Instance,
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        descriptor_set: vk::DescriptorSet,
+        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
+        mesh_data: &MeshData,
+        object_mane: &str,
+    );
+    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData);
+
+    fn destroy_swapchain(&self, device: &Device);
+    fn destroy(&self, device: &Device);
+
+    fn clone_dyn(&self) -> Box<dyn Material>;
+    fn loaded(&self) -> bool;
+}
+
+impl Clone for Box<dyn Material> {
+    fn clone(&self) -> Self {
+        self.clone_dyn()
+    }
+}
+
+impl Loadable for Box<dyn Material> {
+    fn is_loaded(&self) -> bool {
+        self.loaded()
+    }
+}
+
+
 #[derive(Debug, Clone)]
-pub struct Material {
+pub struct BasicMaterial {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
@@ -255,7 +289,7 @@ pub struct Material {
     subpass: u32,
 }
 
-impl Material {
+impl BasicMaterial {
     pub fn new(
         instance: &Instance,
         device: &Device,
@@ -295,7 +329,7 @@ impl Material {
 
         let pipeline = create_pipeline_from_states(instance, device, pipeline_layout, &subpass_state, &shader_state, &mesh_state, subpass, data.render_pass, "").unwrap();
 
-        Material {
+        BasicMaterial {
             pipeline,
             pipeline_layout,
 
@@ -312,43 +346,10 @@ impl Material {
             loaded: true,
         }
     }
+}
 
-    pub fn destroy_swapchain(&self, device: &Device) {
-        unsafe {
-            device.destroy_pipeline(self.pipeline, None);
-            device.destroy_pipeline_layout(self.pipeline_layout, None);
-        }
-    }
-
-    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
-        let mut set_layouts = vec![self.descriptor_set_layout];
-
-        set_layouts.append(&mut self.other_set_layouts.clone());
-
-        let layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&set_layouts)
-            .push_constant_ranges(&self.push_constant_ranges)
-            .build();
-
-        let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
-
-        self.pipeline = create_pipeline_from_states(
-            instance,
-            device,
-            pipeline_layout,
-            &self.subpass_state,
-            &self.shader_state,
-            &self.mesh_state,
-            self.subpass,
-            data.render_pass,
-            "",
-        )
-        .unwrap();
-
-        self.pipeline_layout = pipeline_layout;
-    }
-
-    pub fn draw(
+impl Material for BasicMaterial {
+    fn draw(
         &self,
         instance: &Instance,
         device: &Device,
@@ -398,10 +399,55 @@ impl Material {
             device.cmd_draw_indexed(command_buffer, mesh_data.index_count, 1, 0, 0, 0);
         }
     }
-}
 
-impl Loadable for Material {
-    fn is_loaded(&self) -> bool {
+    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
+        self.subpass_state.viewports[0].width = data.swapchain_extent.width as f32;
+        self.subpass_state.viewports[0].height = data.swapchain_extent.height as f32;
+        self.subpass_state.scissors[0].extent = data.swapchain_extent;
+
+        let mut set_layouts = vec![self.descriptor_set_layout];
+
+        set_layouts.append(&mut self.other_set_layouts.clone());
+
+        let layout_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&set_layouts)
+            .push_constant_ranges(&self.push_constant_ranges)
+            .build();
+
+        let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
+
+        self.pipeline = create_pipeline_from_states(
+            instance,
+            device,
+            pipeline_layout,
+            &self.subpass_state,
+            &self.shader_state,
+            &self.mesh_state,
+            self.subpass,
+            data.render_pass,
+            "",
+        )
+        .unwrap();
+
+        self.pipeline_layout = pipeline_layout;
+    }
+
+    fn destroy_swapchain(&self, device: &Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+        }
+    }
+
+    fn destroy(&self, _device: &Device) {
+        
+    }
+
+    fn clone_dyn(&self) -> Box<dyn Material> {
+        Box::new(self.clone())
+    }
+
+    fn loaded(&self) -> bool {
         self.loaded
     }
 }

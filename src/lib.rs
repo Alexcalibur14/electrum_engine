@@ -598,7 +598,7 @@ pub struct RendererData {
     pub light_groups: Record<LightGroup>,
 
     pub objects: Record<Box<dyn Renderable>>,
-    pub materials: Record<Material>,
+    pub materials: Record<Box<dyn Material>>,
     pub cameras: Record<Box<dyn Camera>>,
 
     pub global_descriptor_pools: DescriptorAllocator,

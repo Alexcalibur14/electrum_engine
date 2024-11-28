@@ -3,7 +3,7 @@ use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 
 use electrum_engine::{
-    Camera, Image, LightGroup, Material, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, SubpassPipelineState, VFShader, Vertex
+    Camera, Image, LightGroup, BasicMaterial, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, SubpassPipelineState, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -284,11 +284,11 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             .build(),
     ];
 
-    let shadow_material = Material::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state.clone(), mesh_state.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
-    let shadow_mat_id = data.materials.push(shadow_material);
+    let shadow_material = BasicMaterial::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state.clone(), mesh_state.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
+    let shadow_mat_id = data.materials.push(Box::new(shadow_material));
 
-    let material = Material::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state, mesh_state, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
-    let mat_id = data.materials.push(material);
+    let material = BasicMaterial::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state, mesh_state, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
+    let mat_id = data.materials.push(Box::new(material));
 
     let render_data_0 = SubPassRenderData::new(
         0,
