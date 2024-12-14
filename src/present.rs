@@ -15,16 +15,16 @@ pub fn generate_render_pass_images(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
-    attachments: &Vec<(
+    attachments: &[(
         vk::AttachmentDescription,
         vk::ImageUsageFlags,
         vk::ImageAspectFlags,
-    )>,
+    )],
 ) -> Vec<Image> {
     let mut images = vec![];
 
     for attachment in attachments {
-        images.push(Image::new(
+        let image = Image::new(
             data,
             instance,
             device,
@@ -38,7 +38,9 @@ pub fn generate_render_pass_images(
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             attachment.2,
             false,
-        ))
+        );
+        
+        images.push(image)
     }
 
     images

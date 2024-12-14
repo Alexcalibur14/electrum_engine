@@ -1,5 +1,6 @@
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 pub use vulkanalia::prelude::v1_2::*;
+
 use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::vk::KhrSwapchainExtension;
 use vulkanalia::vk::{AttachmentDescription, ExtDebugUtilsExtension};
@@ -82,112 +83,6 @@ impl Renderer {
 
         unsafe { create_swapchain(window, &instance, &device, &mut data) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
-
-        // generating subpasses, render passes and attachments
-        let mut attachments = vec![
-            Attachment {
-                format: unsafe { get_depth_format(&instance, &data) }?,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_depth()
-            },
-            Attachment {
-                format: data.swapchain_format,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_colour()
-            },
-            Attachment {
-                format: data.swapchain_format,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_colour()
-            },
-            Attachment {
-                format: unsafe { get_depth_format(&instance, &data) }?,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_depth()
-            },
-            Attachment {
-                format: data.swapchain_format,
-                ..Attachment::template_present()
-            },
-        ];
-
-        attachments.iter_mut().for_each(|a| a.generate());
-
-        data.attachments = attachments.iter().map(|a| a.attachment_desc).collect();
-
-        data.subpass_data = vec![
-            SubpassData::new(
-                vk::PipelineBindPoint::GRAPHICS,
-                vec![
-                    (
-                        0,
-                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        AttachmentType::DepthStencil,
-                    ),
-                    (
-                        1,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        AttachmentType::Color,
-                    ),
-                ],
-            ),
-            SubpassData::new(
-                vk::PipelineBindPoint::GRAPHICS,
-                vec![
-                    (
-                        2,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        AttachmentType::Color,
-                    ),
-                    (
-                        3,
-                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        AttachmentType::DepthStencil,
-                    ),
-                    (
-                        4,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        AttachmentType::Resolve,
-                    ),
-                ],
-            ),
-        ];
-
-        data.render_pass = generate_render_pass(
-            &device,
-            &data.subpass_data,
-            &data.attachments,
-            &data.dependencies,
-        )
-        .unwrap();
-
-        data.swapchain_images_desc = vec![
-            (
-                attachments[0].attachment_desc,
-                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::ImageAspectFlags::DEPTH,
-            ),
-            (
-                attachments[1].attachment_desc,
-                vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                vk::ImageAspectFlags::COLOR,
-            ),
-            (
-                attachments[2].attachment_desc,
-                vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                vk::ImageAspectFlags::COLOR,
-            ),
-            (
-                attachments[3].attachment_desc,
-                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::ImageAspectFlags::DEPTH,
-            ),
-        ];
-
-        data.images =
-            generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
-
-        data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
         unsafe { create_command_pools(&instance, &device, &mut data) }.unwrap();
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
@@ -401,22 +296,11 @@ impl Renderer {
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
-        self.data.render_pass = generate_render_pass(
-            &self.device,
-            &self.data.subpass_data,
-            &self.data.attachments,
-            &self.data.dependencies,
-        )
-        .unwrap();
+        let mut rp_builder = self.data.render_pass_builder.clone();
 
-        self.data.images = generate_render_pass_images(
-            &self.instance,
-            &self.device,
-            &self.data,
-            &self.data.swapchain_images_desc,
-        );
+        (self.data.render_pass, self.data.framebuffers) = rp_builder.create_render_pass(&self.instance, &self.device, &self.data)?;
 
-        self.data.framebuffers = create_framebuffers(&self.data, &self.device)?;
+        self.data.render_pass_builder = rp_builder;
 
         let mut objects = self.data.objects.clone();
 
@@ -456,10 +340,7 @@ impl Renderer {
             .iter()
             .for_each(|f| self.device.destroy_framebuffer(*f, None));
 
-        self.data
-            .images
-            .iter()
-            .for_each(|i| i.destroy(&self.device));
+        self.data.render_pass_builder.destroy_swapchain(&self.device);
 
         self.data
             .objects
@@ -576,6 +457,7 @@ pub struct RendererData {
 
     // Pipeline
     pub render_pass: vk::RenderPass,
+    pub render_pass_builder: RenderPassBuilder,
     pub attachments: Vec<AttachmentDescription>,
     pub subpass_data: Vec<SubpassData>,
     pub dependencies: Vec<vk::SubpassDependency>,
@@ -860,20 +742,22 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     Ok(device)
 }
 
-unsafe fn get_depth_format(instance: &Instance, data: &RendererData) -> Result<vk::Format> {
+pub fn get_depth_format(instance: &Instance, data: &RendererData) -> Result<vk::Format> {
     let candidates = &[
         vk::Format::D32_SFLOAT,
         vk::Format::D32_SFLOAT_S8_UINT,
         vk::Format::D24_UNORM_S8_UINT,
     ];
 
-    get_supported_format(
-        instance,
-        data,
-        candidates,
-        vk::ImageTiling::OPTIMAL,
-        vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
-    )
+    unsafe { 
+        get_supported_format(
+            instance,
+            data,
+            candidates,
+            vk::ImageTiling::OPTIMAL,
+            vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
+        ) 
+    }
 }
 
 unsafe fn get_supported_format(

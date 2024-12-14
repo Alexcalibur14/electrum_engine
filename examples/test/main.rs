@@ -3,7 +3,7 @@ use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 
 use electrum_engine::{
-    Camera, Image, LightGroup, BasicMaterial, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, SubpassPipelineState, VFShader, Vertex
+    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, SubpassBuilder, SubpassPipelineState, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -41,6 +41,7 @@ impl ApplicationHandler for App {
             .create_window(Window::default_attributes())
             .unwrap();
         let mut renderer = Renderer::create(&window).unwrap();
+        setup_renderpass(&renderer.instance, &renderer.device, &mut renderer.data);
         pre_load_objects(&renderer.instance, &renderer.device, &mut renderer.data);
 
         self.window = Some(window);
@@ -103,6 +104,62 @@ impl ApplicationHandler for App {
             _ => {}
         }
     }
+}
+
+fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererData) {
+    let mut attachments = vec![
+        Attachment {
+            format: get_depth_format(&instance, &data).unwrap(),
+            sample_count: data.msaa_samples,
+            ..Attachment::template_depth()
+        },
+        Attachment {
+            format: data.swapchain_format,
+            sample_count: data.msaa_samples,
+            ..Attachment::template_colour()
+        },
+        Attachment {
+            format: data.swapchain_format,
+            sample_count: data.msaa_samples,
+            ..Attachment::template_colour()
+        },
+        Attachment {
+            format: get_depth_format(&instance, &data).unwrap(),
+            sample_count: data.msaa_samples,
+            ..Attachment::template_depth()
+        },
+        Attachment {
+            format: data.swapchain_format,
+            ..Attachment::template_present()
+        },
+    ];
+
+    attachments.iter_mut().for_each(|a| a.generate());
+
+    let subpass_1 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
+        .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .add_color_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .build();
+
+    let subpass_2 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
+        .add_color_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .add_resolve_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .build();
+
+    let mut render_pass_builder = RenderPassBuilder::new()
+        .add_attachment(attachments[0].attachment_desc, AttachmentUse::Depth)
+        .add_attachment(attachments[1].attachment_desc, AttachmentUse::Color)
+        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Color)
+        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Depth)
+        .add_attachment(attachments[4].attachment_desc, AttachmentUse::Color)
+        .add_subpass(&subpass_1, &[(0, None), (1, None)])
+        .add_subpass(&subpass_2, &[(2, None), (3, None), (4, None)])
+        .build();
+
+    (data.render_pass, data.framebuffers) = render_pass_builder.create_render_pass(instance, device, data).unwrap();
+
+    data.render_pass_builder = render_pass_builder;
 }
 
 fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererData) {
