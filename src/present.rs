@@ -46,33 +46,6 @@ pub fn generate_render_pass_images(
     images
 }
 
-pub(crate) unsafe fn create_framebuffers(
-    data: &RendererData,
-    device: &Device,
-) -> Result<Vec<vk::Framebuffer>> {
-    let framebuffers = data
-        .swapchain_image_views
-        .iter()
-        .map(|i| {
-            let mut views = data.images.iter().map(|i| i.view).collect::<Vec<_>>();
-            views.push(*i);
-
-            let info = vk::FramebufferCreateInfo::builder()
-                .render_pass(data.render_pass)
-                .attachments(&views)
-                .width(data.swapchain_extent.width)
-                .height(data.swapchain_extent.height)
-                .layers(1)
-                .build();
-
-            device.create_framebuffer(&info, None)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-
-    Ok(framebuffers)
-}
-
 pub(crate) unsafe fn create_swapchain(
     window: &Window,
     instance: &Instance,

@@ -447,11 +447,6 @@ pub struct RendererData {
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_images_desc: Vec<(
-        AttachmentDescription,
-        vk::ImageUsageFlags,
-        vk::ImageAspectFlags,
-    )>,
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
 
@@ -459,12 +454,9 @@ pub struct RendererData {
     pub render_pass: vk::RenderPass,
     pub render_pass_builder: RenderPassBuilder,
     pub attachments: Vec<AttachmentDescription>,
-    pub subpass_data: Vec<SubpassData>,
-    pub dependencies: Vec<vk::SubpassDependency>,
     pub subpass_render_data: Vec<SubPassRenderData>,
 
     // Framebuffers
-    pub images: Vec<Image>,
     pub framebuffers: Vec<vk::Framebuffer>,
 
     // Command Buffers
