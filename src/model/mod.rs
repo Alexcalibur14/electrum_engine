@@ -14,14 +14,13 @@ pub trait Renderable {
         device: &Device,
         data: &RendererData,
         stats: &RenderStats,
-        index: usize,
-        view_proj: Mat4,
+        index: usize
     );
     fn destroy_swapchain(&self, device: &Device);
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData);
     fn destroy(&mut self, device: &Device);
     
-    fn descriptor_set(&self, image_index: usize) -> vk::DescriptorSet;
+    fn descriptor_set(&self, subpass: u32, image_index: usize) -> vk::DescriptorSet;
     
     fn mesh_data(&self) -> &MeshData;
     
@@ -55,15 +54,12 @@ pub trait Vertex {
 #[derive(Debug, Clone, Copy, Default)]
 struct ModelMVP {
     model: Mat4,
-    view: Mat4,
-    proj: Mat4,
 }
 
 impl ModelMVP {
-    pub fn get_data(&self, view_proj: &Mat4) -> ModelData {
+    pub fn get_data(&self) -> ModelData {
         ModelData {
             model: self.model,
-            mvp: *view_proj * self.model,
             normal: self.model.inverse().transpose(),
         }
     }
@@ -73,7 +69,6 @@ impl ModelMVP {
 #[derive(Debug, Clone, Copy, Default)]
 struct ModelData {
     model: Mat4,
-    mvp: Mat4,
     normal: Mat4,
 }
 
@@ -93,7 +88,7 @@ impl MeshData {
             data,
             (size_of::<T>() * vertices.len()) as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
-            Some(format!("{} Vertex Buffer", name)),
+            &format!("{} Vertex Buffer", name),
             vertices,
         ).unwrap();
 
@@ -105,7 +100,7 @@ impl MeshData {
             data,
             (size_of::<u32>() * indices.len()) as u64,
             vk::BufferUsageFlags::INDEX_BUFFER,
-            Some(format!("{} Index Buffer", name)),
+            &format!("{} Index Buffer", name),
             indices,
         ).unwrap();
 

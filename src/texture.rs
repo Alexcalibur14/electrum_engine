@@ -64,7 +64,7 @@ impl Image {
 
         let sampler = if generate_sampler {
             Some(
-                unsafe { create_texture_sampler(instance, device, &mips, String::new()) }.unwrap()
+                unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap()
             )
         } else {
             None
@@ -120,7 +120,7 @@ impl Image {
 
         let sampler = if generate_sampler {
             Some(
-                unsafe { create_texture_sampler(instance, device, &mips, String::new()) }.unwrap()
+                unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap()
             )
         } else {
             None
@@ -221,7 +221,7 @@ pub unsafe fn create_texture_image(
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-        Some("Image staging buffer".to_string()),
+        "Image staging buffer",
     )?;
 
     // Copy (staging)
@@ -318,7 +318,7 @@ unsafe fn transition_image_layout(
         instance,
         device,
         data,
-        "Transition Image Layout".to_string(),
+        "Transition Image Layout",
     )?;
 
     let subresource = vk::ImageSubresourceRange::builder()
@@ -363,7 +363,7 @@ unsafe fn copy_buffer_to_image(
     height: u32,
 ) -> Result<()> {
     let command_buffer =
-        begin_single_time_commands(instance, device, data, "Copy Buffer To Image".to_string())?;
+        begin_single_time_commands(instance, device, data, "Copy Buffer To Image")?;
 
     let subresource = vk::ImageSubresourceLayers::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -423,7 +423,7 @@ pub unsafe fn create_texture_sampler(
     instance: &Instance,
     device: &Device,
     mip_level: &u32,
-    name: String,
+    name: &str,
 ) -> Result<vk::Sampler> {
     let info = vk::SamplerCreateInfo::builder()
         .mag_filter(vk::Filter::LINEAR)
@@ -480,7 +480,7 @@ unsafe fn generate_mipmaps(
     // Mipmaps
 
     let command_buffer =
-        begin_single_time_commands(instance, device, data, "Generate MipMaps".to_string())?;
+        begin_single_time_commands(instance, device, data, "Generate MipMaps")?;
 
     let subresource = vk::ImageSubresourceRange::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)

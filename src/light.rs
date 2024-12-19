@@ -57,23 +57,21 @@ impl LightGroup {
 
         let light_data = lights
             .iter()
-            .map(|i| *data.point_light_data.get(*i).unwrap())
+            .map(|i| *data.point_light_data.get_loaded(*i).unwrap())
             .collect::<Vec<PointLight>>();
 
         let mut buffers = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    (size_of::<PointLight>() * capacity) as u64,
-                    vk::BufferUsageFlags::STORAGE_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("Light Buffer {}", i)),
-                )
-            }
+            let buffer = create_buffer(
+                instance,
+                device,
+                data,
+                (size_of::<PointLight>() * capacity) as u64,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                &format!("Light Buffer {}", i),
+            )
             .unwrap();
 
             buffer.copy_vec_into_buffer(device, &light_data);
@@ -112,14 +110,13 @@ impl LightGroup {
         let offset = (self.point_lights.len() * size_of::<PointLight>()) as u64;
         self.point_lights.push(light);
 
-        let light_data = data.point_light_data.get(light).unwrap();
+        let light_data = data.point_light_data.get_loaded(light).unwrap();
 
         for buffer in self.buffers.clone() {
             buffer.copy_data_into_buffer_with_offset(
                 device,
                 &light_data,
                 offset,
-                size_of::<PointLight>() as u64,
             );
         }
     }

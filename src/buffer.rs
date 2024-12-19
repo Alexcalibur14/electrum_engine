@@ -14,7 +14,7 @@ pub unsafe fn begin_single_time_commands(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
-    name: String,
+    name: &str,
 ) -> Result<vk::CommandBuffer> {
     let info = vk::CommandBufferAllocateInfo::builder()
         .level(vk::CommandBufferLevel::PRIMARY)
@@ -55,62 +55,65 @@ pub unsafe fn end_single_time_commands(
     Ok(())
 }
 
-/// # Safety
-/// the `properties` field must contain flags that work together
-pub unsafe fn create_buffer(
+pub fn execute_command<F>(instance: &Instance, device: &Device, data: &RendererData, name: &str, f: F)
+where F: FnOnce(vk::CommandBuffer)
+{
+    let command_buffer = unsafe { begin_single_time_commands(instance, device, data, name) }.unwrap();
+    f(command_buffer);
+    unsafe { end_single_time_commands(instance, device, data, command_buffer) }.unwrap();
+}
+
+pub fn create_buffer(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
-    name: Option<String>,
+    name: &str,
 ) -> Result<BufferWrapper> {
     let buffer_info = vk::BufferCreateInfo::builder()
         .size(size)
         .usage(usage)
         .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-    let buffer = device.create_buffer(&buffer_info, None)?;
+    let buffer = unsafe { device.create_buffer(&buffer_info, None)? };
 
-    let requirements = device.get_buffer_memory_requirements(buffer);
+    let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
 
-    let memory_info = vk::MemoryAllocateInfo::builder()
-        .allocation_size(requirements.size)
-        .memory_type_index(get_memory_type_index(
-            instance,
-            data,
-            properties,
-            requirements,
-        )?);
+    let memory_info = unsafe { vk::MemoryAllocateInfo::builder()
+            .allocation_size(requirements.size)
+            .memory_type_index(get_memory_type_index(
+                instance,
+                data,
+                properties,
+                requirements,
+            )?) };
 
-    let buffer_memory = device.allocate_memory(&memory_info, None)?;
+    let buffer_memory = unsafe { device.allocate_memory(&memory_info, None)? };
 
-    device.bind_buffer_memory(buffer, buffer_memory, 0)?;
+    unsafe { device.bind_buffer_memory(buffer, buffer_memory, 0)? };
 
     let wrapper = BufferWrapper {
         buffer,
         memory: buffer_memory,
-        size,
     };
 
-    if let Some(object_name) = name {
-        set_object_name(
-            instance,
-            device,
-            object_name.clone(),
-            vk::ObjectType::BUFFER,
-            buffer.as_raw(),
-        )?;
+    set_object_name(
+        instance,
+        device,
+        name,
+        vk::ObjectType::BUFFER,
+        buffer.as_raw(),
+    )?;
 
-        set_object_name(
-            instance,
-            device,
-            object_name + " Memory",
-            vk::ObjectType::DEVICE_MEMORY,
-            buffer_memory.as_raw(),
-        )?;
-    }
+    set_object_name(
+        instance,
+        device,
+        &(name.to_owned() + " Memory"),
+        vk::ObjectType::DEVICE_MEMORY,
+        buffer_memory.as_raw(),
+    )?;
 
     Ok(wrapper)
 }
@@ -146,7 +149,7 @@ pub fn copy_buffer(
 ) -> Result<()> {
     unsafe {
         let command_buffer =
-            begin_single_time_commands(instance, device, data, "Copy Buffer".to_string())?;
+            begin_single_time_commands(instance, device, data, "Copy Buffer")?;
 
         let regions = vk::BufferCopy::builder()
             .src_offset(0)
@@ -166,35 +169,31 @@ pub fn create_and_stage_buffer<T>(
     data: &RendererData,
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
-    name: Option<String>,
+    name: &str,
     bytes: &[T],
 ) -> Result<BufferWrapper> {
-    let staging_buffer = unsafe {
-        create_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            None,
-        )
-    }
+    let staging_buffer = create_buffer(
+        instance,
+        device,
+        data,
+        size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        "",
+    )
     .unwrap();
 
     staging_buffer.copy_vec_into_buffer(device, bytes);
 
-    let buffer = unsafe {
-        create_buffer(
-            instance,
-            device,
-            data,
-            size,
-            vk::BufferUsageFlags::TRANSFER_DST | usage,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            name,
-        )
-    }
+    let buffer = create_buffer(
+        instance,
+        device,
+        data,
+        size,
+        vk::BufferUsageFlags::TRANSFER_DST | usage,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        name,
+    )
     .unwrap();
 
     copy_buffer(
@@ -215,7 +214,6 @@ pub fn create_and_stage_buffer<T>(
 pub struct BufferWrapper {
     pub buffer: vk::Buffer,
     pub memory: vk::DeviceMemory,
-    size: u64,
 }
 
 impl BufferWrapper {
@@ -229,7 +227,7 @@ impl BufferWrapper {
     /// Copies data into the buffer, if you are trying to copy a vec use `copy_vec_into_buffer`
     pub fn copy_data_into_buffer<T>(&self, device: &Device, data: &T) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data, buffer_mem.cast(), 1) };
@@ -243,10 +241,9 @@ impl BufferWrapper {
         device: &Device,
         data: &T,
         offset: u64,
-        size: u64,
     ) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, offset, size, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, offset, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data, buffer_mem.cast(), 1) };
@@ -257,7 +254,7 @@ impl BufferWrapper {
     /// Copies a vec into the buffer
     pub fn copy_vec_into_buffer<T>(&self, device: &Device, data: &[T]) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
@@ -271,10 +268,9 @@ impl BufferWrapper {
         device: &Device,
         data: &[T],
         offset: u64,
-        size: u64,
     ) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, offset, size, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, offset, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };

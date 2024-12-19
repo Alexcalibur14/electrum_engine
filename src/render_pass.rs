@@ -89,8 +89,8 @@ pub enum AttachmentType {
 }
 
 #[derive(Debug, Clone)]
-pub struct SubPassRenderData {
-    pub subpass_id: usize,
+pub struct SubpassRenderData {
+    pub subpass_id: u32,
     pub objects: Vec<(usize, usize)>,
     pub light_group: usize,
     pub camera: usize,
@@ -98,9 +98,9 @@ pub struct SubPassRenderData {
     pub command_buffers: Vec<vk::CommandBuffer>,
 }
 
-impl SubPassRenderData {
-    pub fn new(id: usize, objects: Vec<(usize, usize)>, camera: usize, light_group: usize) -> Self {
-        SubPassRenderData {
+impl SubpassRenderData {
+    pub fn new(id: u32, objects: Vec<(usize, usize)>, camera: usize, light_group: usize) -> Self {
+        SubpassRenderData {
             subpass_id: id,
             objects,
             light_group,
@@ -143,8 +143,8 @@ impl SubPassRenderData {
 
         unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
 
-        let light_group = data.light_groups.get(self.light_group).unwrap();
-        let camera = data.cameras.get(self.camera).unwrap();
+        let light_group = data.light_groups.get_loaded(self.light_group).unwrap();
+        let camera = data.cameras.get_loaded(self.camera).unwrap();
         let other_descriptors = vec![
             (1, camera.get_descriptor_sets()[image_index]),
             (2, light_group.get_descriptor_sets()[image_index]),
@@ -152,13 +152,13 @@ impl SubPassRenderData {
 
         self.objects
             .iter()
-            .map(|(k_o, k_m)| (data.objects.get(*k_o).unwrap(), data.materials.get(*k_m).unwrap()))
+            .map(|(k_o, k_m)| (data.objects.get_loaded(*k_o).unwrap(), data.materials.get_loaded(*k_m).unwrap()))
             .for_each(|(o, m)| {
                 m.draw(
                     instance,
                     device,
                     command_buffer,
-                    o.descriptor_set(image_index),
+                    o.descriptor_set(self.subpass_id, image_index),
                     other_descriptors.clone(),
                     o.mesh_data(),
                     &o.name(),
@@ -171,13 +171,13 @@ impl SubPassRenderData {
     }
 
     pub fn destroy_swapchain(&self, device: &Device, data: &RendererData) {
-        data.materials.get(self.objects[0].1).unwrap().destroy_swapchain(device);
+        data.materials.get_loaded(self.objects[0].1).unwrap().destroy_swapchain(device);
     }
 
     pub fn recreate_swapchain(&self, instance: &Instance, device: &Device, data: &mut RendererData) {
-        let mut mat = data.materials.get_mut(self.objects[0].1).unwrap().clone();
+        let mut mat = data.materials.get_mut_loaded(self.objects[0].1).unwrap().clone();
         mat.recreate_swapchain(instance, device, data);
-        data.materials.replace(self.objects[0].1, mat);
+        data.materials[self.objects[0].1] = mat;
     }
 
     pub fn update(
@@ -187,22 +187,20 @@ impl SubPassRenderData {
         stats: &RenderStats,
         image_index: usize,
     ) {
-        let camera = data.cameras.get_mut(self.camera).unwrap();
+        let camera = data.cameras.get_mut_loaded(self.camera).unwrap();
         camera.calculate_view(device, image_index);
-
-        let vp = camera.proj() * camera.view();
 
         let objects = self
             .objects
             .iter()
-            .map(|(k, _)| (*k, data.objects.get(*k).unwrap().clone()))
+            .map(|(k, _)| (*k, data.objects.get_loaded(*k).unwrap().clone()))
             .collect::<Vec<(usize, Box<dyn Renderable>)>>();
 
         objects
             .into_iter()
             .for_each(|(id, mut o)| {
-                o.update(device, data, stats, image_index, vp);
-                data.objects.replace(id, o);
+                o.update(device, data, stats, image_index);
+                data.objects[id] = o;
             });
     }
 }

@@ -3,7 +3,7 @@ use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubPassRenderData, SubpassBuilder, SubpassPipelineState, VFShader, Vertex
+    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassRenderData, SubpassBuilder, SubpassPipelineState, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -85,6 +85,18 @@ impl ApplicationHandler for App {
                 } else {
                     self.minimized = false;
                     renderer.resized = true;
+
+                    
+                    let aspect = size.width as f32 / size.height as f32;
+
+                    renderer.data
+                        .cameras
+                        .iter_mut()
+                        .for_each(|c| c.set_aspect(aspect));
+                    renderer.data
+                        .cameras
+                        .iter_mut()
+                        .for_each(|c| c.calculate_proj(&renderer.device));
                 }
             }
             WindowEvent::CloseRequested => {
@@ -167,8 +179,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let projection = Projection::new(PI / 4.0, aspect, 0.1, 100.0);
     let mut camera = SimpleCamera::new(
-        &instance,
-        &device,
+        instance,
+        device,
         data,
         vec3(0.0, 4.0, 4.0),
         vec3(0.0, 0.0, 0.0),
@@ -178,9 +190,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let camera_id = data.cameras.push(Box::new(camera.clone()));
 
-    let view = camera.view();
-    let proj = camera.proj();
-
     let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
     let red_light_id = data.point_light_data.push(red_light);
 
@@ -188,8 +197,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let blue_light_id = data.point_light_data.push(blue_light);
 
     let light_group = LightGroup::new(
-        &instance,
-        &device,
+        instance,
+        device,
         data,
         vec![red_light_id, blue_light_id],
         10,
@@ -199,7 +208,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let lit_shader = VFShader::builder(&instance, &device, "Lit".to_string())
+    let lit_shader = VFShader::builder(instance, device, "Lit".to_string())
         .load_vertex("res\\shaders\\test_lit.vert.spv")
         .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
@@ -209,9 +218,9 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let image = Image::from_path(
         "res\\textures\\white.png",
         MipLevels::Maximum,
-        &instance,
-        &device,
-        &data,
+        instance,
+        device,
+        data,
         vk::Format::R8G8B8A8_SRGB,
         true,
     );
@@ -221,9 +230,9 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let image_2077 = Image::from_path(
         "res\\textures\\photomode.png",
         MipLevels::Maximum,
-        &instance,
-        &device,
-        &data,
+        instance,
+        device,
+        data,
         vk::Format::R8G8B8A8_SRGB,
         true,
     );
@@ -231,13 +240,11 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let image_2077_id = data.textures.push(image_2077);
 
     let monkey = ObjectPrototype::load(
-        &instance,
-        &device,
+        instance,
+        device,
         data,
         "res\\models\\MONKEY.obj",
         position,
-        view,
-        proj,
         image_id,
         "monkey".to_string(),
     );
@@ -247,8 +254,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
     let plane = Quad::new(
-        &instance,
-        &device,
+        instance,
+        device,
         data,
         [
             vec3(-1.5, 0.0, -1.5),
@@ -259,8 +266,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         position,
-        view,
-        proj,
         "Quad".to_string(),
     );
 
@@ -269,8 +274,8 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
     let shadow_plane = Quad::new(
-        &instance,
-        &device,
+        instance,
+        device,
         data,
         [
             vec3(-1.5, 0.0, -1.5),
@@ -281,8 +286,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         shadow_position,
-        view,
-        proj,
         "Shadow Quad".to_string(),
     );
 
@@ -341,20 +344,42 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             .build(),
     ];
 
-    let shadow_material = BasicMaterial::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state.clone(), mesh_state.clone(), vec![camera.get_set_layout(), light_group.get_set_layout()], 0);
+    let shadow_material = BasicMaterial::new(
+        instance,
+        device,
+        data,
+        bindings.clone(),
+        vec![],
+        lit_shader.states(),
+        subpass_state.clone(),
+        mesh_state.clone(),
+        vec![camera.get_set_layout(), light_group.get_set_layout()],
+        0
+    );
     let shadow_mat_id = data.materials.push(Box::new(shadow_material));
 
-    let material = BasicMaterial::new(&instance, device, data, bindings.clone(), vec![], lit_shader.states(), subpass_state, mesh_state, vec![camera.get_set_layout(), light_group.get_set_layout()], 1);
+    let material = BasicMaterial::new(
+        instance,
+        device,
+        data,
+        bindings.clone(),
+        vec![],
+        lit_shader.states(),
+        subpass_state,
+        mesh_state,
+        vec![camera.get_set_layout(), light_group.get_set_layout()],
+        1
+    );
     let mat_id = data.materials.push(Box::new(material));
 
-    let render_data_0 = SubPassRenderData::new(
+    let render_data_0 = SubpassRenderData::new(
         0,
         vec![(shadow_plane_id, shadow_mat_id)],
         camera_id,
         light_group_id
     );
 
-    let render_data_1 = SubPassRenderData::new(
+    let render_data_1 = SubpassRenderData::new(
         1,
         vec![(plane_id, mat_id), (monkey_id, mat_id)],
         camera_id,

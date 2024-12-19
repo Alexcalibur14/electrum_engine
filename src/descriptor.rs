@@ -185,7 +185,6 @@ impl DescriptorLayoutCache {
 
     pub fn destroy(&mut self, device: &Device) {
         self.cache.iter().for_each(|(_, v)| unsafe { device.destroy_descriptor_set_layout(*v, None) });
-        self.cache.clear();
     }
 }
 

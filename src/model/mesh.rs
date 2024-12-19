@@ -42,8 +42,6 @@ impl Quad {
         image: usize,
 
         model: Mat4,
-        view: Mat4,
-        proj: Mat4,
 
         name: String,
     ) -> Self {
@@ -68,24 +66,22 @@ impl Quad {
 
         let mesh_data = MeshData::new(instance, device, data, &vertices, &indices, &name);
 
-        let ubo = ModelMVP { model, view, proj };
+        let ubo = ModelMVP { model };
 
-        let model_data = ubo.get_data(&(proj * view));
+        let model_data = ubo.get_data();
 
         let mut ubo_buffers = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    size_of::<ModelData>() as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("{} UBO {}", name, i)),
-                )
-            }
+            let buffer = create_buffer(
+                instance,
+                device,
+                data,
+                size_of::<ModelData>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                &format!("{} UBO {}", name, i),
+            )
             .unwrap();
 
             buffer.copy_data_into_buffer(device, &model_data);
@@ -93,7 +89,7 @@ impl Quad {
             ubo_buffers.push(buffer);
         }
         
-        let texture = data.textures.get(image).unwrap();
+        let texture = data.textures.get_loaded(image).unwrap();
         let sampler = texture.sampler.unwrap();
 
         let mut descriptor_sets = vec![];
@@ -140,9 +136,8 @@ impl Renderable for Quad {
         _data: &RendererData,
         _stats: &RenderStats,
         index: usize,
-        view_proj: Mat4,
     ) {
-        let model_data = self.ubo.get_data(&view_proj);
+        let model_data = self.ubo.get_data();
 
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
@@ -162,7 +157,7 @@ impl Renderable for Quad {
         Box::new(self.clone())
     }
     
-    fn descriptor_set(&self, image_index: usize) -> vk::DescriptorSet {
+    fn descriptor_set(&self,  _: u32, image_index: usize) -> vk::DescriptorSet {
         self.descriptor_sets[image_index]
     }
     
@@ -202,8 +197,6 @@ impl ObjectPrototype {
         data: &mut RendererData,
         path: &str,
         model: Mat4,
-        view: Mat4,
-        proj: Mat4,
         image: usize,
         name: String,
     ) -> Self {
@@ -211,24 +204,22 @@ impl ObjectPrototype {
 
         let mesh_data = MeshData::new(instance, device, data, &vertices, &indices, &name);
 
-        let ubo = ModelMVP { model, view, proj };
+        let ubo = ModelMVP { model };
 
-        let model_data = ubo.get_data(&(proj * view));
+        let model_data = ubo.get_data();
 
         let mut ubo_buffers = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    size_of::<ModelData>() as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("{} UBO {}", name, i)),
-                )
-            }
+            let buffer = create_buffer(
+                instance,
+                device,
+                data,
+                size_of::<ModelData>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                &format!("{} UBO {}", name, i),
+            )
             .unwrap();
 
             buffer.copy_data_into_buffer(device, &model_data);
@@ -236,7 +227,7 @@ impl ObjectPrototype {
             ubo_buffers.push(buffer);
         }
 
-        let texture = data.textures.get(image).unwrap();
+        let texture = data.textures.get_loaded(image).unwrap();
         let sampler = texture.sampler.unwrap();
 
         let mut descriptor_sets = vec![];
@@ -300,20 +291,19 @@ impl Renderable for ObjectPrototype {
         _data: &RendererData,
         stats: &RenderStats,
         index: usize,
-        view_proj: Mat4,
     ) {
         self.ubo.model = Mat4::from_translation(vec3(0.0, 0.0, 0.0))
             * Mat4::from_axis_angle(Vec3::Y, stats.start.elapsed().as_secs_f32() / 2.0);
 
-        let model_data = self.ubo.get_data(&view_proj);
+        let model_data = self.ubo.get_data();
 
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
-    fn descriptor_set(&self, image_index: usize) -> vk::DescriptorSet {
+    fn descriptor_set(&self,  _: u32, image_index: usize) -> vk::DescriptorSet {
         self.descriptor_sets[image_index]
     }
-    
+
     fn mesh_data(&self) -> &MeshData {
         &self.mesh_data
     }
@@ -321,7 +311,7 @@ impl Renderable for ObjectPrototype {
     fn name(&self) -> String {
         self.name.clone()
     }
-    
+
     fn loaded(&self) -> bool {
         self.loaded
     }

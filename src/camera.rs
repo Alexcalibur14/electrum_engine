@@ -101,17 +101,15 @@ impl SimpleCamera {
         let mut buffers = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    size_of::<CameraData>() as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("Camera Data {}", i)),
-                )
-            }
+            let buffer = create_buffer(
+                instance,
+                device,
+                data,
+                size_of::<CameraData>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                &format!("Camera Data {}", i),
+            )
             .unwrap();
 
             buffer.copy_data_into_buffer(device, &camera_data);

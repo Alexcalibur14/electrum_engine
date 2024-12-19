@@ -123,7 +123,7 @@ impl VFShaderBuilder {
         set_object_name(
             &self.instance,
             &self.device,
-            self.name.clone() + " Vertex Shader",
+            &(self.name.clone() + " Vertex Shader"),
             vk::ObjectType::SHADER_MODULE,
             vertex.as_raw(),
         )
@@ -145,7 +145,7 @@ impl VFShaderBuilder {
         set_object_name(
             &self.instance,
             &self.device,
-            self.name.clone() + " Vertex Shader",
+            &(self.name.clone() + " Vertex Shader"),
             vk::ObjectType::SHADER_MODULE,
             vertex.as_raw(),
         )
@@ -164,7 +164,7 @@ impl VFShaderBuilder {
         set_object_name(
             &self.instance,
             &self.device,
-            self.name.clone() + " Fragment Shader",
+            &(self.name.clone() + " Fragment Shader"),
             vk::ObjectType::SHADER_MODULE,
             fragment.as_raw(),
         )
@@ -186,7 +186,7 @@ impl VFShaderBuilder {
         set_object_name(
             &self.instance,
             &self.device,
-            self.name.clone() + " Fragment Shader",
+            &(self.name.clone() + " Fragment Shader"),
             vk::ObjectType::SHADER_MODULE,
             fragment.as_raw(),
         )
@@ -365,6 +365,7 @@ impl Material for BasicMaterial {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline,
             );
+
             device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -383,6 +384,7 @@ impl Material for BasicMaterial {
                     &[],
                 );
             }
+
             device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh_data.vertex_buffer.buffer], &[0]);
             device.cmd_bind_index_buffer(
                 command_buffer,
@@ -390,12 +392,14 @@ impl Material for BasicMaterial {
                 0,
                 vk::IndexType::UINT32,
             );
+
             insert_command_label(
                 instance,
                 command_buffer,
-                format!("Draw {}", name),
+                &format!("Draw {}", name),
                 [0.0, 0.5, 0.1, 1.0],
             );
+            
             device.cmd_draw_indexed(command_buffer, mesh_data.index_count, 1, 0, 0, 0);
         }
     }
@@ -638,7 +642,7 @@ pub fn create_pipeline_from_states(
     
     let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None) }?.0[0];
 
-    set_object_name(instance, device, format!("{} Material Pipeline", material_name), vk::ObjectType::PIPELINE, pipeline.as_raw())?;
+    set_object_name(instance, device, &format!("{} Material Pipeline", material_name), vk::ObjectType::PIPELINE, pipeline.as_raw())?;
 
     Ok(pipeline)
 }

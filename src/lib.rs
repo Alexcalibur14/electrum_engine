@@ -242,7 +242,7 @@ impl Renderer {
         begin_command_label(
             &self.instance,
             command_buffer,
-            "Main Object Pass".to_string(),
+            "Main Object Pass",
             [0.0, 0.1, 0.5, 1.0],
         );
 
@@ -313,18 +313,6 @@ impl Renderer {
         let subpass_render_data = self.data.subpass_render_data.clone();
         subpass_render_data.iter().for_each(|s| s.recreate_swapchain(&self.instance, &self.device, &mut self.data));
         self.data.subpass_render_data = subpass_render_data;
-
-        let aspect =
-            self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
-
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|c| c.set_aspect(aspect));
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|c| c.calculate_proj(&self.device));
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -454,7 +442,7 @@ pub struct RendererData {
     pub render_pass: vk::RenderPass,
     pub render_pass_builder: RenderPassBuilder,
     pub attachments: Vec<AttachmentDescription>,
-    pub subpass_render_data: Vec<SubPassRenderData>,
+    pub subpass_render_data: Vec<SubpassRenderData>,
 
     // Framebuffers
     pub framebuffers: Vec<vk::Framebuffer>,
@@ -715,7 +703,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     set_object_name(
         instance,
         &device,
-        "Graphics Queue".to_string(),
+        "Graphics Queue",
         vk::ObjectType::QUEUE,
         graphics_queue.as_raw() as u64,
     )?;
@@ -725,7 +713,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     set_object_name(
         instance,
         &device,
-        "Present Queue".to_string(),
+        "Present Queue",
         vk::ObjectType::QUEUE,
         graphics_queue.as_raw() as u64,
     )?;
@@ -788,7 +776,7 @@ unsafe fn create_sync_objects(
         set_object_name(
             instance,
             device,
-            format!("Image Available Semaphore {}", i),
+            &format!("Image Available Semaphore {}", i),
             vk::ObjectType::SEMAPHORE,
             image_available_semaphor.as_raw(),
         )?;
@@ -799,7 +787,7 @@ unsafe fn create_sync_objects(
         set_object_name(
             instance,
             device,
-            format!("Render Finished Semaphore {}", i),
+            &format!("Render Finished Semaphore {}", i),
             vk::ObjectType::SEMAPHORE,
             render_finished_semaphor.as_raw(),
         )?;
@@ -810,7 +798,7 @@ unsafe fn create_sync_objects(
         set_object_name(
             instance,
             device,
-            format!("In Flight Fence {}", i),
+            &format!("In Flight Fence {}", i),
             vk::ObjectType::FENCE,
             in_flight_fence.as_raw(),
         )?;
@@ -916,13 +904,13 @@ extern "system" fn debug_callback(
 fn set_object_name(
     instance: &Instance,
     device: &Device,
-    name: String,
+    name: &str,
     object_type: vk::ObjectType,
     object_handle: u64,
 ) -> Result<()> {
     if VALIDATION_ENABLED {
         let name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
-            .object_name((name + "\0").as_bytes())
+            .object_name((name.to_owned() + "\0").as_bytes())
             .object_type(object_type)
             .object_handle(object_handle)
             .build();
@@ -936,12 +924,12 @@ fn set_object_name(
 fn begin_command_label(
     instance: &Instance,
     command_buffer: vk::CommandBuffer,
-    name: String,
+    name: &str,
     colour: [f32; 4],
 ) {
     if VALIDATION_ENABLED {
         let info = vk::DebugUtilsLabelEXT::builder()
-            .label_name((name + "\0").as_bytes())
+            .label_name((name.to_owned() + "\0").as_bytes())
             .color(colour)
             .build();
 
@@ -960,12 +948,12 @@ fn end_command_label(instance: &Instance, command_buffer: vk::CommandBuffer) {
 fn insert_command_label(
     instance: &Instance,
     command_buffer: vk::CommandBuffer,
-    name: String,
+    name: &str,
     colour: [f32; 4],
 ) {
     if VALIDATION_ENABLED {
         let info = vk::DebugUtilsLabelEXT::builder()
-            .label_name((name + "\0").as_bytes())
+            .label_name((name.to_owned() + "\0").as_bytes())
             .color(colour)
             .build();
 
@@ -994,7 +982,7 @@ where
 }
 
 mod record {
-    use std::{slice::{Iter, IterMut}, vec::IntoIter};
+    use std::{ops::{Index, IndexMut}, slice::{Iter, IterMut}, vec::IntoIter};
 
     use thiserror::Error;
 
@@ -1016,7 +1004,7 @@ mod record {
             Record(vec)
         }
 
-        pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
+        pub fn get_loaded(&self, index: usize) -> Result<&T, RecordGetError> {
             match self.0.get(index) {
                 Some(value) => {
                     match value.is_loaded() {
@@ -1028,7 +1016,7 @@ mod record {
             }
         }
 
-        pub fn get_mut(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
+        pub fn get_mut_loaded(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
             match self.0.get_mut(index) {
                 Some(value) => {
                     match value.is_loaded() {
@@ -1040,14 +1028,14 @@ mod record {
             }
         }
 
-        pub fn get_no_check(&self, index: usize) -> Result<&T, RecordGetError> {
+        pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
             match self.0.get(index) {
                 Some(value) => Ok(value),
                 None => Err(RecordGetError::NotInRecord(index)),
             }
         }
 
-        pub fn get_mut_no_check(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
+        pub fn get_mut(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
             match self.0.get_mut(index) {
                 Some(value) => Ok(value),
                 None => Err(RecordGetError::NotInRecord(index)),
@@ -1060,11 +1048,6 @@ mod record {
             index
         }
 
-        pub fn replace(&mut self, index: usize, value: T) {
-            let old = self.0.get_mut(index).unwrap();
-            *old = value;
-        }
-
         pub fn len(&self) -> usize {
             self.0.len()
         }
@@ -1075,6 +1058,24 @@ mod record {
 
         pub fn iter_mut(&mut self) -> IterMut<T> {
             self.0.iter_mut()
+        }
+    }
+
+    impl<T> Index<usize> for Record<T> 
+    where T: Loadable
+    {
+        type Output = T;
+    
+        fn index(&self, index: usize) -> &Self::Output {
+            self.get_loaded(index).unwrap()
+        }
+    }
+
+    impl<T> IndexMut<usize> for Record<T>
+    where T: Loadable
+    {
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            self.get_mut_loaded(index).unwrap()
         }
     }
 
@@ -1152,9 +1153,9 @@ mod record {
             record.push(Value(false));
             record.push(Value(true));
 
-            assert_eq!(record.get(0), Result::Ok(&Value(true)));
-            assert_eq!(record.get(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get(1), Result::Err(RecordGetError::NotLoaded(1)));
+            assert_eq!(record.get_loaded(0), Result::Ok(&Value(true)));
+            assert_eq!(record.get_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
         }
 
         #[test]
@@ -1166,9 +1167,9 @@ mod record {
             record.push(Value(false));
             record.push(Value(true));
 
-            assert_eq!(record.get_mut(0), Result::Ok(&mut Value(true)));
-            assert_eq!(record.get_mut(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_mut(1), Result::Err(RecordGetError::NotLoaded(1)));
+            assert_eq!(record.get_mut_loaded(0), Result::Ok(&mut Value(true)));
+            assert_eq!(record.get_mut_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_mut_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
         }
 
         #[test]
@@ -1180,9 +1181,9 @@ mod record {
             record.push(Value(false));
             record.push(Value(true));
 
-            assert_eq!(record.get_no_check(0), Result::Ok(&Value(true)));
-            assert_eq!(record.get_no_check(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_no_check(1), Result::Ok(&Value(false)));
+            assert_eq!(record.get(0), Result::Ok(&Value(true)));
+            assert_eq!(record.get(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get(1), Result::Ok(&Value(false)));
         }
 
         #[test]
@@ -1194,9 +1195,9 @@ mod record {
             record.push(Value(false));
             record.push(Value(true));
 
-            assert_eq!(record.get_mut_no_check(0), Result::Ok(&mut Value(true)));
-            assert_eq!(record.get_mut_no_check(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_mut_no_check(1), Result::Ok(&mut Value(false)));
+            assert_eq!(record.get_mut(0), Result::Ok(&mut Value(true)));
+            assert_eq!(record.get_mut(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_mut(1), Result::Ok(&mut Value(false)));
         }
     }
 }
