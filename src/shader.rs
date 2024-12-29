@@ -244,7 +244,7 @@ pub trait Material {
         instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
-        descriptor_set: vk::DescriptorSet,
+        descriptor_set: &[vk::DescriptorSet],
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         mesh_data: &MeshData,
         object_mane: &str,
@@ -278,7 +278,7 @@ pub struct BasicMaterial {
 
     pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
-    pub descriptor_set_layout: vk::DescriptorSetLayout,
+    pub descriptor_set_layout: Vec<vk::DescriptorSetLayout>,
     pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
 
     pub mesh_state: PipelineMeshState,
@@ -294,7 +294,7 @@ impl BasicMaterial {
         instance: &Instance,
         device: &Device,
         data: &mut RendererData,
-        bindings: Vec<vk::DescriptorSetLayoutBinding>,
+        bindings: Vec<Vec<vk::DescriptorSetLayoutBinding>>,
         push_constant_sizes: Vec<(u32, vk::ShaderStageFlags)>,
         shader_state: PipelineShaderState,
         subpass_state: SubpassPipelineState,
@@ -315,9 +315,12 @@ impl BasicMaterial {
             push_constant_ranges.push(range);
         }
 
-        let descriptor_set_layout = data.global_layout_cache.create_descriptor_set_layout(device, &bindings);
+        let mut descriptor_set_layout = vec![];
+        for binding in bindings {
+            descriptor_set_layout.push(data.global_layout_cache.create_descriptor_set_layout(device, &binding));
+        }
 
-        let mut set_layouts = vec![descriptor_set_layout];
+        let mut set_layouts = descriptor_set_layout.clone();
         set_layouts.append(&mut other_layouts.clone());
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
@@ -354,7 +357,7 @@ impl Material for BasicMaterial {
         instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
-        descriptor_set: vk::DescriptorSet,
+        descriptor_set: &[vk::DescriptorSet],
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         mesh_data: &MeshData,
         name: &str,
@@ -371,9 +374,10 @@ impl Material for BasicMaterial {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                &[descriptor_set],
+                descriptor_set,
                 &[],
             );
+
             for (set, descriptor) in other_descriptors {
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
@@ -409,7 +413,7 @@ impl Material for BasicMaterial {
         self.subpass_state.viewports[0].height = data.swapchain_extent.height as f32;
         self.subpass_state.scissors[0].extent = data.swapchain_extent;
 
-        let mut set_layouts = vec![self.descriptor_set_layout];
+        let mut set_layouts = self.descriptor_set_layout.clone();
 
         set_layouts.append(&mut self.other_set_layouts.clone());
 

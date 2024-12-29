@@ -20,7 +20,7 @@ pub trait Renderable {
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData);
     fn destroy(&mut self, device: &Device);
     
-    fn descriptor_set(&self, subpass: u32, image_index: usize) -> vk::DescriptorSet;
+    fn descriptor_set(&self, subpass: u32, image_index: usize) -> &[vk::DescriptorSet];
     
     fn mesh_data(&self) -> &MeshData;
     

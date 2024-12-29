@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform ModelViewProjection {
     mat4 normal_matrix;
 };
 
-layout(set = 1, binding = 0) uniform CameraData {
+layout(set = 2, binding = 0) uniform CameraData {
     vec3 position;
     mat4 view;
     mat4 proj;

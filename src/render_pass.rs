@@ -146,8 +146,8 @@ impl SubpassRenderData {
         let light_group = data.light_groups.get_loaded(self.light_group).unwrap();
         let camera = data.cameras.get_loaded(self.camera).unwrap();
         let other_descriptors = vec![
-            (1, camera.get_descriptor_sets()[image_index]),
-            (2, light_group.get_descriptor_sets()[image_index]),
+            (2, camera.get_descriptor_sets()[image_index]),
+            (3, light_group.get_descriptor_sets()[image_index]),
         ];
 
         self.objects

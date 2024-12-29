@@ -25,7 +25,7 @@ pub struct Quad {
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
-    descriptor_sets: Vec<vk::DescriptorSet>,
+    descriptor_sets: Vec<Vec<vk::DescriptorSet>>,
 
     loaded: bool,
 }
@@ -107,12 +107,15 @@ impl Quad {
                 .sampler(sampler)
                 .build();
 
-            let (set, _) = DescriptorBuilder::new()
+            let (model_set, _) = DescriptorBuilder::new()
                 .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .bind_image(1, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
                 .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
-            descriptor_sets.push(set);
+            let (image_set, _) = DescriptorBuilder::new()
+                .bind_image(0, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
+                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+
+            descriptor_sets.push(vec![model_set, image_set]);
         }
 
         Quad {
@@ -157,8 +160,8 @@ impl Renderable for Quad {
         Box::new(self.clone())
     }
     
-    fn descriptor_set(&self,  _: u32, image_index: usize) -> vk::DescriptorSet {
-        self.descriptor_sets[image_index]
+    fn descriptor_set(&self,  _: u32, image_index: usize) -> &[vk::DescriptorSet] {
+        &self.descriptor_sets[image_index]
     }
     
     fn mesh_data(&self) -> &MeshData {
@@ -185,7 +188,7 @@ pub struct ObjectPrototype {
 
     image: usize,
 
-    descriptor_sets: Vec<vk::DescriptorSet>,
+    descriptor_sets: Vec<Vec<vk::DescriptorSet>>,
 
     loaded: bool,
 }
@@ -245,12 +248,15 @@ impl ObjectPrototype {
                 .sampler(sampler)
                 .build();
 
-            let (set, _) = DescriptorBuilder::new()
+            let (model_set, _) = DescriptorBuilder::new()
                 .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .bind_image(1, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
                 .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
-            descriptor_sets.push(set);
+            let (image_set, _) = DescriptorBuilder::new()
+                .bind_image(0, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
+                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+
+            descriptor_sets.push(vec![model_set, image_set]);
         }
 
         ObjectPrototype {
@@ -300,8 +306,8 @@ impl Renderable for ObjectPrototype {
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
-    fn descriptor_set(&self,  _: u32, image_index: usize) -> vk::DescriptorSet {
-        self.descriptor_sets[image_index]
+    fn descriptor_set(&self,  _: u32, image_index: usize) -> &[vk::DescriptorSet] {
+        &self.descriptor_sets[image_index]
     }
 
     fn mesh_data(&self) -> &MeshData {
