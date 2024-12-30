@@ -3,7 +3,7 @@ use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PipelineMeshState, PointLight, Projection, Quad, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassRenderData, SubpassBuilder, SubpassPipelineState, VFShader, Vertex
+    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, VFShader, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -239,7 +239,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let image_2077_id = data.textures.push(image_2077);
 
-    let monkey = ObjectPrototype::load(
+    let monkey = MeshObject::from_obj(
         instance,
         device,
         data,
@@ -253,7 +253,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let plane = Quad::new(
+    let plane = MeshObject::new_quad(
         instance,
         device,
         data,
@@ -270,26 +270,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     );
 
     let plane_id = data.objects.push(Box::new(plane));
-
-    let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
-
-    let shadow_plane = Quad::new(
-        instance,
-        device,
-        data,
-        [
-            vec3(-1.5, 0.0, -1.5),
-            vec3(1.5, 0.0, -1.5),
-            vec3(-1.5, 0.0, 1.5),
-            vec3(1.5, 0.0, 1.5),
-        ],
-        vec3(0.0, 1.0, 0.0),
-        image_2077_id,
-        shadow_position,
-        "Shadow Quad".to_string(),
-    );
-
-    let shadow_plane_id = data.objects.push(Box::new(shadow_plane));
 
     let mesh_state = PipelineMeshState::new(
         PCTVertex::binding_descriptions(),
@@ -378,7 +358,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let render_data_0 = SubpassRenderData::new(
         0,
-        vec![(shadow_plane_id, shadow_mat_id)],
+        vec![(plane_id, shadow_mat_id)],
         camera_id,
         light_group_id
     );

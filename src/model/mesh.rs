@@ -12,26 +12,40 @@ use crate::{
 use super::{DescriptorManager, MeshData, ModelData, ModelMVP};
 
 #[derive(Clone)]
-pub struct Quad {
+pub struct MeshObject {
     name: String,
 
-    points: [Vec3; 4],
-    normal: Vec3,
-
     mesh_data: MeshData,
-
-    image: usize,
 
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
-    descritpor_manager: DescriptorManager,
+    image: usize,
+
+    descriptor_manager: DescriptorManager,
 
     loaded: bool,
 }
 
-impl Quad {
-    pub fn new(
+impl MeshObject {
+    pub fn from_obj(
+        instance: &Instance,
+        device: &Device,
+        data: &mut RendererData,
+
+        file_path: &str,
+
+        model: Mat4,
+        image: usize,
+
+        name: String,
+    ) -> Self {
+        let (vertices, indices) = load_model_temp(file_path).unwrap();
+
+        MeshObject::new(instance, device, data, &vertices, &indices, model, image, name)
+    }
+
+    pub fn new_quad(
         instance: &Instance,
         device: &Device,
         data: &mut RendererData,
@@ -64,15 +78,30 @@ impl Quad {
 
         let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
 
-        let mesh_data = MeshData::new(instance, device, data, &vertices, &indices, &name);
+        MeshObject::new(instance, device, data, &vertices, &indices, model, image, name)
+    }
+
+    pub fn new(
+        instance: &Instance,
+        device: &Device,
+        data: &mut RendererData,
+
+        vertices: &[PCTVertex],
+        indices: &[u32],
+
+        model: Mat4,
+        image: usize,
+
+        name: String,
+    ) -> Self {
+        let mesh_data = MeshData::new(instance, device, data, vertices, indices, &name);
 
         let ubo = ModelMVP { model };
-
         let model_data = ubo.get_data();
 
         let mut ubo_buffers = vec![];
 
-        for i in 0..data.swapchain_images.len() {
+        for _ in 0..data.swapchain_images.len() {
             let buffer = create_buffer(
                 instance,
                 device,
@@ -80,15 +109,14 @@ impl Quad {
                 size_of::<ModelData>() as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                &format!("{} UBO {}", name, i),
+                &format!("{} UBO", name),
             )
             .unwrap();
 
             buffer.copy_data_into_buffer(device, &model_data);
-
             ubo_buffers.push(buffer);
         }
-        
+
         let texture = data.textures.get_loaded(image).unwrap();
         let sampler = texture.sampler.unwrap();
 
@@ -118,26 +146,24 @@ impl Quad {
             descriptor_sets.push(vec![model_set, image_set]);
         }
 
-        let manager = DescriptorManager {
+        let descriptor_manager = DescriptorManager {
             descriptors: descriptor_sets,
             subpasses: vec![vec![0, 1], vec![0, 1]],
         };
 
-        Quad {
+        MeshObject {
             name,
             mesh_data,
-            image,
             ubo,
             ubo_buffers,
-            descritpor_manager: manager,
-            points,
-            normal,
+            image,
+            descriptor_manager,
             loaded: true,
         }
     }
 }
 
-impl Renderable for Quad {
+impl Renderable for MeshObject {
     fn update(
         &mut self,
         device: &Device,
@@ -164,160 +190,9 @@ impl Renderable for Quad {
     fn clone_dyn(&self) -> Box<dyn Renderable> {
         Box::new(self.clone())
     }
-    
-    fn descriptor_set(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
-        self.descritpor_manager.get_descriptors(subpass, image_index)
-    }
-    
-    fn mesh_data(&self) -> &MeshData {
-        &self.mesh_data
-    }
-
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-    
-    fn loaded(&self) -> bool {
-        self.loaded
-    }
-}
-
-#[derive(Clone)]
-pub struct ObjectPrototype {
-    name: String,
-
-    mesh_data: MeshData,
-
-    ubo: ModelMVP,
-    ubo_buffers: Vec<BufferWrapper>,
-
-    image: usize,
-
-    descritor_manager: DescriptorManager,
-
-    loaded: bool,
-}
-
-impl ObjectPrototype {
-    pub fn load(
-        instance: &Instance,
-        device: &Device,
-        data: &mut RendererData,
-        path: &str,
-        model: Mat4,
-        image: usize,
-        name: String,
-    ) -> Self {
-        let (vertices, indices) = load_model_temp(path).unwrap();
-
-        let mesh_data = MeshData::new(instance, device, data, &vertices, &indices, &name);
-
-        let ubo = ModelMVP { model };
-
-        let model_data = ubo.get_data();
-
-        let mut ubo_buffers = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer = create_buffer(
-                instance,
-                device,
-                data,
-                size_of::<ModelData>() as u64,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                &format!("{} UBO {}", name, i),
-            )
-            .unwrap();
-
-            buffer.copy_data_into_buffer(device, &model_data);
-
-            ubo_buffers.push(buffer);
-        }
-
-        let texture = data.textures.get_loaded(image).unwrap();
-        let sampler = texture.sampler.unwrap();
-
-        let mut descriptor_sets = vec![];
-
-        for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
-                .buffer(ubo_buffers[i].buffer)
-                .offset(0)
-                .range(size_of::<ModelData>() as u64)
-                .build();
-            
-            let image_info = vk::DescriptorImageInfo::builder()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(texture.view)
-                .sampler(sampler)
-                .build();
-
-            let (model_set, _) = DescriptorBuilder::new()
-                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
-
-            let (image_set, _) = DescriptorBuilder::new()
-                .bind_image(0, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
-
-            descriptor_sets.push(vec![model_set, image_set]);
-        }
-
-        let manager = DescriptorManager {
-            descriptors: descriptor_sets,
-            subpasses: vec![vec![0, 1], vec![0, 1]],
-        };
-
-        ObjectPrototype {
-            name,
-
-            mesh_data,
-
-            ubo,
-            ubo_buffers,
-
-            descritor_manager: manager,
-            image,
-
-            loaded: true,
-        }
-    }
-}
-
-impl Renderable for ObjectPrototype {
-    fn destroy_swapchain(&self, _device: &Device) {
-    }
-
-    fn recreate_swapchain(&mut self, _device: &Device, _data: &mut RendererData) {
-    }
-
-    fn destroy(&mut self, device: &Device) {
-        self.mesh_data.destroy(device);
-        self.ubo_buffers.iter().for_each(|b| b.destroy(device));
-    }
-
-    fn clone_dyn(&self) -> Box<dyn Renderable> {
-        Box::new(self.clone())
-    }
-
-    fn update(
-        &mut self,
-        device: &Device,
-        _data: &RendererData,
-        stats: &RenderStats,
-        index: usize,
-    ) {
-        self.ubo.model = Mat4::from_translation(vec3(0.0, 0.0, 0.0))
-            * Mat4::from_axis_angle(Vec3::Y, stats.start.elapsed().as_secs_f32() / 2.0);
-
-        let model_data = self.ubo.get_data();
-
-        self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
-    }
 
     fn descriptor_set(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
-        self.descritor_manager.get_descriptors(subpass, image_index)
+        self.descriptor_manager.get_descriptors(subpass, image_index)
     }
 
     fn mesh_data(&self) -> &MeshData {
@@ -332,6 +207,7 @@ impl Renderable for ObjectPrototype {
         self.loaded
     }
 }
+
 
 fn load_model_temp(path: &str) -> Result<(Vec<PCTVertex>, Vec<u32>)> {
     let mut reader = BufReader::new(File::open(path)?);
