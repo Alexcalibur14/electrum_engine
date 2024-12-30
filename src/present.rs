@@ -25,9 +25,9 @@ pub fn generate_render_pass_images(
 
     for attachment in attachments {
         let image = Image::new(
-            data,
             instance,
             device,
+            data,
             data.swapchain_extent.width,
             data.swapchain_extent.height,
             MipLevels::One,

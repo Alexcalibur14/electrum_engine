@@ -38,11 +38,13 @@ impl MeshObject {
         model: Mat4,
         image: usize,
 
+        descriptor_layout: Vec<Vec<usize>>,
+
         name: String,
     ) -> Self {
         let (vertices, indices) = load_model_temp(file_path).unwrap();
 
-        MeshObject::new(instance, device, data, &vertices, &indices, model, image, name)
+        MeshObject::new(instance, device, data, &vertices, &indices, model, image, descriptor_layout, name)
     }
 
     pub fn new_quad(
@@ -56,6 +58,8 @@ impl MeshObject {
         image: usize,
 
         model: Mat4,
+
+        descriptor_layout: Vec<Vec<usize>>,
 
         name: String,
     ) -> Self {
@@ -78,7 +82,7 @@ impl MeshObject {
 
         let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
 
-        MeshObject::new(instance, device, data, &vertices, &indices, model, image, name)
+        MeshObject::new(instance, device, data, &vertices, &indices, model, image, descriptor_layout, name)
     }
 
     pub fn new(
@@ -92,6 +96,7 @@ impl MeshObject {
         model: Mat4,
         image: usize,
 
+        descriptor_layout: Vec<Vec<usize>>,
         name: String,
     ) -> Self {
         let mesh_data = MeshData::new(instance, device, data, vertices, indices, &name);
@@ -148,7 +153,7 @@ impl MeshObject {
 
         let descriptor_manager = DescriptorManager {
             descriptors: descriptor_sets,
-            subpasses: vec![vec![0, 1], vec![0, 1]],
+            subpasses: descriptor_layout,
         };
 
         MeshObject {

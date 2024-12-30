@@ -1,6 +1,7 @@
 use electrum_engine::vertices::PCTVertex;
 use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
+use std::vec;
 
 use electrum_engine::{
     get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, VFShader, Vertex
@@ -201,7 +202,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         device,
         data,
         vec![red_light_id, blue_light_id],
-        10,
+        5,
     );
 
     let light_group_id = data.light_groups.push(light_group.clone());
@@ -215,12 +216,18 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     data.shaders.push(Box::new(lit_shader));
 
+    let shadow_shader = VFShader::builder(instance, device, "Lit".to_string())
+        .load_vertex("res\\shaders\\test_shadow.vert.spv")
+        .build();
+
+    data.shaders.push(Box::new(shadow_shader));
+
     let image = Image::from_path(
-        "res\\textures\\white.png",
-        MipLevels::Maximum,
         instance,
         device,
         data,
+        "res\\textures\\white.png",
+        MipLevels::Maximum,
         vk::Format::R8G8B8A8_SRGB,
         true,
     );
@@ -228,11 +235,11 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     let image_id = data.textures.push(image);
 
     let image_2077 = Image::from_path(
-        "res\\textures\\photomode.png",
-        MipLevels::Maximum,
         instance,
         device,
         data,
+        "res\\textures\\photomode.png",
+        MipLevels::Maximum,
         vk::Format::R8G8B8A8_SRGB,
         true,
     );
@@ -246,6 +253,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "res\\models\\MONKEY.obj",
         position,
         image_id,
+        vec![vec![0, 1], vec![0, 1]],
         "monkey".to_string(),
     );
 
@@ -266,6 +274,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         position,
+        vec![vec![0, 1], vec![0, 1]],
         "Quad".to_string(),
     );
 

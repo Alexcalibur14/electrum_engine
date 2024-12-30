@@ -32,9 +32,9 @@ pub struct Image {
 
 impl Image {
     pub fn new(
-        data: &RendererData,
         instance: &Instance,
         device: &Device,
+        data: &RendererData,
         width: u32,
         height: u32,
         mip_levels: MipLevels,
@@ -81,11 +81,11 @@ impl Image {
     }
 
     pub fn from_path(
-        path: &str,
-        mip_levels: MipLevels,
         instance: &Instance,
         device: &Device,
         data: &RendererData,
+        path: &str,
+        mip_levels: MipLevels,
         format: vk::Format,
         generate_sampler: bool,
     ) -> Self {
