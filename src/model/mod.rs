@@ -20,7 +20,7 @@ pub trait Renderable {
     fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData);
     fn destroy(&mut self, device: &Device);
     
-    fn descriptor_set(&self, subpass: u32, image_index: usize) -> &[vk::DescriptorSet];
+    fn descriptor_set(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet>;
     
     fn mesh_data(&self) -> &MeshData;
     
@@ -128,5 +128,23 @@ impl Default for MeshData {
             vertex_buffer: BufferWrapper::default(),
             index_buffer: BufferWrapper::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DescriptorManager {
+    pub descriptors: Vec<Vec<vk::DescriptorSet>>,
+    pub subpasses: Vec<Vec<usize>>,
+}
+
+impl DescriptorManager {
+    fn get_descriptors(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
+        let ids = &self.subpasses[subpass as usize];
+        let mut descriptors = Vec::with_capacity(ids.len());
+        for id in ids {
+            descriptors.push(self.descriptors[image_index][*id]);
+        }
+
+        descriptors
     }
 }

@@ -244,7 +244,7 @@ pub trait Material {
         instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
-        descriptor_set: &[vk::DescriptorSet],
+        descriptor_set: Vec<vk::DescriptorSet>,
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         mesh_data: &MeshData,
         object_mane: &str,
@@ -357,7 +357,7 @@ impl Material for BasicMaterial {
         instance: &Instance,
         device: &Device,
         command_buffer: vk::CommandBuffer,
-        descriptor_set: &[vk::DescriptorSet],
+        descriptor_set: Vec<vk::DescriptorSet>,
         other_descriptors: Vec<(u32, vk::DescriptorSet)>,
         mesh_data: &MeshData,
         name: &str,
@@ -374,7 +374,7 @@ impl Material for BasicMaterial {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                descriptor_set,
+                &descriptor_set,
                 &[],
             );
 

@@ -9,7 +9,7 @@ use crate::{
     buffer::{create_buffer, BufferWrapper}, vertices::PCTVertex, DescriptorBuilder, RenderStats, Renderable, RendererData
 };
 
-use super::{MeshData, ModelData, ModelMVP};
+use super::{DescriptorManager, MeshData, ModelData, ModelMVP};
 
 #[derive(Clone)]
 pub struct Quad {
@@ -25,7 +25,7 @@ pub struct Quad {
     ubo: ModelMVP,
     ubo_buffers: Vec<BufferWrapper>,
 
-    descriptor_sets: Vec<Vec<vk::DescriptorSet>>,
+    descritpor_manager: DescriptorManager,
 
     loaded: bool,
 }
@@ -118,13 +118,18 @@ impl Quad {
             descriptor_sets.push(vec![model_set, image_set]);
         }
 
+        let manager = DescriptorManager {
+            descriptors: descriptor_sets,
+            subpasses: vec![vec![0, 1], vec![0, 1]],
+        };
+
         Quad {
             name,
             mesh_data,
             image,
             ubo,
             ubo_buffers,
-            descriptor_sets,
+            descritpor_manager: manager,
             points,
             normal,
             loaded: true,
@@ -160,8 +165,8 @@ impl Renderable for Quad {
         Box::new(self.clone())
     }
     
-    fn descriptor_set(&self,  _: u32, image_index: usize) -> &[vk::DescriptorSet] {
-        &self.descriptor_sets[image_index]
+    fn descriptor_set(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
+        self.descritpor_manager.get_descriptors(subpass, image_index)
     }
     
     fn mesh_data(&self) -> &MeshData {
@@ -188,7 +193,7 @@ pub struct ObjectPrototype {
 
     image: usize,
 
-    descriptor_sets: Vec<Vec<vk::DescriptorSet>>,
+    descritor_manager: DescriptorManager,
 
     loaded: bool,
 }
@@ -259,6 +264,11 @@ impl ObjectPrototype {
             descriptor_sets.push(vec![model_set, image_set]);
         }
 
+        let manager = DescriptorManager {
+            descriptors: descriptor_sets,
+            subpasses: vec![vec![0, 1], vec![0, 1]],
+        };
+
         ObjectPrototype {
             name,
 
@@ -267,7 +277,7 @@ impl ObjectPrototype {
             ubo,
             ubo_buffers,
 
-            descriptor_sets,
+            descritor_manager: manager,
             image,
 
             loaded: true,
@@ -306,8 +316,8 @@ impl Renderable for ObjectPrototype {
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
-    fn descriptor_set(&self,  _: u32, image_index: usize) -> &[vk::DescriptorSet] {
-        &self.descriptor_sets[image_index]
+    fn descriptor_set(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
+        self.descritor_manager.get_descriptors(subpass, image_index)
     }
 
     fn mesh_data(&self) -> &MeshData {
