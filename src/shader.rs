@@ -50,21 +50,24 @@ impl Loadable for Box<dyn Shader> {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VFShader {
+pub struct GraphicsShader {
     pub vertex: vk::ShaderModule,
     pub fragment: vk::ShaderModule,
+    pub geometry: vk::ShaderModule,
+    pub tessalation_control: vk::ShaderModule,
+    pub tessalation_evaluation: vk::ShaderModule,
     loaded: bool,
 }
 
-impl VFShader {
-    pub fn builder(instance: &Instance, device: &Device, name: String) -> VFShaderBuilder {
-        VFShaderBuilder::new(instance.clone(), device.clone(), name)
+impl GraphicsShader {
+    pub fn builder<'a>(instance: &'a Instance, device: &'a Device, name: String) -> GraphicsShaderBuilder<'a> {
+        GraphicsShaderBuilder::new(instance, device, name)
     }
 }
 
-impl Shader for VFShader {
+impl Shader for GraphicsShader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo> {
-        vec![
+        let mut stages = vec![
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(self.vertex)
@@ -75,42 +78,91 @@ impl Shader for VFShader {
                 .module(self.fragment)
                 .name(b"main\0")
                 .build(),
-        ]
+        ];
+
+        if self.geometry != vk::ShaderModule::default() {
+            stages.push(
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::GEOMETRY)
+                    .module(self.geometry)
+                    .name(b"main\0")
+                    .build(),
+            );
+        }
+
+        if self.tessalation_control != vk::ShaderModule::default() {
+            stages.push(
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::TESSELLATION_CONTROL)
+                    .module(self.tessalation_control)
+                    .name(b"main\0")
+                    .build(),
+            );
+        }
+
+        if self.tessalation_evaluation != vk::ShaderModule::default() {
+            stages.push(
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::TESSELLATION_EVALUATION)
+                    .module(self.tessalation_evaluation)
+                    .name(b"main\0")
+                    .build(),
+            );
+        }
+
+        stages
     }
 
     fn destroy(&self, device: &Device) {
         unsafe {
             device.destroy_shader_module(self.vertex, None);
             device.destroy_shader_module(self.fragment, None);
+
+            if self.geometry != vk::ShaderModule::default() {
+                device.destroy_shader_module(self.geometry, None);
+            }
+
+            if self.tessalation_control != vk::ShaderModule::default() {
+                device.destroy_shader_module(self.tessalation_control, None);
+            }
+
+            if self.tessalation_evaluation != vk::ShaderModule::default() {
+                device.destroy_shader_module(self.tessalation_evaluation, None);
+            }
         }
     }
 
     fn clone_dyn(&self) -> Box<dyn Shader> {
-        Box::new(*self)
+        todo!()
     }
-    
+
     fn loaded(&self) -> bool {
         self.loaded
     }
-    
 }
 
-pub struct VFShaderBuilder {
-    instance: Instance,
-    device: Device,
+pub struct GraphicsShaderBuilder<'a> {
+    instance: &'a Instance,
+    device: &'a Device,
     name: String,
     vertex: vk::ShaderModule,
     fragment: vk::ShaderModule,
+    geometry: vk::ShaderModule,
+    tessalation_control: vk::ShaderModule,
+    tessalation_evaluation: vk::ShaderModule,
 }
 
-impl VFShaderBuilder {
-    fn new(instance: Instance, device: Device, name: String) -> Self {
-        VFShaderBuilder {
+impl<'a> GraphicsShaderBuilder<'a> {
+    pub fn new(instance: &'a Instance, device: &'a Device, name: String) -> Self {
+        GraphicsShaderBuilder {
             instance,
             device,
             name,
             vertex: vk::ShaderModule::default(),
             fragment: vk::ShaderModule::default(),
+            geometry: vk::ShaderModule::default(),
+            tessalation_control: vk::ShaderModule::default(),
+            tessalation_evaluation: vk::ShaderModule::default(),
         }
     }
 
@@ -176,6 +228,7 @@ impl VFShaderBuilder {
 
     pub fn load_fragment(&mut self, path: &str) -> &mut Self {
         let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
+    
         let create_info = vk::ShaderModuleCreateInfo::builder()
             .code_size(bytecode.code_size())
             .code(bytecode.code())
@@ -196,14 +249,144 @@ impl VFShaderBuilder {
         self
     }
 
-    pub fn build(&mut self) -> VFShader {
-        VFShader {
+    /// Compiles the geometry shader at the location from `path`
+    /// If the geometry shader is not needed, this function can be skipped
+    pub fn compile_geometry(&mut self, path: &str) -> &mut Self {
+        let geometry =
+            compile_shader_module(&self.device, path, "main", ShaderKind::Geometry)
+                .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            &(self.name.clone() + " Geometry Shader"),
+            vk::ObjectType::SHADER_MODULE,
+            geometry.as_raw(),
+        )
+        .unwrap();
+
+        self.geometry = geometry;
+        self
+    }
+
+    pub fn load_geometry(&mut self, path: &str) -> &mut Self {
+        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::builder()
+            .code_size(bytecode.code_size())
+            .code(bytecode.code())
+            .build();
+
+        let geometry = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            &(self.name.clone() + " Geometry Shader"),
+            vk::ObjectType::SHADER_MODULE,
+            geometry.as_raw(),
+        )
+        .unwrap();
+
+        self.geometry = geometry;
+        self
+    }
+
+    /// Compiles the tessalation control shader at the location from `path`
+    /// If the tessalation control shader is not needed, this function can be skipped
+    pub fn compile_tessalation_control(&mut self, path: &str) -> &mut Self {
+        let tessalation_control =
+            compile_shader_module(&self.device, path, "main", ShaderKind::TessControl)
+                .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            &(self.name.clone() + " Tessalation Control Shader"),
+            vk::ObjectType::SHADER_MODULE,
+            tessalation_control.as_raw(),
+        )
+        .unwrap();
+
+        self.tessalation_control = tessalation_control;
+        self
+    }
+
+    pub fn load_tessalation_control(&mut self, path: &str) -> &mut Self {
+        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::builder()
+            .code_size(bytecode.code_size())
+            .code(bytecode.code())
+            .build();
+
+        let tess_ctrl = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            &(self.name.clone() + " Tessallation Control Shader"),
+            vk::ObjectType::SHADER_MODULE,
+            tess_ctrl.as_raw(),
+        )
+        .unwrap();
+
+        self.tessalation_control = tess_ctrl;
+        self
+    }
+
+    /// Compiles the tessalation evaluation shader at the location from `path`
+    /// If the tessalation evaluation shader is not needed, this function can be skipped
+    pub fn compile_tessalation_evaluation(&mut self, path: &str) -> &mut Self {
+        let tessalation_evaluation =
+            compile_shader_module(&self.device, path, "main", ShaderKind::TessEvaluation)
+                .unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            &(self.name.clone() + " Tessalation Evaluation Shader"),
+            vk::ObjectType::SHADER_MODULE,
+            tessalation_evaluation.as_raw(),
+        )
+        .unwrap();
+
+        self.tessalation_evaluation = tessalation_evaluation;
+        self
+    }
+
+    pub fn load_tessalation_evaluation(&mut self, path: &str) -> &mut Self {
+        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::builder()
+            .code_size(bytecode.code_size())
+            .code(bytecode.code())
+            .build();
+
+        let tess_eval = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
+
+        set_object_name(
+            &self.instance,
+            &self.device,
+            &(self.name.clone() + " Tessallation Evaluation Shader"),
+            vk::ObjectType::SHADER_MODULE,
+            tess_eval.as_raw(),
+        )
+        .unwrap();
+
+        self.tessalation_evaluation = tess_eval;
+        self
+    }
+
+    pub fn build(&mut self) -> GraphicsShader {
+        GraphicsShader {
             vertex: self.vertex,
             fragment: self.fragment,
+            geometry: self.geometry,
+            tessalation_control: self.tessalation_control,
+            tessalation_evaluation: self.tessalation_evaluation,
             loaded: true,
         }
     }
 }
+
 
 /// Compiles a shader file
 pub fn compile_shader_module(

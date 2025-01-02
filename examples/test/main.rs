@@ -4,7 +4,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, VFShader, Vertex
+    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -209,15 +209,16 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let lit_shader = VFShader::builder(instance, device, "Lit".to_string())
+    let lit_shader = GraphicsShader::builder(instance, device, "Lit".to_string())
         .load_vertex("res\\shaders\\test_lit.vert.spv")
         .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
 
     data.shaders.push(Box::new(lit_shader));
 
-    let shadow_shader = VFShader::builder(instance, device, "Lit".to_string())
-        .load_vertex("res\\shaders\\test_shadow.vert.spv")
+    let shadow_shader = GraphicsShader::builder(instance, device, "Lit".to_string())
+        .load_vertex("res\\shaders\\test_lit.vert.spv")
+        .load_fragment("res\\shaders\\test_lit.frag.spv")    
         .build();
 
     data.shaders.push(Box::new(shadow_shader));
