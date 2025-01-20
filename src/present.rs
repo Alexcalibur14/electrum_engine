@@ -15,19 +15,19 @@ pub fn generate_render_pass_images(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
-    attachments: &Vec<(
+    attachments: &[(
         vk::AttachmentDescription,
         vk::ImageUsageFlags,
         vk::ImageAspectFlags,
-    )>,
+    )],
 ) -> Vec<Image> {
     let mut images = vec![];
 
     for attachment in attachments {
-        images.push(Image::new(
-            data,
+        let image = Image::new(
             instance,
             device,
+            data,
             data.swapchain_extent.width,
             data.swapchain_extent.height,
             MipLevels::One,
@@ -37,37 +37,13 @@ pub fn generate_render_pass_images(
             attachment.1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             attachment.2,
-        ))
+            false,
+        );
+        
+        images.push(image)
     }
 
     images
-}
-
-pub(crate) unsafe fn create_framebuffers(
-    data: &RendererData,
-    device: &Device,
-) -> Result<Vec<vk::Framebuffer>> {
-    let framebuffers = data
-        .swapchain_image_views
-        .iter()
-        .map(|i| {
-            let mut views = data.images.iter().map(|i| i.view).collect::<Vec<_>>();
-            views.push(*i);
-
-            let info = vk::FramebufferCreateInfo::builder()
-                .render_pass(data.render_pass)
-                .attachments(&views)
-                .width(data.swapchain_extent.width)
-                .height(data.swapchain_extent.height)
-                .layers(1)
-                .build();
-
-            device.create_framebuffer(&info, None)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-
-    Ok(framebuffers)
 }
 
 pub(crate) unsafe fn create_swapchain(

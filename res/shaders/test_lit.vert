@@ -6,11 +6,10 @@ layout(location = 2) in vec3 inNormal;
 
 layout(set = 0, binding = 0) uniform ModelViewProjection {
     mat4 model_matrix;
-    mat4 mvp_matrix;
     mat4 normal_matrix;
 };
 
-layout(set = 1, binding = 0) uniform CameraData {
+layout(set = 2, binding = 0) uniform CameraData {
     vec3 position;
     mat4 view;
     mat4 proj;
@@ -22,7 +21,7 @@ layout(location = 2) out vec3 outNormals;
 layout(location = 3) out vec3 camera_position;
 
 void main() {
-    gl_Position = mvp_matrix * vec4(inPosition, 1.0);
+    gl_Position = camera.proj * camera.view * model_matrix * vec4(inPosition, 1.0);
     
     outPosition = (model_matrix * vec4(inPosition, 1.0)).xyz;
     fragTexCoord = inTexCoord;

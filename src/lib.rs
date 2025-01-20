@@ -1,5 +1,6 @@
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 pub use vulkanalia::prelude::v1_2::*;
+
 use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::vk::KhrSwapchainExtension;
 use vulkanalia::vk::{AttachmentDescription, ExtDebugUtilsExtension};
@@ -10,7 +11,7 @@ use thiserror::Error;
 use tracing::*;
 use winit::window::Window;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::ptr;
@@ -25,10 +26,10 @@ mod present;
 mod render_pass;
 mod shader;
 mod texture;
+mod descriptor;
 
 pub use buffer::*;
 pub use camera::*;
-use command::{create_command_buffers, create_command_pools};
 pub use light::*;
 pub use mesh::*;
 pub use model::*;
@@ -36,6 +37,10 @@ pub use present::*;
 pub use render_pass::*;
 pub use shader::*;
 pub use texture::*;
+pub use record::*;
+pub use descriptor::*;
+
+use command::{create_command_buffers, create_command_pools};
 
 pub use electrum_engine_macros;
 
@@ -78,112 +83,6 @@ impl Renderer {
 
         unsafe { create_swapchain(window, &instance, &device, &mut data) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
-
-        // generating subpasses, render passes and attachments
-        let mut attachments = vec![
-            Attachment {
-                format: unsafe { get_depth_format(&instance, &data) }?,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_depth()
-            },
-            Attachment {
-                format: data.swapchain_format,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_colour()
-            },
-            Attachment {
-                format: data.swapchain_format,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_colour()
-            },
-            Attachment {
-                format: unsafe { get_depth_format(&instance, &data) }?,
-                sample_count: data.msaa_samples,
-                ..Attachment::template_depth()
-            },
-            Attachment {
-                format: data.swapchain_format,
-                ..Attachment::template_present()
-            },
-        ];
-
-        attachments.iter_mut().for_each(|a| a.generate());
-
-        data.attachments = attachments.iter().map(|a| a.attachment_desc).collect();
-
-        data.subpass_data = vec![
-            SubpassData::new(
-                vk::PipelineBindPoint::GRAPHICS,
-                vec![
-                    (
-                        0,
-                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        AttachmentType::DepthStencil,
-                    ),
-                    (
-                        1,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        AttachmentType::Color,
-                    ),
-                ],
-            ),
-            SubpassData::new(
-                vk::PipelineBindPoint::GRAPHICS,
-                vec![
-                    (
-                        2,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        AttachmentType::Color,
-                    ),
-                    (
-                        3,
-                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        AttachmentType::DepthStencil,
-                    ),
-                    (
-                        4,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        AttachmentType::Resolve,
-                    ),
-                ],
-            ),
-        ];
-
-        data.render_pass = generate_render_pass(
-            &device,
-            &data.subpass_data,
-            &data.attachments,
-            &data.dependencies,
-        )
-        .unwrap();
-
-        data.swapchain_images_desc = vec![
-            (
-                attachments[0].attachment_desc,
-                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::ImageAspectFlags::DEPTH,
-            ),
-            (
-                attachments[1].attachment_desc,
-                vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                vk::ImageAspectFlags::COLOR,
-            ),
-            (
-                attachments[2].attachment_desc,
-                vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                vk::ImageAspectFlags::COLOR,
-            ),
-            (
-                attachments[3].attachment_desc,
-                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::ImageAspectFlags::DEPTH,
-            ),
-        ];
-
-        data.images =
-            generate_render_pass_images(&instance, &device, &data, &data.swapchain_images_desc);
-
-        data.framebuffers = unsafe { create_framebuffers(&data, &device) }.unwrap();
 
         unsafe { create_command_pools(&instance, &device, &mut data) }.unwrap();
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
@@ -274,6 +173,7 @@ impl Renderer {
             .queue_present_khr(self.data.present_queue, &present_info);
         let changed = result == Ok(vk::SuccessCode::SUBOPTIMAL_KHR)
             || result == Err(vk::ErrorCode::OUT_OF_DATE_KHR);
+
         if self.resized || changed {
             self.resized = false;
             self.recreate_swapchain(window)?;
@@ -314,35 +214,16 @@ impl Renderer {
             .offset(vk::Offset2D::default())
             .extent(self.data.swapchain_extent);
 
-        let color_clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        };
-
-        let depth_clear_value = vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue {
-                depth: 1.0,
-                stencil: 0,
-            },
-        };
-
-        let clear_values = &[
-            depth_clear_value,
-            color_clear_value,
-            color_clear_value,
-            depth_clear_value,
-        ];
         let info = vk::RenderPassBeginInfo::builder()
             .render_pass(self.data.render_pass)
             .framebuffer(self.data.framebuffers[image_index])
             .render_area(render_area)
-            .clear_values(clear_values);
+            .clear_values(&self.data.render_pass_builder.clear_values);
 
         begin_command_label(
             &self.instance,
             command_buffer,
-            "Main Object Pass".to_string(),
+            "Main Object Pass",
             [0.0, 0.1, 0.5, 1.0],
         );
 
@@ -385,6 +266,8 @@ impl Renderer {
     unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
         self.data.recreated = true;
 
+        info!("Recreating swapchain");
+
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
 
@@ -394,42 +277,23 @@ impl Renderer {
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
-        self.data.render_pass = generate_render_pass(
-            &self.device,
-            &self.data.subpass_data,
-            &self.data.attachments,
-            &self.data.dependencies,
-        )
-        .unwrap();
+        let mut rp_builder = self.data.render_pass_builder.clone();
 
-        self.data.images = generate_render_pass_images(
-            &self.instance,
-            &self.device,
-            &self.data,
-            &self.data.swapchain_images_desc,
-        );
+        (self.data.render_pass, self.data.framebuffers) = rp_builder.create_render_pass(&self.instance, &self.device, &self.data)?;
 
-        self.data.framebuffers = create_framebuffers(&self.data, &self.device)?;
+        self.data.render_pass_builder = rp_builder;
 
         let mut objects = self.data.objects.clone();
 
         objects
             .iter_mut()
-            .for_each(|(_, o)| o.recreate_swapchain(&self.device, &self.data));
+            .for_each(|o| o.recreate_swapchain(&self.device, &mut self.data));
 
         self.data.objects = objects;
 
-        let aspect =
-            self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32;
-
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|(_, c)| c.set_aspect(aspect));
-        self.data
-            .cameras
-            .iter_mut()
-            .for_each(|(_, c)| c.calculate_proj(&self.device));
+        let subpass_render_data = self.data.subpass_render_data.clone();
+        subpass_render_data.iter().for_each(|s| s.recreate_swapchain(&self.instance, &self.device, &mut self.data));
+        self.data.subpass_render_data = subpass_render_data;
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -445,15 +309,14 @@ impl Renderer {
             .iter()
             .for_each(|f| self.device.destroy_framebuffer(*f, None));
 
-        self.data
-            .images
-            .iter()
-            .for_each(|i| i.destroy(&self.device));
+        self.data.render_pass_builder.destroy_swapchain(&self.device);
 
         self.data
             .objects
             .iter()
-            .for_each(|(_, o)| o.destroy_swapchain(&self.device));
+            .for_each(|o| o.destroy_swapchain(&self.device));
+
+        self.data.subpass_render_data.iter().for_each(|s| s.destroy_swapchain(&self.device, &self.data));
 
         self.device.destroy_render_pass(self.data.render_pass, None);
 
@@ -482,33 +345,31 @@ impl Renderer {
         let mut objects = self.data.objects.clone();
         objects
             .iter_mut()
-            .for_each(|(_, o)| o.destroy(&self.device));
+            .for_each(|o| o.destroy(&self.device));
         self.data.objects = objects;
 
         self.data
             .light_groups
             .iter()
-            .for_each(|(_, l)| l.destroy(&self.device));
+            .for_each(|l| l.destroy(&self.device));
 
         self.data
             .shaders
             .iter()
-            .for_each(|(_, s)| s.destroy(&self.device));
-
-        self.data
-            .samplers
-            .iter()
-            .for_each(|(_, s)| self.device.destroy_sampler(*s, None));
+            .for_each(|s| s.destroy(&self.device));
 
         self.data
             .textures
             .iter()
-            .for_each(|(_, t)| t.destroy(&self.device));
+            .for_each(|t| t.destroy(&self.device));
 
         self.data
             .cameras
             .iter()
-            .for_each(|(_, c)| c.destroy(&self.device));
+            .for_each(|c| c.destroy(&self.device));
+
+        self.data.global_descriptor_pools.destroy(&self.device);
+        self.data.global_layout_cache.destroy(&self.device);
 
         self.data
             .in_flight_fences
@@ -555,23 +416,16 @@ pub struct RendererData {
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_images_desc: Vec<(
-        AttachmentDescription,
-        vk::ImageUsageFlags,
-        vk::ImageAspectFlags,
-    )>,
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
 
     // Pipeline
     pub render_pass: vk::RenderPass,
+    pub render_pass_builder: RenderPassBuilder,
     pub attachments: Vec<AttachmentDescription>,
-    pub subpass_data: Vec<SubpassData>,
-    pub dependencies: Vec<vk::SubpassDependency>,
-    pub subpass_render_data: Vec<SubPassRenderData>,
+    pub subpass_render_data: Vec<SubpassRenderData>,
 
     // Framebuffers
-    pub images: Vec<Image>,
     pub framebuffers: Vec<vk::Framebuffer>,
 
     // Command Buffers
@@ -581,14 +435,17 @@ pub struct RendererData {
     pub secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     // objects
-    pub shaders: HashMap<u64, Box<dyn Shader>>,
-    pub samplers: HashMap<u64, vk::Sampler>,
-    pub textures: HashMap<u64, Image>,
-    pub point_light_data: HashMap<u64, PointLight>,
-    pub light_groups: HashMap<u64, LightGroup>,
+    pub shaders: Record<Box<dyn Shader>>,
+    pub textures: Record<Image>,
+    pub point_light_data: Record<PointLight>,
+    pub light_groups: Record<LightGroup>,
 
-    pub objects: HashMap<u64, Box<dyn Renderable>>,
-    pub cameras: HashMap<u64, Box<dyn Camera>>,
+    pub objects: Record<Box<dyn Renderable>>,
+    pub materials: Record<Box<dyn Material>>,
+    pub cameras: Record<Box<dyn Camera>>,
+
+    pub global_descriptor_pools: DescriptorAllocator,
+    pub global_layout_cache: DescriptorLayoutCache,
 
     // Semaphores
     pub image_available_semaphores: Vec<vk::Semaphore>,
@@ -604,6 +461,7 @@ pub struct RendererData {
     pub recreated: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct RenderStats {
     start: Instant,
@@ -827,7 +685,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     set_object_name(
         instance,
         &device,
-        "Graphics Queue".to_string(),
+        "Graphics Queue",
         vk::ObjectType::QUEUE,
         graphics_queue.as_raw() as u64,
     )?;
@@ -837,7 +695,7 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     set_object_name(
         instance,
         &device,
-        "Present Queue".to_string(),
+        "Present Queue",
         vk::ObjectType::QUEUE,
         graphics_queue.as_raw() as u64,
     )?;
@@ -846,20 +704,22 @@ unsafe fn create_logical_device(instance: &Instance, data: &mut RendererData) ->
     Ok(device)
 }
 
-unsafe fn get_depth_format(instance: &Instance, data: &RendererData) -> Result<vk::Format> {
+pub fn get_depth_format(instance: &Instance, data: &RendererData) -> Result<vk::Format> {
     let candidates = &[
         vk::Format::D32_SFLOAT,
         vk::Format::D32_SFLOAT_S8_UINT,
         vk::Format::D24_UNORM_S8_UINT,
     ];
 
-    get_supported_format(
-        instance,
-        data,
-        candidates,
-        vk::ImageTiling::OPTIMAL,
-        vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
-    )
+    unsafe { 
+        get_supported_format(
+            instance,
+            data,
+            candidates,
+            vk::ImageTiling::OPTIMAL,
+            vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
+        ) 
+    }
 }
 
 unsafe fn get_supported_format(
@@ -898,7 +758,7 @@ unsafe fn create_sync_objects(
         set_object_name(
             instance,
             device,
-            format!("Image Available Semaphore {}", i),
+            &format!("Image Available Semaphore {}", i),
             vk::ObjectType::SEMAPHORE,
             image_available_semaphor.as_raw(),
         )?;
@@ -909,7 +769,7 @@ unsafe fn create_sync_objects(
         set_object_name(
             instance,
             device,
-            format!("Render Finished Semaphore {}", i),
+            &format!("Render Finished Semaphore {}", i),
             vk::ObjectType::SEMAPHORE,
             render_finished_semaphor.as_raw(),
         )?;
@@ -920,7 +780,7 @@ unsafe fn create_sync_objects(
         set_object_name(
             instance,
             device,
-            format!("In Flight Fence {}", i),
+            &format!("In Flight Fence {}", i),
             vk::ObjectType::FENCE,
             in_flight_fence.as_raw(),
         )?;
@@ -1026,13 +886,13 @@ extern "system" fn debug_callback(
 fn set_object_name(
     instance: &Instance,
     device: &Device,
-    name: String,
+    name: &str,
     object_type: vk::ObjectType,
     object_handle: u64,
 ) -> Result<()> {
     if VALIDATION_ENABLED {
         let name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
-            .object_name((name + "\0").as_bytes())
+            .object_name((name.to_owned() + "\0").as_bytes())
             .object_type(object_type)
             .object_handle(object_handle)
             .build();
@@ -1046,12 +906,12 @@ fn set_object_name(
 fn begin_command_label(
     instance: &Instance,
     command_buffer: vk::CommandBuffer,
-    name: String,
+    name: &str,
     colour: [f32; 4],
 ) {
     if VALIDATION_ENABLED {
         let info = vk::DebugUtilsLabelEXT::builder()
-            .label_name((name + "\0").as_bytes())
+            .label_name((name.to_owned() + "\0").as_bytes())
             .color(colour)
             .build();
 
@@ -1070,12 +930,12 @@ fn end_command_label(instance: &Instance, command_buffer: vk::CommandBuffer) {
 fn insert_command_label(
     instance: &Instance,
     command_buffer: vk::CommandBuffer,
-    name: String,
+    name: &str,
     colour: [f32; 4],
 ) {
     if VALIDATION_ENABLED {
         let info = vk::DebugUtilsLabelEXT::builder()
-            .label_name((name + "\0").as_bytes())
+            .label_name((name.to_owned() + "\0").as_bytes())
             .color(colour)
             .build();
 
@@ -1100,5 +960,226 @@ where
         ptr::null()
     } else {
         t
+    }
+}
+
+mod record {
+    use std::{ops::{Index, IndexMut}, slice::{Iter, IterMut}, vec::IntoIter};
+
+    use thiserror::Error;
+
+    pub trait Loadable {
+        fn is_loaded(&self) -> bool;
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Record<T>(Vec<T>);
+
+    impl<T> Record<T>
+        where T: Loadable
+    {
+        pub fn new() -> Self {
+            Record(vec![])
+        }
+
+        pub fn from_vec(vec: Vec<T>) -> Self {
+            Record(vec)
+        }
+
+        pub fn get_loaded(&self, index: usize) -> Result<&T, RecordGetError> {
+            match self.0.get(index) {
+                Some(value) => {
+                    match value.is_loaded() {
+                        true => Ok(value),
+                        false => Err(RecordGetError::NotLoaded(index)),
+                    }
+                },
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn get_mut_loaded(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
+            match self.0.get_mut(index) {
+                Some(value) => {
+                    match value.is_loaded() {
+                        true => Ok(value),
+                        false => Err(RecordGetError::NotLoaded(index)),
+                    }
+                },
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
+            match self.0.get(index) {
+                Some(value) => Ok(value),
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn get_mut(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
+            match self.0.get_mut(index) {
+                Some(value) => Ok(value),
+                None => Err(RecordGetError::NotInRecord(index)),
+            }
+        }
+
+        pub fn push(&mut self, value: T) -> usize {
+            let index = self.0.len();
+            self.0.push(value);
+            index
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn iter(&self) -> Iter<T> {
+            self.0.iter()
+        }
+
+        pub fn iter_mut(&mut self) -> IterMut<T> {
+            self.0.iter_mut()
+        }
+    }
+
+    impl<T> Index<usize> for Record<T> 
+    where T: Loadable
+    {
+        type Output = T;
+    
+        fn index(&self, index: usize) -> &Self::Output {
+            self.get_loaded(index).unwrap()
+        }
+    }
+
+    impl<T> IndexMut<usize> for Record<T>
+    where T: Loadable
+    {
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            self.get_mut_loaded(index).unwrap()
+        }
+    }
+
+    impl<T> Default for Record<T>
+    where T: Loadable
+    {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl<T> IntoIterator for Record<T> {
+        type Item = T;
+    
+        type IntoIter = IntoIter<T>;
+    
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.into_iter()
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+    pub enum RecordGetError {
+        #[error("Element with index {0} is not in record")]
+        NotInRecord(usize),
+        #[error("Element with index {0} is not loaded")]
+        NotLoaded(usize),
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::record::RecordGetError;
+
+        use super::{Loadable, Record};
+
+        #[derive(Debug, PartialEq)]
+        struct Value(bool);
+
+        impl Loadable for Value {
+            fn is_loaded(&self) -> bool {
+                self.0
+            }
+        }
+
+        #[test]
+        fn empty() {
+            let record: Record<Value> = Record::new();
+            assert_eq!(record, Record::<Value>(vec![]))
+        }
+
+        #[test]
+        fn push_multiple() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record, Record::<Value>(vec![
+                Value(true),
+                Value(false),
+                Value(true),
+                Value(false),
+                Value(true),
+            ]));
+        }
+
+        #[test]
+        fn get() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get_loaded(0), Result::Ok(&Value(true)));
+            assert_eq!(record.get_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
+        }
+
+        #[test]
+        fn get_mut() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get_mut_loaded(0), Result::Ok(&mut Value(true)));
+            assert_eq!(record.get_mut_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_mut_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
+        }
+
+        #[test]
+        fn get_no_check() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get(0), Result::Ok(&Value(true)));
+            assert_eq!(record.get(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get(1), Result::Ok(&Value(false)));
+        }
+
+        #[test]
+        fn get_mut_no_check() {
+            let mut record: Record<Value> = Record::new();
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+            record.push(Value(false));
+            record.push(Value(true));
+
+            assert_eq!(record.get_mut(0), Result::Ok(&mut Value(true)));
+            assert_eq!(record.get_mut(5), Result::Err(RecordGetError::NotInRecord(5)));
+            assert_eq!(record.get_mut(1), Result::Ok(&mut Value(false)));
+        }
     }
 }

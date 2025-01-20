@@ -1,14 +1,10 @@
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    mem::size_of,
-};
+use std::mem::size_of;
 
 use glam::{Mat4, Quat, Vec3};
 use vulkanalia::prelude::v1_2::*;
 
 use crate::{
-    buffer::{create_buffer, BufferWrapper},
-    Descriptors, RendererData,
+    buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
 };
 
 pub trait Camera {
@@ -34,10 +30,10 @@ pub trait Camera {
     /// Used to destroy all buffers associated with the camera
     fn destroy(&self, device: &Device);
 
-    fn hash(&self) -> u64;
-
     /// Used to implement Clone on the trait
     fn clone_dyn(&self) -> Box<dyn Camera>;
+
+    fn loaded(&self) -> bool;
 }
 
 #[repr(C)]
@@ -55,6 +51,18 @@ impl Clone for Box<dyn Camera> {
     }
 }
 
+impl Default for Box<dyn Camera> {
+    fn default() -> Self {
+        Box::new(SimpleCamera::blank())
+    }
+}
+
+impl Loadable for Box<dyn Camera> {
+    fn is_loaded(&self) -> bool {
+        self.loaded()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SimpleCamera {
     pub position: Vec3,
@@ -62,16 +70,18 @@ pub struct SimpleCamera {
     pub view: Mat4,
     pub projection: Projection,
 
-    pub descriptor: Descriptors,
+    descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub buffers: Vec<BufferWrapper>,
+
+    loaded: bool,
 }
 
 impl SimpleCamera {
     pub fn new(
         instance: &Instance,
         device: &Device,
-        data: &RendererData,
+        data: &mut RendererData,
         position: Vec3,
         rotation: Vec3,
         projection: Projection,
@@ -80,15 +90,6 @@ impl SimpleCamera {
             Quat::from_euler(glam::EulerRot::XYZ, rotation.x, rotation.y, rotation.z),
             position,
         );
-
-        let bindings = vec![vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .build()];
-
-        let descriptor = Descriptors::new(device, data, bindings);
 
         let camera_data = CameraData {
             position,
@@ -100,17 +101,15 @@ impl SimpleCamera {
         let mut buffers = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer = unsafe {
-                create_buffer(
-                    instance,
-                    device,
-                    data,
-                    size_of::<CameraData>() as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    Some(format!("Camera Data {}", i)),
-                )
-            }
+            let buffer = create_buffer(
+                instance,
+                device,
+                data,
+                size_of::<CameraData>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                &format!("Camera Data {}", i),
+            )
             .unwrap();
 
             buffer.copy_data_into_buffer(device, &camera_data);
@@ -118,30 +117,22 @@ impl SimpleCamera {
             buffers.push(buffer);
         }
 
-        let layouts = vec![descriptor.descriptor_set_layout; data.swapchain_images.len()];
-        let info = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor.descriptor_pool)
-            .set_layouts(&layouts);
-
-        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&info) }.unwrap();
+        let mut descriptor_sets = vec![];
+        let mut descriptor_set_layout = Default::default();
 
         for i in 0..data.swapchain_images.len() {
-            let info = vk::DescriptorBufferInfo::builder()
+            let buffer_info = vk::DescriptorBufferInfo::builder()
                 .buffer(buffers[i].buffer)
                 .offset(0)
                 .range(size_of::<CameraData>() as u64)
                 .build();
 
-            let buffer_info = &[info];
-            let cam_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets[i])
-                .dst_binding(0)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(buffer_info)
-                .build();
+            let (descriptor_set, new_set_layout) = DescriptorBuilder::new()
+                .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
-            unsafe { device.update_descriptor_sets(&[cam_write], &[] as &[vk::CopyDescriptorSet]) };
+            descriptor_sets.push(descriptor_set);
+            descriptor_set_layout = new_set_layout;
         }
 
         SimpleCamera {
@@ -150,9 +141,11 @@ impl SimpleCamera {
             view,
             projection,
 
-            descriptor,
+            descriptor_set_layout,
             descriptor_sets,
             buffers,
+
+            loaded: true,
         }
     }
 
@@ -162,9 +155,12 @@ impl SimpleCamera {
             rotation: Vec3::default(),
             view: Mat4::default(),
             projection: Projection::default(),
-            descriptor: Descriptors::default(),
+            
+            descriptor_set_layout: Default::default(),
             descriptor_sets: vec![],
             buffers: vec![],
+
+            loaded: false,
         }
     }
 
@@ -177,12 +173,6 @@ impl SimpleCamera {
             .to_euler(glam::EulerRot::XYZ)
             .into();
         self.position = self.view.to_scale_rotation_translation().2;
-    }
-}
-
-impl Default for Box<dyn Camera> {
-    fn default() -> Self {
-        Box::new(SimpleCamera::blank())
     }
 }
 
@@ -242,8 +232,6 @@ impl Camera for SimpleCamera {
     }
 
     fn destroy(&self, device: &Device) {
-        self.descriptor.destroy_swapchain(device);
-        self.descriptor.destroy(device);
         self.buffers.iter().for_each(|b| b.destroy(device));
     }
 
@@ -265,22 +253,11 @@ impl Camera for SimpleCamera {
     }
 
     fn get_set_layout(&self) -> vk::DescriptorSetLayout {
-        self.descriptor.descriptor_set_layout
+        self.descriptor_set_layout
     }
-
-    fn hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.view.to_string().as_bytes().hash(&mut hasher);
-        self.proj().to_string().as_bytes().hash(&mut hasher);
-        self.buffers[0].buffer.as_raw().hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-impl Hash for SimpleCamera {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.projection.hash(state);
-        self.descriptor_sets.hash(state);
+    
+    fn loaded(&self) -> bool {
+        self.loaded
     }
 }
 
@@ -314,14 +291,5 @@ impl Projection {
 
         self.proj = proj;
         self.inv_proj = proj.inverse();
-    }
-}
-
-impl Hash for Projection {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (self.fov_y_rad as u32).hash(state);
-        (self.aspect_ratio as u32).hash(state);
-        (self.z_near as u32).hash(state);
-        (self.z_far as u32).hash(state);
     }
 }

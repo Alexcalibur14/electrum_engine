@@ -10,8 +10,7 @@ use image::ImageReader;
 use crate::{
     buffer::{
         begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index,
-    },
-    set_object_name, RendererData,
+    }, set_object_name, Loadable, RendererData
 };
 
 #[allow(dead_code)]
@@ -21,19 +20,21 @@ pub enum MipLevels {
     Maximum,
 }
 
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Debug, Clone, Default)]
 pub struct Image {
     pub image: vk::Image,
     pub image_memory: vk::DeviceMemory,
     pub view: vk::ImageView,
     pub mip_level: u32,
+    pub sampler: Option<vk::Sampler>,
+    loaded: bool,
 }
 
 impl Image {
     pub fn new(
-        data: &RendererData,
         instance: &Instance,
         device: &Device,
+        data: &RendererData,
         width: u32,
         height: u32,
         mip_levels: MipLevels,
@@ -43,6 +44,7 @@ impl Image {
         usage: vk::ImageUsageFlags,
         properties: vk::MemoryPropertyFlags,
         aspects: vk::ImageAspectFlags,
+        generate_sampler: bool,
     ) -> Self {
         let mips = match mip_levels {
             MipLevels::One => 1,
@@ -60,21 +62,32 @@ impl Image {
 
         let view = unsafe { create_image_view(device, image, format, aspects, mips) }.unwrap();
 
+        let sampler = if generate_sampler {
+            Some(
+                unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap()
+            )
+        } else {
+            None
+        };
+
         Image {
             image,
             image_memory,
             view,
             mip_level: mips,
+            sampler,
+            loaded: true,
         }
     }
 
     pub fn from_path(
-        path: &str,
-        mip_levels: MipLevels,
         instance: &Instance,
         device: &Device,
         data: &RendererData,
+        path: &str,
+        mip_levels: MipLevels,
         format: vk::Format,
+        generate_sampler: bool,
     ) -> Self {
         let img = ImageReader::open(path).unwrap().decode().unwrap();
         let bytes = img
@@ -96,7 +109,7 @@ impl Image {
 
         let (image, image_memory) = unsafe {
             create_texture_image(
-                instance, device, data, size, bytes, width, height, mips, format,
+                instance, device, data, size, &bytes, width, height, mips, format,
             )
         }
         .unwrap();
@@ -105,20 +118,39 @@ impl Image {
             unsafe { create_image_view(device, image, format, vk::ImageAspectFlags::COLOR, mips) }
                 .unwrap();
 
+        let sampler = if generate_sampler {
+            Some(
+                unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap()
+            )
+        } else {
+            None
+        };
+
         Image {
             image,
             image_memory,
             view,
             mip_level: mips,
+            sampler,
+            loaded: true,
         }
     }
 
     pub fn destroy(&self, device: &Device) {
         unsafe {
+            if let Some(sampler) = self.sampler {
+                device.destroy_sampler(sampler, None);
+            }
             device.destroy_image_view(self.view, None);
             device.destroy_image(self.image, None);
             device.free_memory(self.image_memory, None);
         }
+    }
+}
+
+impl Loadable for Image {
+    fn is_loaded(&self) -> bool {
+        self.loaded
     }
 }
 
@@ -176,7 +208,7 @@ pub unsafe fn create_texture_image(
     device: &Device,
     data: &RendererData,
     size: vk::DeviceSize,
-    pixels: Vec<u8>,
+    pixels: &[u8],
     width: u32,
     height: u32,
     mip_levels: u32,
@@ -189,12 +221,12 @@ pub unsafe fn create_texture_image(
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-        Some("Image staging buffer".to_string()),
+        "Image staging buffer",
     )?;
 
     // Copy (staging)
 
-    staging_buffer.copy_vec_into_buffer(device, &pixels);
+    staging_buffer.copy_vec_into_buffer(device, pixels);
 
     // Create (image)
 
@@ -286,7 +318,7 @@ unsafe fn transition_image_layout(
         instance,
         device,
         data,
-        "Transition Image Layout".to_string(),
+        "Transition Image Layout",
     )?;
 
     let subresource = vk::ImageSubresourceRange::builder()
@@ -331,7 +363,7 @@ unsafe fn copy_buffer_to_image(
     height: u32,
 ) -> Result<()> {
     let command_buffer =
-        begin_single_time_commands(instance, device, data, "Copy Buffer To Image".to_string())?;
+        begin_single_time_commands(instance, device, data, "Copy Buffer To Image")?;
 
     let subresource = vk::ImageSubresourceLayers::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -391,7 +423,7 @@ pub unsafe fn create_texture_sampler(
     instance: &Instance,
     device: &Device,
     mip_level: &u32,
-    name: String,
+    name: &str,
 ) -> Result<vk::Sampler> {
     let info = vk::SamplerCreateInfo::builder()
         .mag_filter(vk::Filter::LINEAR)
@@ -448,7 +480,7 @@ unsafe fn generate_mipmaps(
     // Mipmaps
 
     let command_buffer =
-        begin_single_time_commands(instance, device, data, "Generate MipMaps".to_string())?;
+        begin_single_time_commands(instance, device, data, "Generate MipMaps")?;
 
     let subresource = vk::ImageSubresourceRange::builder()
         .aspect_mask(vk::ImageAspectFlags::COLOR)

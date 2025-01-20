@@ -1,11 +1,10 @@
+use electrum_engine::vertices::PCTVertex;
 use glam::{vec3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::vec;
 
 use electrum_engine::{
-    create_texture_sampler, Camera, Image, LightGroup, MipLevels, ObjectPrototype, PointLight,
-    Projection, Quad, Renderer, RendererData, Shader, ShadowQuad, SimpleCamera, SubPassRenderData,
-    VFShader,
+    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -43,6 +42,7 @@ impl ApplicationHandler for App {
             .create_window(Window::default_attributes())
             .unwrap();
         let mut renderer = Renderer::create(&window).unwrap();
+        setup_renderpass(&renderer.instance, &renderer.device, &mut renderer.data);
         pre_load_objects(&renderer.instance, &renderer.device, &mut renderer.data);
 
         self.window = Some(window);
@@ -86,6 +86,18 @@ impl ApplicationHandler for App {
                 } else {
                     self.minimized = false;
                     renderer.resized = true;
+
+                    
+                    let aspect = size.width as f32 / size.height as f32;
+
+                    renderer.data
+                        .cameras
+                        .iter_mut()
+                        .for_each(|c| c.set_aspect(aspect));
+                    renderer.data
+                        .cameras
+                        .iter_mut()
+                        .for_each(|c| c.calculate_proj(&renderer.device));
                 }
             }
             WindowEvent::CloseRequested => {
@@ -107,136 +119,161 @@ impl ApplicationHandler for App {
     }
 }
 
+fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererData) {
+    let mut attachments = vec![
+        Attachment {
+            format: get_depth_format(&instance, &data).unwrap(),
+            ..Attachment::template_depth()
+        },
+        Attachment {
+            format: data.swapchain_format,
+            sample_count: data.msaa_samples,
+            ..Attachment::template_colour()
+        },
+        Attachment {
+            format: get_depth_format(&instance, &data).unwrap(),
+            sample_count: data.msaa_samples,
+            ..Attachment::template_depth()
+        },
+        Attachment {
+            format: data.swapchain_format,
+            ..Attachment::template_present()
+        },
+    ];
+
+    attachments.iter_mut().for_each(|a| a.generate());
+
+    let color_clear_value = vk::ClearValue {
+        color: vk::ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0],
+        },
+    };
+
+    let depth_clear_value = vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+        },
+    };
+
+    let subpass_1 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
+        .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .build();
+
+    let subpass_2 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
+        .add_color_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .add_resolve_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .build();
+
+    let mut render_pass_builder = RenderPassBuilder::new()
+        .add_attachment(attachments[0].attachment_desc, AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[1].attachment_desc, AttachmentUse::Color, color_clear_value)
+        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Color, color_clear_value)
+        .add_subpass(&subpass_1, &[(0, None)])
+        .add_subpass(&subpass_2, &[(1, None), (2, None), (3, None)])
+        .build();
+
+    (data.render_pass, data.framebuffers) = render_pass_builder.create_render_pass(instance, device, data).unwrap();
+
+    data.render_pass_builder = render_pass_builder;
+}
+
 fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererData) {
     let aspect = data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32;
 
     let projection = Projection::new(PI / 4.0, aspect, 0.1, 100.0);
     let mut camera = SimpleCamera::new(
-        &instance,
-        &device,
-        &data,
+        instance,
+        device,
+        data,
         vec3(0.0, 4.0, 4.0),
         vec3(0.0, 0.0, 0.0),
         projection,
     );
     camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
-    let camera_hash = get_hash(&camera);
-
-    data.cameras.insert(camera_hash, Box::new(camera.clone()));
-
-    let view = camera.view();
-    let proj = camera.proj();
+    let camera_id = data.cameras.push(Box::new(camera.clone()));
 
     let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
-    let red_light_hash = get_hash(&red_light);
-
-    data.point_light_data.insert(red_light_hash, red_light);
+    let red_light_id = data.point_light_data.push(red_light);
 
     let blue_light = PointLight::new(vec3(-3.0, 3.0, 0.0), vec3(0.0, 1.0, 1.0), 5.0);
-    let blue_light_hash = get_hash(&blue_light);
-
-    data.point_light_data.insert(blue_light_hash, blue_light);
+    let blue_light_id = data.point_light_data.push(blue_light);
 
     let light_group = LightGroup::new(
-        &instance,
-        &device,
-        &data,
-        vec![red_light_hash, blue_light_hash],
-        10,
+        instance,
+        device,
+        data,
+        vec![red_light_id, blue_light_id],
+        5,
     );
 
-    let light_group_hash = get_hash(&light_group);
-
-    data.light_groups
-        .insert(light_group_hash, light_group.clone());
+    let light_group_id = data.light_groups.push(light_group.clone());
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let lit_shader = VFShader::builder(&instance, &device, "Lit".to_string())
-        .compile_vertex("res\\shaders\\test_lit.vert.glsl")
-        .compile_fragment("res\\shaders\\test_lit.frag.glsl")
+    let lit_shader = GraphicsShader::builder(instance, device, "Lit".to_string())
+        .load_vertex("res\\shaders\\test_lit.vert.spv")
+        .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
 
-    let lit_shader_hash = lit_shader.hash();
+    let lit_state = lit_shader.state();
 
-    data.shaders.insert(lit_shader_hash, Box::new(lit_shader));
+    data.shaders.push(Box::new(lit_shader));
+
+    let shadow_shader = GraphicsShader::builder(instance, device, "Shadow".to_string())
+        .load_vertex("res\\shaders\\test_shadow.vert.spv") 
+        .build();
+
+    let shadow_state = shadow_shader.state();
+
+    data.shaders.push(Box::new(shadow_shader));
 
     let image = Image::from_path(
+        instance,
+        device,
+        data,
         "res\\textures\\white.png",
         MipLevels::Maximum,
-        &instance,
-        &device,
-        &data,
         vk::Format::R8G8B8A8_SRGB,
+        true,
     );
 
-    let sampler = unsafe {
-        create_texture_sampler(
-            &instance,
-            &device,
-            &image.mip_level,
-            "white sampler".to_string(),
-        )
-    }
-    .unwrap();
-
-    let sampler_hash = get_hash(&sampler);
-    data.samplers.insert(sampler_hash, sampler);
-
-    let image_hash = get_hash(&image);
-    data.textures.insert(image_hash, image);
+    let image_id = data.textures.push(image);
 
     let image_2077 = Image::from_path(
+        instance,
+        device,
+        data,
         "res\\textures\\photomode.png",
         MipLevels::Maximum,
-        &instance,
-        &device,
-        &data,
         vk::Format::R8G8B8A8_SRGB,
+        true,
     );
 
-    let sampler_2077 = unsafe {
-        create_texture_sampler(
-            &instance,
-            &device,
-            &image_2077.mip_level,
-            "2077 sampler".to_string(),
-        )
-    }
-    .unwrap();
+    let image_2077_id = data.textures.push(image_2077);
 
-    let sampler_2077_hash = get_hash(&sampler_2077);
-    data.samplers.insert(sampler_2077_hash, sampler_2077);
-
-    let image_2077_hash = get_hash(&image_2077);
-    data.textures.insert(image_2077_hash, image_2077);
-
-    let mut monkey = ObjectPrototype::load(
-        &instance,
-        &device,
-        &data,
+    let monkey = MeshObject::from_obj(
+        instance,
+        device,
+        data,
         "res\\models\\MONKEY.obj",
-        lit_shader_hash,
         position,
-        view,
-        proj,
-        (image_hash, sampler_hash),
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
+        image_id,
+        vec![vec![0], vec![0, 1]],
         "monkey".to_string(),
     );
-    unsafe { monkey.generate_vertex_buffer(&instance, &device, &data) };
-    unsafe { monkey.generate_index_buffer(&instance, &device, &data) };
 
-    let monkey_hash = get_hash(&monkey);
-    data.objects.insert(monkey_hash, Box::new(monkey));
+    let monkey_id = data.objects.push(Box::new(monkey));
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let mut plane = Quad::new(
-        &instance,
-        &device,
-        &data,
+    let plane = MeshObject::new_quad(
+        instance,
+        device,
+        data,
         [
             vec3(-1.5, 0.0, -1.5),
             vec3(1.5, 0.0, -1.5),
@@ -244,54 +281,152 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             vec3(1.5, 0.0, 1.5),
         ],
         vec3(0.0, 1.0, 0.0),
-        lit_shader_hash,
-        (image_2077_hash, sampler_2077_hash),
+        image_2077_id,
         position,
-        view,
-        proj,
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
+        vec![vec![0], vec![0, 1]],
         "Quad".to_string(),
     );
-    plane.generate(&instance, &device, &data);
 
-    let plane_hash = get_hash(&plane);
-    data.objects.insert(plane_hash, Box::new(plane));
+    let plane_id = data.objects.push(Box::new(plane));
 
-    let shadow_position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
+    let mesh_state = PipelineMeshState::new(
+        PCTVertex::binding_descriptions(),
+        PCTVertex::attribute_descriptions(),
+        false,
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+    );
 
-    let mut shadow_plane = ShadowQuad::new(
-        &instance,
-        &device,
-        &data,
-        [
-            vec3(-1.5, 0.0, -1.5),
-            vec3(1.5, 0.0, -1.5),
-            vec3(-1.5, 0.0, 1.5),
-            vec3(1.5, 0.0, 1.5),
+    let shadow_subpass_state = SubpassPipelineState::new(
+        vec![
+            vk::Viewport::builder()
+                .x(0.0)
+                .y(0.0)
+                .width(data.swapchain_extent.width as f32)
+                .height(data.swapchain_extent.height as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .build(),
         ],
-        vec3(0.0, 1.0, 0.0),
-        lit_shader_hash,
-        (image_2077_hash, sampler_2077_hash),
-        shadow_position,
-        view,
-        proj,
+        vec![
+            vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
+            }
+        ],
+        vk::SampleCountFlags::_1,
+        true,
+        true,
+        vec![],
+        false,
+        vk::LogicOp::COPY,
+        [0.0, 0.0, 0.0, 0.0],
+    );
+
+    let subpass_state = SubpassPipelineState::new(
+        vec![
+            vk::Viewport::builder()
+                .x(0.0)
+                .y(0.0)
+                .width(data.swapchain_extent.width as f32)
+                .height(data.swapchain_extent.height as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .build(),
+        ],
+        vec![
+            vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
+            }
+        ],
+        data.msaa_samples,
+        true,
+        true,
+        vec![
+            vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)
+                .build()
+        ],
+        false,
+        vk::LogicOp::COPY,
+        [0.0, 0.0, 0.0, 0.0],
+    );
+
+    let lit_bindings = vec![
+        vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .build(),
+        ],
+        vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .build(),
+        ],
+    ];
+
+    let shadow_bindings = vec![
+        vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .build(),
+        ],
+    ];
+
+    let shadow_material = BasicMaterial::new(
+        instance,
+        device,
+        data,
+        shadow_bindings,
+        vec![],
+        shadow_state,
+        shadow_subpass_state,
+        mesh_state.clone(),
+        vec![camera.get_set_layout()],
+        vec![0],
+        0
+    );
+    let shadow_mat_id = data.materials.push(Box::new(shadow_material));
+
+    let material = BasicMaterial::new(
+        instance,
+        device,
+        data,
+        lit_bindings,
+        vec![],
+        lit_state,
+        subpass_state,
+        mesh_state,
         vec![camera.get_set_layout(), light_group.get_set_layout()],
-        "Shadow Quad".to_string(),
+        vec![0, 1],
+        1
     );
-    shadow_plane.generate(&instance, &device, &data);
+    let mat_id = data.materials.push(Box::new(material));
 
-    let shadow_plane_hash = get_hash(&shadow_plane);
-    data.objects
-        .insert(shadow_plane_hash, Box::new(shadow_plane));
+    let render_data_0 = SubpassRenderData::new(
+        0,
+        vec![(plane_id, shadow_mat_id), (monkey_id, shadow_mat_id)],
+        camera_id,
+        light_group_id
+    );
 
-    let render_data_0 =
-        SubPassRenderData::new(0, vec![shadow_plane_hash], camera_hash, light_group_hash);
-    let render_data_1 = SubPassRenderData::new(
+    let render_data_1 = SubpassRenderData::new(
         1,
-        vec![plane_hash, monkey_hash],
-        camera_hash,
-        light_group_hash,
+        vec![(plane_id, mat_id), (monkey_id, mat_id)],
+        camera_id,
+        light_group_id,
     );
+    
     data.subpass_render_data = vec![render_data_0, render_data_1];
 
     let mut render_data = data.subpass_render_data.clone();
@@ -299,13 +434,4 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         .iter_mut()
         .for_each(|s| s.setup_command_buffers(&device, &data));
     data.subpass_render_data = render_data;
-}
-
-fn get_hash<T>(object: &T) -> u64
-where
-    T: Hash,
-{
-    let mut hasher = DefaultHasher::new();
-    object.hash(&mut hasher);
-    hasher.finish()
 }
