@@ -12,24 +12,8 @@ use crate::{insert_command_label, set_object_name, Loadable, MeshData, RendererD
 
 pub trait Shader {
     fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
-    fn states(&self) -> PipelineShaderState {
-        PipelineShaderState {
-            stages: self.stages(),
-            rasterisation: vk::PipelineRasterizationStateCreateInfo::builder()
-                .depth_clamp_enable(false)
-                .rasterizer_discard_enable(false)
-                .polygon_mode(vk::PolygonMode::FILL)
-                .cull_mode(vk::CullModeFlags::BACK)
-                .front_face(vk::FrontFace::CLOCKWISE)
-                .depth_bias_enable(false)
-                .build(),
-
-            tessalation: vk::PipelineTessellationStateCreateInfo::builder()
-                .build(),
-
-            dynamic: vk::PipelineDynamicStateCreateInfo::builder()
-                .build(),
-        }
+    fn state(&self) -> PipelineShaderState {
+        PipelineShaderState::default()
     }
     fn destroy(&self, device: &Device);
 
@@ -49,13 +33,14 @@ impl Loadable for Box<dyn Shader> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct GraphicsShader {
     pub vertex: vk::ShaderModule,
     pub fragment: vk::ShaderModule,
     pub geometry: vk::ShaderModule,
     pub tessalation_control: vk::ShaderModule,
     pub tessalation_evaluation: vk::ShaderModule,
+    pub state: PipelineShaderState,
     loaded: bool,
 }
 
@@ -73,12 +58,17 @@ impl Shader for GraphicsShader {
                 .module(self.vertex)
                 .name(b"main\0")
                 .build(),
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(self.fragment)
-                .name(b"main\0")
-                .build(),
         ];
+
+        if self.fragment != vk::ShaderModule::default() {
+            stages.push(
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::FRAGMENT)
+                    .module(self.fragment)
+                    .name(b"main\0")
+                    .build(),
+            );
+        }
 
         if self.geometry != vk::ShaderModule::default() {
             stages.push(
@@ -113,6 +103,12 @@ impl Shader for GraphicsShader {
         stages
     }
 
+    fn state(&self) -> PipelineShaderState {
+        let mut state = self.state.clone();
+        state.stages = self.stages();
+        state
+    }
+
     fn destroy(&self, device: &Device) {
         unsafe {
             device.destroy_shader_module(self.vertex, None);
@@ -144,12 +140,16 @@ impl Shader for GraphicsShader {
 pub struct GraphicsShaderBuilder<'a> {
     instance: &'a Instance,
     device: &'a Device,
-    name: String,
+
     vertex: vk::ShaderModule,
     fragment: vk::ShaderModule,
     geometry: vk::ShaderModule,
     tessalation_control: vk::ShaderModule,
     tessalation_evaluation: vk::ShaderModule,
+
+    state: PipelineShaderState,
+
+    name: String,
 }
 
 impl<'a> GraphicsShaderBuilder<'a> {
@@ -157,12 +157,15 @@ impl<'a> GraphicsShaderBuilder<'a> {
         GraphicsShaderBuilder {
             instance,
             device,
-            name,
             vertex: vk::ShaderModule::default(),
             fragment: vk::ShaderModule::default(),
             geometry: vk::ShaderModule::default(),
             tessalation_control: vk::ShaderModule::default(),
             tessalation_evaluation: vk::ShaderModule::default(),
+
+            state: PipelineShaderState::default(),
+
+            name,
         }
     }
 
@@ -375,6 +378,11 @@ impl<'a> GraphicsShaderBuilder<'a> {
         self
     }
 
+    pub fn state(&mut self, state: PipelineShaderState) -> &mut Self {
+        self.state = state;
+        self
+    }
+
     pub fn build(&mut self) -> GraphicsShader {
         GraphicsShader {
             vertex: self.vertex,
@@ -382,6 +390,9 @@ impl<'a> GraphicsShaderBuilder<'a> {
             geometry: self.geometry,
             tessalation_control: self.tessalation_control,
             tessalation_evaluation: self.tessalation_evaluation,
+
+            state: self.state.clone(),
+
             loaded: true,
         }
     }
@@ -428,11 +439,13 @@ pub trait Material {
         device: &Device,
         command_buffer: vk::CommandBuffer,
         descriptor_set: Vec<vk::DescriptorSet>,
-        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
+        other_descriptors: Vec<vk::DescriptorSet>,
         mesh_data: &MeshData,
         object_mane: &str,
     );
     fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData);
+
+    fn get_scene_descriptor_ids(&self) -> &[usize];
 
     fn destroy_swapchain(&self, device: &Device);
     fn destroy(&self, device: &Device);
@@ -468,6 +481,8 @@ pub struct BasicMaterial {
     pub shader_state: PipelineShaderState,
     pub subpass_state: SubpassPipelineState,
 
+    pub scene_descriptors: Vec<usize>,
+
     loaded: bool,
     subpass: u32,
 }
@@ -483,6 +498,7 @@ impl BasicMaterial {
         subpass_state: SubpassPipelineState,
         mesh_state: PipelineMeshState,
         other_layouts: Vec<vk::DescriptorSetLayout>,
+        scene_descriptors: Vec<usize>,
         subpass: u32,
     ) -> Self {
         let mut push_constant_ranges = vec![];
@@ -527,6 +543,7 @@ impl BasicMaterial {
 
             descriptor_set_layout,
             other_set_layouts: other_layouts.clone(),
+            scene_descriptors,
             
             subpass,
             loaded: true,
@@ -541,7 +558,7 @@ impl Material for BasicMaterial {
         device: &Device,
         command_buffer: vk::CommandBuffer,
         descriptor_set: Vec<vk::DescriptorSet>,
-        other_descriptors: Vec<(u32, vk::DescriptorSet)>,
+        other_descriptors: Vec<vk::DescriptorSet>,
         mesh_data: &MeshData,
         name: &str,
     ) {
@@ -561,7 +578,9 @@ impl Material for BasicMaterial {
                 &[],
             );
 
-            for (set, descriptor) in other_descriptors {
+            let mut set = descriptor_set.len() as u32;
+
+            for descriptor in other_descriptors {
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -570,6 +589,8 @@ impl Material for BasicMaterial {
                     &[descriptor],
                     &[],
                 );
+
+                set += 1;
             }
 
             device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh_data.vertex_buffer.buffer], &[0]);
@@ -621,6 +642,10 @@ impl Material for BasicMaterial {
         .unwrap();
 
         self.pipeline_layout = pipeline_layout;
+    }
+
+    fn get_scene_descriptor_ids(&self) -> &[usize] {
+        &self.scene_descriptors
     }
 
     fn destroy_swapchain(&self, device: &Device) {
@@ -753,12 +778,60 @@ impl SubpassPipelineState {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct PipelineShaderState {
     pub stages: Vec<vk::PipelineShaderStageCreateInfo>,
-    pub rasterisation: vk::PipelineRasterizationStateCreateInfo,
+    pub rasterisation: RasterisationState,
     pub tessalation: vk::PipelineTessellationStateCreateInfo,
     pub dynamic: vk::PipelineDynamicStateCreateInfo,
+}
+
+impl PipelineShaderState {
+    pub fn get_rasterisation(&self) -> vk::PipelineRasterizationStateCreateInfo {
+        vk::PipelineRasterizationStateCreateInfo::builder()
+            .depth_clamp_enable(self.rasterisation.depth_clamp_enable)
+            .rasterizer_discard_enable(self.rasterisation.rasterizer_discard_enable)
+            .polygon_mode(self.rasterisation.polygon_mode)
+            .cull_mode(self.rasterisation.cull_mode)
+            .front_face(self.rasterisation.front_face)
+            .depth_bias_enable(self.rasterisation.depth_bias_enable)
+            .depth_bias_constant_factor(self.rasterisation.depth_bias_constant_factor)
+            .depth_bias_clamp(self.rasterisation.depth_bias_clamp)
+            .depth_bias_slope_factor(self.rasterisation.depth_bias_slope_factor)
+            .line_width(self.rasterisation.line_width)
+            .build()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RasterisationState {
+    pub depth_clamp_enable: bool,
+    pub rasterizer_discard_enable: bool,
+    pub polygon_mode: vk::PolygonMode,
+    pub cull_mode: vk::CullModeFlags,
+    pub front_face: vk::FrontFace,
+    pub depth_bias_enable: bool,
+    pub depth_bias_constant_factor: f32,
+    pub depth_bias_clamp: f32,
+    pub depth_bias_slope_factor: f32,
+    pub line_width: f32,
+}
+
+impl Default for RasterisationState {
+    fn default() -> Self {
+        Self {
+            depth_clamp_enable: false,
+            rasterizer_discard_enable: false,
+            polygon_mode: vk::PolygonMode::FILL,
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::CLOCKWISE,
+            depth_bias_enable: false,
+            depth_bias_constant_factor: 0.0,
+            depth_bias_clamp: 0.0,
+            depth_bias_slope_factor: 0.0,
+            line_width: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -819,7 +892,7 @@ pub fn create_pipeline_from_states(
         .input_assembly_state(&mesh_state.input_assembly())
         .tessellation_state(&shader_state.tessalation)
         .viewport_state(&subpass_state.viewport())
-        .rasterization_state(&shader_state.rasterisation)
+        .rasterization_state(&shader_state.get_rasterisation())
         .multisample_state(&subpass_state.multisample())
         .depth_stencil_state(&subpass_state.depth_stencil())
         .color_blend_state(&subpass_state.color_blend())

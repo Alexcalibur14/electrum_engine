@@ -123,13 +123,7 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut attachments = vec![
         Attachment {
             format: get_depth_format(&instance, &data).unwrap(),
-            sample_count: data.msaa_samples,
             ..Attachment::template_depth()
-        },
-        Attachment {
-            format: data.swapchain_format,
-            sample_count: data.msaa_samples,
-            ..Attachment::template_colour()
         },
         Attachment {
             format: data.swapchain_format,
@@ -151,7 +145,6 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let subpass_1 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
         .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-        .add_color_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .build();
 
     let subpass_2 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
@@ -163,11 +156,10 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut render_pass_builder = RenderPassBuilder::new()
         .add_attachment(attachments[0].attachment_desc, AttachmentUse::Depth)
         .add_attachment(attachments[1].attachment_desc, AttachmentUse::Color)
-        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Color)
-        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Depth)
-        .add_attachment(attachments[4].attachment_desc, AttachmentUse::Color)
-        .add_subpass(&subpass_1, &[(0, None), (1, None)])
-        .add_subpass(&subpass_2, &[(2, None), (3, None), (4, None)])
+        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Depth)
+        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Color)
+        .add_subpass(&subpass_1, &[(0, None)])
+        .add_subpass(&subpass_2, &[(1, None), (2, None), (3, None)])
         .build();
 
     (data.render_pass, data.framebuffers) = render_pass_builder.create_render_pass(instance, device, data).unwrap();
@@ -214,12 +206,15 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         .load_fragment("res\\shaders\\test_lit.frag.spv")
         .build();
 
+    let lit_state = lit_shader.state();
+
     data.shaders.push(Box::new(lit_shader));
 
-    let shadow_shader = GraphicsShader::builder(instance, device, "Lit".to_string())
-        .load_vertex("res\\shaders\\test_lit.vert.spv")
-        .load_fragment("res\\shaders\\test_lit.frag.spv")    
+    let shadow_shader = GraphicsShader::builder(instance, device, "Shadow".to_string())
+        .load_vertex("res\\shaders\\test_shadow.vert.spv") 
         .build();
+
+    let shadow_state = shadow_shader.state();
 
     data.shaders.push(Box::new(shadow_shader));
 
@@ -254,7 +249,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "res\\models\\MONKEY.obj",
         position,
         image_id,
-        vec![vec![0, 1], vec![0, 1]],
+        vec![vec![0], vec![0, 1]],
         "monkey".to_string(),
     );
 
@@ -275,7 +270,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         position,
-        vec![vec![0, 1], vec![0, 1]],
+        vec![vec![0], vec![0, 1]],
         "Quad".to_string(),
     );
 
@@ -286,6 +281,32 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         PCTVertex::attribute_descriptions(),
         false,
         vk::PrimitiveTopology::TRIANGLE_LIST,
+    );
+
+    let shadow_subpass_state = SubpassPipelineState::new(
+        vec![
+            vk::Viewport::builder()
+                .x(0.0)
+                .y(0.0)
+                .width(data.swapchain_extent.width as f32)
+                .height(data.swapchain_extent.height as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .build(),
+        ],
+        vec![
+            vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
+            }
+        ],
+        vk::SampleCountFlags::_1,
+        true,
+        true,
+        vec![],
+        false,
+        vk::LogicOp::COPY,
+        [0.0, 0.0, 0.0, 0.0],
     );
 
     let subpass_state = SubpassPipelineState::new(
@@ -319,7 +340,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         [0.0, 0.0, 0.0, 0.0],
     );
 
-    let bindings = vec![
+    let lit_bindings = vec![
         vec![
             vk::DescriptorSetLayoutBinding::builder()
                 .binding(0)
@@ -338,16 +359,28 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         ],
     ];
 
+    let shadow_bindings = vec![
+        vec![
+            vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .build(),
+        ],
+    ];
+
     let shadow_material = BasicMaterial::new(
         instance,
         device,
         data,
-        bindings.clone(),
+        shadow_bindings,
         vec![],
-        lit_shader.states(),
-        subpass_state.clone(),
+        shadow_state,
+        shadow_subpass_state,
         mesh_state.clone(),
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
+        vec![camera.get_set_layout()],
+        vec![0],
         0
     );
     let shadow_mat_id = data.materials.push(Box::new(shadow_material));
@@ -356,19 +389,20 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         instance,
         device,
         data,
-        bindings.clone(),
+        lit_bindings,
         vec![],
-        lit_shader.states(),
+        lit_state,
         subpass_state,
         mesh_state,
         vec![camera.get_set_layout(), light_group.get_set_layout()],
+        vec![0, 1],
         1
     );
     let mat_id = data.materials.push(Box::new(material));
 
     let render_data_0 = SubpassRenderData::new(
         0,
-        vec![(plane_id, shadow_mat_id)],
+        vec![(plane_id, shadow_mat_id), (monkey_id, shadow_mat_id)],
         camera_id,
         light_group_id
     );

@@ -230,7 +230,6 @@ impl Renderer {
         let clear_values = &[
             depth_clear_value,
             color_clear_value,
-            color_clear_value,
             depth_clear_value,
         ];
         let info = vk::RenderPassBeginInfo::builder()
@@ -480,6 +479,7 @@ pub struct RendererData {
     pub recreated: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct RenderStats {
     start: Instant,

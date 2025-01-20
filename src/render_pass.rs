@@ -146,20 +146,22 @@ impl SubpassRenderData {
         let light_group = data.light_groups.get_loaded(self.light_group).unwrap();
         let camera = data.cameras.get_loaded(self.camera).unwrap();
         let other_descriptors = vec![
-            (2, camera.get_descriptor_sets()[image_index]),
-            (3, light_group.get_descriptor_sets()[image_index]),
+            camera.get_descriptor_sets()[image_index],
+            light_group.get_descriptor_sets()[image_index],
         ];
 
         self.objects
             .iter()
             .map(|(k_o, k_m)| (data.objects.get_loaded(*k_o).unwrap(), data.materials.get_loaded(*k_m).unwrap()))
             .for_each(|(o, m)| {
+                let scene_descriptors = m.get_scene_descriptor_ids().iter().map(|id| other_descriptors[*id]).collect::<Vec<_>>();
+
                 m.draw(
                     instance,
                     device,
                     command_buffer,
                     o.descriptor_set(self.subpass_id, image_index),
-                    other_descriptors.clone(),
+                    scene_descriptors,
                     o.mesh_data(),
                     &o.name(),
                 )
@@ -384,7 +386,8 @@ impl RenderPassBuilder {
         let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
 
         let image_attachments = self.attachments.iter().map(|(description, a_use, _)| (*description, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
-        let attachment_images = generate_render_pass_images(instance, device, data, &image_attachments[0..(image_attachments.len() - 1)]);
+        // the last attachment must be the swapchain image
+        let attachment_images = generate_render_pass_images(instance, device, data, &image_attachments[..(image_attachments.len() - 1)]);
 
         let framebuffers = data
             .swapchain_image_views
