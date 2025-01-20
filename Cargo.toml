@@ -10,7 +10,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.92"
 glam = "0.29.0"
-vulkanalia = { version = "0.25.0", features = ["libloading", "window"] }
+ash = "0.38.0"
 shaderc = "0.8.3"
 thiserror = "1.0.67"
 tobj = { version = "4.0.2", features = ["log"] }
@@ -19,6 +19,8 @@ winit = "0.30.5"
 image = "0.25.4"
 
 electrum_engine_macros = { path = "electrum_engine_macros"}
+ash-window = "0.13.0"
+raw-window-handle = "0.6.2"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"

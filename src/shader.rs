@@ -1,17 +1,19 @@
-use std::fs;
+use std::ffi::CString;
+use std::{fs, io};
 use std::io::Read;
 use std::fs::File;
 
 use anyhow::Result;
 use shaderc::{CompileOptions, Compiler, ShaderKind};
 
-use vulkanalia::bytecode::Bytecode;
-use vulkanalia::prelude::v1_2::*;
+use ash::vk;
+use ash::{Device, Instance};
+use ash::util::read_spv;
 
 use crate::{insert_command_label, set_object_name, Loadable, MeshData, RendererData};
 
 pub trait Shader {
-    fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo>;
+    fn stages(&self) -> Vec<PipelineShaderStage>;
     fn state(&self) -> PipelineShaderState {
         PipelineShaderState::default()
     }
@@ -51,52 +53,52 @@ impl GraphicsShader {
 }
 
 impl Shader for GraphicsShader {
-    fn stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo> {
+    fn stages(&self) -> Vec<PipelineShaderStage> {
         let mut stages = vec![
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(self.vertex)
-                .name(b"main\0")
-                .build(),
+            PipelineShaderStage {
+                shader: self.vertex,
+                stage: vk::ShaderStageFlags::VERTEX,
+                name: c"main".to_owned(),
+            },
         ];
 
         if self.fragment != vk::ShaderModule::default() {
             stages.push(
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::FRAGMENT)
-                    .module(self.fragment)
-                    .name(b"main\0")
-                    .build(),
+                PipelineShaderStage {
+                    shader: self.fragment,
+                    stage: vk::ShaderStageFlags::FRAGMENT,
+                    name: c"main".to_owned(),
+                },
             );
         }
 
         if self.geometry != vk::ShaderModule::default() {
             stages.push(
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::GEOMETRY)
-                    .module(self.geometry)
-                    .name(b"main\0")
-                    .build(),
+                PipelineShaderStage {
+                    shader: self.geometry,
+                    stage: vk::ShaderStageFlags::GEOMETRY,
+                    name: c"main".to_owned(),
+                },
             );
         }
 
         if self.tessalation_control != vk::ShaderModule::default() {
             stages.push(
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::TESSELLATION_CONTROL)
-                    .module(self.tessalation_control)
-                    .name(b"main\0")
-                    .build(),
+                PipelineShaderStage {
+                    shader: self.tessalation_control,
+                    stage: vk::ShaderStageFlags::TESSELLATION_CONTROL,
+                    name: c"main".to_owned(),
+                },
             );
         }
 
         if self.tessalation_evaluation != vk::ShaderModule::default() {
             stages.push(
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::TESSELLATION_EVALUATION)
-                    .module(self.tessalation_evaluation)
-                    .name(b"main\0")
-                    .build(),
+                PipelineShaderStage {
+                    shader: self.tessalation_evaluation,
+                    stage: vk::ShaderStageFlags::TESSELLATION_EVALUATION,
+                    name: c"main".to_owned(),
+                },
             );
         }
 
@@ -179,8 +181,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Vertex Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            vertex.as_raw(),
+            vertex,
         )
         .unwrap();
 
@@ -189,11 +190,9 @@ impl<'a> GraphicsShaderBuilder<'a> {
     }
 
     pub fn load_vertex(&mut self, path: &str) -> &mut Self {
-        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
-        let create_info = vk::ShaderModuleCreateInfo::builder()
-            .code_size(bytecode.code_size())
-            .code(bytecode.code())
-            .build();
+        let bytecode = read_spv(&mut fs::File::open(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::default()
+            .code(&bytecode);
 
         let vertex = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
@@ -201,8 +200,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Vertex Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            vertex.as_raw(),
+            vertex,
         )
         .unwrap();
 
@@ -220,8 +218,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Fragment Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            fragment.as_raw(),
+            fragment,
         )
         .unwrap();
 
@@ -230,12 +227,9 @@ impl<'a> GraphicsShaderBuilder<'a> {
     }
 
     pub fn load_fragment(&mut self, path: &str) -> &mut Self {
-        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
-    
-        let create_info = vk::ShaderModuleCreateInfo::builder()
-            .code_size(bytecode.code_size())
-            .code(bytecode.code())
-            .build();
+        let bytecode = read_spv(&mut fs::File::open(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::default()
+            .code(&bytecode);
 
         let fragment = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
@@ -243,8 +237,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Fragment Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            fragment.as_raw(),
+            fragment,
         )
         .unwrap();
 
@@ -263,8 +256,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Geometry Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            geometry.as_raw(),
+            geometry,
         )
         .unwrap();
 
@@ -273,11 +265,9 @@ impl<'a> GraphicsShaderBuilder<'a> {
     }
 
     pub fn load_geometry(&mut self, path: &str) -> &mut Self {
-        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
-        let create_info = vk::ShaderModuleCreateInfo::builder()
-            .code_size(bytecode.code_size())
-            .code(bytecode.code())
-            .build();
+        let bytecode = read_spv(&mut fs::File::open(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::default()
+            .code(&bytecode);
 
         let geometry = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
@@ -285,8 +275,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Geometry Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            geometry.as_raw(),
+            geometry,
         )
         .unwrap();
 
@@ -305,8 +294,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Tessalation Control Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            tessalation_control.as_raw(),
+            tessalation_control,
         )
         .unwrap();
 
@@ -315,11 +303,9 @@ impl<'a> GraphicsShaderBuilder<'a> {
     }
 
     pub fn load_tessalation_control(&mut self, path: &str) -> &mut Self {
-        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
-        let create_info = vk::ShaderModuleCreateInfo::builder()
-            .code_size(bytecode.code_size())
-            .code(bytecode.code())
-            .build();
+        let bytecode = read_spv(&mut fs::File::open(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::default()
+            .code(&bytecode);
 
         let tess_ctrl = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
@@ -327,8 +313,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Tessallation Control Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            tess_ctrl.as_raw(),
+            tess_ctrl,
         )
         .unwrap();
 
@@ -347,8 +332,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Tessalation Evaluation Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            tessalation_evaluation.as_raw(),
+            tessalation_evaluation,
         )
         .unwrap();
 
@@ -357,11 +341,9 @@ impl<'a> GraphicsShaderBuilder<'a> {
     }
 
     pub fn load_tessalation_evaluation(&mut self, path: &str) -> &mut Self {
-        let bytecode = Bytecode::new(&fs::read(path).unwrap()).unwrap();
-        let create_info = vk::ShaderModuleCreateInfo::builder()
-            .code_size(bytecode.code_size())
-            .code(bytecode.code())
-            .build();
+        let bytecode = read_spv(&mut fs::File::open(path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::default()
+            .code(&bytecode);
 
         let tess_eval = unsafe { self.device.create_shader_module(&create_info, None) }.unwrap();
 
@@ -369,8 +351,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
             &self.instance,
             &self.device,
             &(self.name.clone() + " Tessallation Evaluation Shader"),
-            vk::ObjectType::SHADER_MODULE,
-            tess_eval.as_raw(),
+            tess_eval,
         )
         .unwrap();
 
@@ -422,11 +403,10 @@ pub fn compile_shader_module(
 
     let bytes = compiled.as_binary_u8();
 
-    let bytecode = Bytecode::new(bytes).unwrap();
+    let bytecode = read_spv(&mut io::Cursor::new(bytes)).unwrap();
 
-    let info = vk::ShaderModuleCreateInfo::builder()
-        .code_size(bytecode.code_size())
-        .code(bytecode.code());
+    let info = vk::ShaderModuleCreateInfo::default()
+        .code(&bytecode);
 
     Ok(unsafe { device.create_shader_module(&info, None) }?)
 }
@@ -504,11 +484,10 @@ impl BasicMaterial {
         let mut push_constant_ranges = vec![];
         let mut offset = 0u32;
         for (size, stage_flag) in &push_constant_sizes {
-            let range = vk::PushConstantRange::builder()
+            let range = vk::PushConstantRange::default()
                 .stage_flags(*stage_flag)
                 .offset(offset)
-                .size(*size)
-                .build();
+                .size(*size);
 
             offset += size;
             push_constant_ranges.push(range);
@@ -522,10 +501,9 @@ impl BasicMaterial {
         let mut set_layouts = descriptor_set_layout.clone();
         set_layouts.append(&mut other_layouts.clone());
 
-        let layout_info = vk::PipelineLayoutCreateInfo::builder()
+        let layout_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&set_layouts)
-            .push_constant_ranges(&push_constant_ranges)
-            .build();
+            .push_constant_ranges(&push_constant_ranges);
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
@@ -603,6 +581,7 @@ impl Material for BasicMaterial {
 
             insert_command_label(
                 instance,
+                device,
                 command_buffer,
                 &format!("Draw {}", name),
                 [0.0, 0.5, 0.1, 1.0],
@@ -621,10 +600,9 @@ impl Material for BasicMaterial {
 
         set_layouts.append(&mut self.other_set_layouts.clone());
 
-        let layout_info = vk::PipelineLayoutCreateInfo::builder()
+        let layout_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&set_layouts)
-            .push_constant_ranges(&self.push_constant_ranges)
-            .build();
+            .push_constant_ranges(&self.push_constant_ranges);
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
@@ -744,51 +722,47 @@ impl SubpassPipelineState {
     }
 
     pub fn viewport(&self) -> vk::PipelineViewportStateCreateInfo {
-        vk::PipelineViewportStateCreateInfo::builder()
+        vk::PipelineViewportStateCreateInfo::default()
             .viewports(&self.viewports)
             .scissors(&self.scissors)
-            .build()
     }
 
     pub fn multisample(&self) -> vk::PipelineMultisampleStateCreateInfo {
-        vk::PipelineMultisampleStateCreateInfo::builder()
+        vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(self.rasterisation_samples)
             .sample_shading_enable(false)
-            .build()
     }
 
     pub fn depth_stencil(&self) -> vk::PipelineDepthStencilStateCreateInfo {
-        vk::PipelineDepthStencilStateCreateInfo::builder()
+        vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(self.depth_test)
             .depth_write_enable(self.depth_write)
             .depth_compare_op(vk::CompareOp::LESS)
             .depth_bounds_test_enable(false)
             .stencil_test_enable(false)
-            .build()
     }
 
     pub fn color_blend(&self) -> vk::PipelineColorBlendStateCreateInfo {
-        vk::PipelineColorBlendStateCreateInfo::builder()
+        vk::PipelineColorBlendStateCreateInfo::default()
             .logic_op_enable(self.logic_op_enable)
             .logic_op(self.logic_op)
             .attachments(&self.attachments)
             .blend_constants(self.blend_constants)
-            .build()
     }
 }
 
 
 #[derive(Default, Debug, Clone)]
 pub struct PipelineShaderState {
-    pub stages: Vec<vk::PipelineShaderStageCreateInfo>,
+    pub stages: Vec<PipelineShaderStage>,
     pub rasterisation: RasterisationState,
-    pub tessalation: vk::PipelineTessellationStateCreateInfo,
-    pub dynamic: vk::PipelineDynamicStateCreateInfo,
+    pub tessalation: TessalationState,
+    pub dynamic: DynamicState,
 }
 
 impl PipelineShaderState {
     pub fn get_rasterisation(&self) -> vk::PipelineRasterizationStateCreateInfo {
-        vk::PipelineRasterizationStateCreateInfo::builder()
+        vk::PipelineRasterizationStateCreateInfo::default()
             .depth_clamp_enable(self.rasterisation.depth_clamp_enable)
             .rasterizer_discard_enable(self.rasterisation.rasterizer_discard_enable)
             .polygon_mode(self.rasterisation.polygon_mode)
@@ -799,7 +773,25 @@ impl PipelineShaderState {
             .depth_bias_clamp(self.rasterisation.depth_bias_clamp)
             .depth_bias_slope_factor(self.rasterisation.depth_bias_slope_factor)
             .line_width(self.rasterisation.line_width)
-            .build()
+    }
+
+    pub fn get_tessalation(&self) -> vk::PipelineTessellationStateCreateInfo {
+        vk::PipelineTessellationStateCreateInfo::default()
+            .patch_control_points(self.tessalation.patch_control_points)
+    }
+
+    pub fn get_dynamic(&self) -> vk::PipelineDynamicStateCreateInfo {
+        vk::PipelineDynamicStateCreateInfo::default()
+            .dynamic_states(&self.dynamic.dynamic_states)
+    }
+
+    pub fn get_stages(&self) -> Vec<vk::PipelineShaderStageCreateInfo> {
+        self.stages.iter().map(|s| {
+            vk::PipelineShaderStageCreateInfo::default()
+                .stage(s.stage)
+                .module(s.shader)
+                .name(&s.name)
+        }).collect::<Vec<_>>()
     }
 }
 
@@ -834,6 +826,23 @@ impl Default for RasterisationState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TessalationState {
+    patch_control_points: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DynamicState {
+    pub dynamic_states: Vec<vk::DynamicState>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PipelineShaderStage {
+    pub shader: vk::ShaderModule,
+    pub stage: vk::ShaderStageFlags,
+    pub name: CString,
+}
+
 #[derive(Debug, Clone)]
 pub struct PipelineMeshState {
     pub bindings: Vec<vk::VertexInputBindingDescription>,
@@ -858,17 +867,15 @@ impl PipelineMeshState {
     }
 
     pub fn vertex_input(&self) -> vk::PipelineVertexInputStateCreateInfo {
-        vk::PipelineVertexInputStateCreateInfo::builder()
+        vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&self.bindings)
             .vertex_attribute_descriptions(&self.attributes)
-            .build()
     }
 
     pub fn input_assembly(&self) -> vk::PipelineInputAssemblyStateCreateInfo {
-        vk::PipelineInputAssemblyStateCreateInfo::builder()
+        vk::PipelineInputAssemblyStateCreateInfo::default()
             .primitive_restart_enable(self.primitive_restart)
             .topology(self.topology)
-            .build()
     }
 }
 
@@ -884,25 +891,41 @@ pub fn create_pipeline_from_states(
     render_pass: vk::RenderPass,
     material_name: &str,
 ) -> Result<vk::Pipeline> {
-    let create_info = vk::GraphicsPipelineCreateInfo::builder()
+    let stages = shader_state.get_stages();
+    let vertex_input_state = mesh_state.vertex_input();
+    let input_assembly_state = mesh_state.input_assembly();
+    let tessellation_state = shader_state.get_tessalation();
+    let viewport_state = subpass_state.viewport();
+    let rasterization_state = shader_state.get_rasterisation();
+    let multisample_state = subpass_state.multisample();
+    let depth_stencil_state = subpass_state.depth_stencil();
+    let color_blend_state = subpass_state.color_blend();
+    let dynamic_state = shader_state.get_dynamic();
+
+    let create_info = vk::GraphicsPipelineCreateInfo::default()
         .render_pass(render_pass)
         .subpass(subpass)
-        .stages(&shader_state.stages)
-        .vertex_input_state(&mesh_state.vertex_input())
-        .input_assembly_state(&mesh_state.input_assembly())
-        .tessellation_state(&shader_state.tessalation)
-        .viewport_state(&subpass_state.viewport())
-        .rasterization_state(&shader_state.get_rasterisation())
-        .multisample_state(&subpass_state.multisample())
-        .depth_stencil_state(&subpass_state.depth_stencil())
-        .color_blend_state(&subpass_state.color_blend())
-        .dynamic_state(&shader_state.dynamic)
-        .layout(layout)
-        .build();
+        .stages(&stages)
+        .vertex_input_state(&vertex_input_state)
+        .input_assembly_state(&input_assembly_state)
+        .tessellation_state(&tessellation_state)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterization_state)
+        .multisample_state(&multisample_state)
+        .depth_stencil_state(&depth_stencil_state)
+        .color_blend_state(&color_blend_state)
+        .dynamic_state(&dynamic_state)
+        .layout(layout);
     
-    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None) }?.0[0];
+    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None) }
+        .map_err(|(_, err)| anyhow::anyhow!("Failed to create graphics pipeline: {:?}", err))?[0];
 
-    set_object_name(instance, device, &format!("{} Material Pipeline", material_name), vk::ObjectType::PIPELINE, pipeline.as_raw())?;
+    set_object_name(
+        instance,
+        device,
+        &format!("{} Material Pipeline", material_name),
+        pipeline
+    )?;
 
     Ok(pipeline)
 }

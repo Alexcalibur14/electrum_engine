@@ -3,7 +3,9 @@ use std::{collections::HashMap, fs::File, io::BufReader, mem::size_of};
 
 use anyhow::Result;
 use glam::{vec2, vec3, Mat4, Vec3};
-use vulkanalia::prelude::v1_2::*;
+
+use ash::vk;
+use ash::{Device, Instance};
 
 use crate::{
     buffer::{create_buffer, BufferWrapper}, vertices::PCTVertex, DescriptorBuilder, RenderStats, Renderable, RendererData
@@ -128,17 +130,15 @@ impl MeshObject {
         let mut descriptor_sets = vec![];
 
         for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
+            let buffer_info = vk::DescriptorBufferInfo::default()
                 .buffer(ubo_buffers[i].buffer)
                 .offset(0)
-                .range(size_of::<ModelData>() as u64)
-                .build();
+                .range(size_of::<ModelData>() as u64);
             
-            let image_info = vk::DescriptorImageInfo::builder()
+            let image_info = vk::DescriptorImageInfo::default()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(texture.view)
-                .sampler(sampler)
-                .build();
+                .sampler(sampler);
 
             let (model_set, _) = DescriptorBuilder::new()
                 .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)

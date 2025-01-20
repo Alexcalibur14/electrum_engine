@@ -1,6 +1,8 @@
 use std::ptr::copy_nonoverlapping as memcpy;
 
-use vulkanalia::prelude::v1_2::*;
+use ash::vk;
+use ash::Device;
+use ash::Instance;
 
 use anyhow::{anyhow, Result};
 
@@ -16,7 +18,7 @@ pub unsafe fn begin_single_time_commands(
     data: &RendererData,
     name: &str,
 ) -> Result<vk::CommandBuffer> {
-    let info = vk::CommandBufferAllocateInfo::builder()
+    let info = vk::CommandBufferAllocateInfo::default()
         .level(vk::CommandBufferLevel::PRIMARY)
         .command_pool(data.command_pool)
         .command_buffer_count(1);
@@ -24,9 +26,9 @@ pub unsafe fn begin_single_time_commands(
     let command_buffer = device.allocate_command_buffers(&info)?[0];
 
     let info =
-        vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-    begin_command_label(instance, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
+    begin_command_label(instance, device, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
     device.begin_command_buffer(command_buffer, &info)?;
 
     Ok(command_buffer)
@@ -42,10 +44,10 @@ pub unsafe fn end_single_time_commands(
     command_buffer: vk::CommandBuffer,
 ) -> Result<()> {
     device.end_command_buffer(command_buffer)?;
-    end_command_label(instance, command_buffer);
+    end_command_label(instance, device, command_buffer);
 
     let command_buffers = &[command_buffer];
-    let info = vk::SubmitInfo::builder().command_buffers(command_buffers);
+    let info = vk::SubmitInfo::default().command_buffers(command_buffers);
 
     device.queue_submit(data.graphics_queue, &[info], vk::Fence::null())?;
     device.queue_wait_idle(data.graphics_queue)?;
@@ -72,7 +74,7 @@ pub fn create_buffer(
     properties: vk::MemoryPropertyFlags,
     name: &str,
 ) -> Result<BufferWrapper> {
-    let buffer_info = vk::BufferCreateInfo::builder()
+    let buffer_info = vk::BufferCreateInfo::default()
         .size(size)
         .usage(usage)
         .sharing_mode(vk::SharingMode::EXCLUSIVE);
@@ -81,7 +83,7 @@ pub fn create_buffer(
 
     let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
 
-    let memory_info = unsafe { vk::MemoryAllocateInfo::builder()
+    let memory_info = unsafe { vk::MemoryAllocateInfo::default()
             .allocation_size(requirements.size)
             .memory_type_index(get_memory_type_index(
                 instance,
@@ -103,16 +105,14 @@ pub fn create_buffer(
         instance,
         device,
         name,
-        vk::ObjectType::BUFFER,
-        buffer.as_raw(),
+        buffer,
     )?;
 
     set_object_name(
         instance,
         device,
         &(name.to_owned() + " Memory"),
-        vk::ObjectType::DEVICE_MEMORY,
-        buffer_memory.as_raw(),
+        buffer_memory,
     )?;
 
     Ok(wrapper)
@@ -151,7 +151,7 @@ pub fn copy_buffer(
         let command_buffer =
             begin_single_time_commands(instance, device, data, "Copy Buffer")?;
 
-        let regions = vk::BufferCopy::builder()
+        let regions = vk::BufferCopy::default()
             .src_offset(0)
             .dst_offset(0)
             .size(size);

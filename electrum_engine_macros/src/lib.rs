@@ -50,23 +50,23 @@ fn impl_vertex_trait(mut ast: DeriveInput) -> proc_macro2::TokenStream {
     // Generate impl
     quote::quote! {
         impl #impl_generics crate::Vertex for #ident #type_generics #where_clauses {
-            fn binding_descriptions() -> Vec<vulkanalia::prelude::v1_2::vk::VertexInputBindingDescription> {
+            fn binding_descriptions() -> Vec<ash::vk::VertexInputBindingDescription> {
                 vec![
-                    vulkanalia::prelude::v1_2::vk::VertexInputBindingDescription {
+                    ash::vk::VertexInputBindingDescription {
                         binding: #binding,
                         stride: std::mem::size_of::<#ident>() as u32,
-                        input_rate: vulkanalia::prelude::v1_2::vk::VertexInputRate::VERTEX,
+                        input_rate: ash::vk::VertexInputRate::VERTEX,
                     }
                 ]
             }
 
-            fn attribute_descriptions() -> Vec<vulkanalia::prelude::v1_2::vk::VertexInputAttributeDescription> {
+            fn attribute_descriptions() -> Vec<ash::vk::VertexInputAttributeDescription> {
                 vec![
                     #(
-                        vulkanalia::prelude::v1_2::vk::VertexInputAttributeDescription {
+                        ash::vk::VertexInputAttributeDescription {
                             location: #locations,
                             binding: #field_bindings,
-                            format: vulkanalia::prelude::v1_2::vk::Format::from_raw(#field_formats),
+                            format: ash::vk::Format::from_raw(#field_formats),
                             offset: #offsets,
                         },
                     )*

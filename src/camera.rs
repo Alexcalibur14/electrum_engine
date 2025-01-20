@@ -1,7 +1,9 @@
 use std::mem::size_of;
 
 use glam::{Mat4, Quat, Vec3};
-use vulkanalia::prelude::v1_2::*;
+
+use ash::vk;
+use ash::{Device, Instance};
 
 use crate::{
     buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
@@ -121,11 +123,10 @@ impl SimpleCamera {
         let mut descriptor_set_layout = Default::default();
 
         for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
+            let buffer_info = vk::DescriptorBufferInfo::default()
                 .buffer(buffers[i].buffer)
                 .offset(0)
-                .range(size_of::<CameraData>() as u64)
-                .build();
+                .range(size_of::<CameraData>() as u64);
 
             let (descriptor_set, new_set_layout) = DescriptorBuilder::new()
                 .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)

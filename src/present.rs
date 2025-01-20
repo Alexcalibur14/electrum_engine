@@ -1,8 +1,10 @@
 #![allow(dead_code)]
-use vulkanalia::{prelude::v1_2::*, vk::KhrSwapchainExtension};
+
+use ash::khr::swapchain;
+use ash::{vk, Entry};
+use ash::{Device, Instance};
 
 use anyhow::{Ok, Result};
-use winit::window::Window;
 
 use crate::{
     texture::{Image, MipLevels},
@@ -47,19 +49,21 @@ pub fn generate_render_pass_images(
 }
 
 pub(crate) unsafe fn create_swapchain(
-    window: &Window,
+    entry: &Entry,
     instance: &Instance,
     device: &Device,
     data: &mut RendererData,
+    width: u32,
+    height: u32,
 ) -> Result<()> {
     // Image
 
-    let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
-    let support = SwapchainSupport::get(instance, data, data.physical_device)?;
+    let indices = QueueFamilyIndices::get(entry, instance, data, data.physical_device)?;
+    let support = SwapchainSupport::get(entry, instance, data, data.physical_device)?;
 
     let surface_format = get_swapchain_surface_format(&support.formats);
     let present_mode = get_swapchain_present_mode(&support.present_modes);
-    let extent = get_swapchain_extent(window, support.capabilities);
+    let extent = get_swapchain_extent(width, height, support.capabilities);
 
     data.swapchain_format = surface_format.format;
     data.swapchain_extent = extent;
@@ -82,7 +86,7 @@ pub(crate) unsafe fn create_swapchain(
 
     // Create
 
-    let info = vk::SwapchainCreateInfoKHR::builder()
+    let info = vk::SwapchainCreateInfoKHR::default()
         .surface(data.surface)
         .min_image_count(image_count)
         .image_format(surface_format.format)
@@ -98,11 +102,13 @@ pub(crate) unsafe fn create_swapchain(
         .clipped(false)
         .old_swapchain(data.swapchain);
 
-    data.swapchain = device.create_swapchain_khr(&info, None)?;
+    let swapchain_loader = swapchain::Device::new(&instance, &device);
+
+    data.swapchain = swapchain_loader.create_swapchain(&info, None)?;
 
     // Images
 
-    data.swapchain_images = device.get_swapchain_images_khr(data.swapchain)?;
+    data.swapchain_images = swapchain_loader.get_swapchain_images(data.swapchain)?;
 
     Ok(())
 }
@@ -126,24 +132,22 @@ fn get_swapchain_present_mode(present_modes: &[vk::PresentModeKHR]) -> vk::Prese
         .unwrap_or(vk::PresentModeKHR::FIFO)
 }
 
-fn get_swapchain_extent(window: &Window, capabilities: vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
+fn get_swapchain_extent(width: u32, height: u32, capabilities: vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
     if capabilities.current_extent.width != u32::MAX {
         capabilities.current_extent
     } else {
-        let size = window.inner_size();
         let clamp = |min: u32, max: u32, v: u32| min.max(max.min(v));
-        vk::Extent2D::builder()
+        vk::Extent2D::default()
             .width(clamp(
                 capabilities.min_image_extent.width,
                 capabilities.max_image_extent.width,
-                size.width,
+                width,
             ))
             .height(clamp(
                 capabilities.min_image_extent.height,
                 capabilities.max_image_extent.height,
-                size.height,
+                height,
             ))
-            .build()
     }
 }
 

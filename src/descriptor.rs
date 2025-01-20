@@ -1,7 +1,9 @@
 use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, marker::PhantomData};
 
 use thiserror::Error;
-use vulkanalia::prelude::v1_2::*;
+
+use ash::vk;
+use ash::Device;
 
 const STANDARD_SIZES: [(vk::DescriptorType, u32); 11] = [
     (vk::DescriptorType::SAMPLER, 1),
@@ -58,17 +60,15 @@ impl DescriptorAllocator {
 
     fn create_pool(&self, device: &Device) -> Result<vk::DescriptorPool, DescriptorAllocateError> {
         let sizes = self.sizes.iter().map(|(d_type, amt)| {
-            vk::DescriptorPoolSize::builder()
-                .type_(*d_type)
+            vk::DescriptorPoolSize::default()
+                .ty(*d_type)
                 .descriptor_count(amt * self.count)
-                .build()
         }).collect::<Vec<_>>();
         
-        let create_info = vk::DescriptorPoolCreateInfo::builder()
+        let create_info = vk::DescriptorPoolCreateInfo::default()
             .flags(vk::DescriptorPoolCreateFlags::empty())
             .pool_sizes(&sizes)
-            .max_sets(self.count)
-            .build();
+            .max_sets(self.count);
 
         match unsafe { device.create_descriptor_pool(&create_info, None) } {
             Ok(pool) => Ok(pool),
@@ -86,18 +86,17 @@ impl DescriptorAllocator {
         let pool = self.current_pool.unwrap();
 
         let layouts = vec![*set_layout];
-        let allocate_info = vk::DescriptorSetAllocateInfo::builder()
+        let allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(pool)
-            .set_layouts(&layouts)
-            .build();
+            .set_layouts(&layouts);
 
         let result = unsafe { device.allocate_descriptor_sets(&allocate_info) };
 
         match result {
             Ok(sets) => return Ok(sets[0]),
             Err(err) => match err {
-                vk::ErrorCode::FRAGMENTED_POOL => {},
-                vk::ErrorCode::OUT_OF_POOL_MEMORY => {},
+                vk::Result::ERROR_FRAGMENTED_POOL => {},
+                vk::Result::ERROR_OUT_OF_POOL_MEMORY => {},
 
                 _ => return Err(DescriptorAllocateError::AllocationFailed(err)),
             },
@@ -144,7 +143,7 @@ pub enum DescriptorAllocateError {
     #[error("Unable to create another pool")]
     UnableToCreate,
     #[error("Descriptor set allocation failed due to error: {0}")]
-    AllocationFailed(vk::ErrorCode),
+    AllocationFailed(vk::Result),
 }
 
 
@@ -166,9 +165,8 @@ impl DescriptorLayoutCache {
         match self.cache.get(&hash) {
             Some(layout) => *layout,
             None => {
-                let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-                    .bindings(bindings)
-                    .build();
+                let create_info = vk::DescriptorSetLayoutCreateInfo::default()
+                    .bindings(bindings);
 
                 let layout = unsafe { device.create_descriptor_set_layout(&create_info, None) }.unwrap();
                 self.cache.insert(hash, layout.clone());
@@ -179,7 +177,12 @@ impl DescriptorLayoutCache {
 
     fn hash_bindings(bindings: &[vk::DescriptorSetLayoutBinding]) -> u64 {
         let mut hasher = DefaultHasher::new();
-        bindings.iter().for_each(|b| b.hash(&mut hasher));
+        bindings.iter().for_each(|b| {
+            b.binding.hash(&mut hasher);
+            b.descriptor_type.hash(&mut hasher);
+            b.descriptor_count.hash(&mut hasher);
+            b.stage_flags.hash(&mut hasher);
+        });
         hasher.finish()
     }
 
@@ -197,8 +200,8 @@ impl Default for DescriptorLayoutCache {
 
 #[derive(Debug, Clone)]
 pub struct DescriptorBuilder<'a> {
-    writes: Vec<vk::WriteDescriptorSet>,
-    bindings: Vec<vk::DescriptorSetLayoutBinding>,
+    writes: Vec<vk::WriteDescriptorSet<'a>>,
+    bindings: Vec<vk::DescriptorSetLayoutBinding<'a>>,
     phantom: PhantomData<&'a u8>,
 }
 
@@ -212,20 +215,18 @@ impl<'a> DescriptorBuilder<'a> {
     }
 
     pub fn bind_buffer(&'a mut self, binding: u32, count: u32, buffer_info: &'a[vk::DescriptorBufferInfo; 1], descriptor_type: vk::DescriptorType, stage_flags: vk::ShaderStageFlags) -> &'a mut Self {
-        let new_binding = vk::DescriptorSetLayoutBinding::builder()
+        let new_binding = vk::DescriptorSetLayoutBinding::default()
             .binding(binding)
             .descriptor_type(descriptor_type)
             .descriptor_count(count)
-            .stage_flags(stage_flags)
-            .build();
+            .stage_flags(stage_flags);
 
         self.bindings.push(new_binding);
 
-        let write_info = vk::WriteDescriptorSet::builder()
+        let write_info = vk::WriteDescriptorSet::default()
             .buffer_info(buffer_info)
             .descriptor_type(descriptor_type)
-            .dst_binding(binding)
-            .build();
+            .dst_binding(binding);
 
         self.writes.push(write_info);
 
@@ -233,20 +234,18 @@ impl<'a> DescriptorBuilder<'a> {
     }
 
     pub fn bind_image(&'a mut self, binding: u32, count: u32, image_info: &'a[vk::DescriptorImageInfo; 1], descriptor_type: vk::DescriptorType, stage_flags: vk::ShaderStageFlags) -> &'a mut Self {
-        let new_binding = vk::DescriptorSetLayoutBinding::builder()
+        let new_binding = vk::DescriptorSetLayoutBinding::default()
             .binding(binding)
             .descriptor_type(descriptor_type)
             .descriptor_count(count)
-            .stage_flags(stage_flags)
-            .build();
+            .stage_flags(stage_flags);
 
         self.bindings.push(new_binding);
 
-        let write_info = vk::WriteDescriptorSet::builder()
+        let write_info = vk::WriteDescriptorSet::default()
             .image_info(image_info)
             .descriptor_type(descriptor_type)
-            .dst_binding(binding)
-            .build();
+            .dst_binding(binding);
 
         self.writes.push(write_info);
 
