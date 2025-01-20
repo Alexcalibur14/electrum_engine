@@ -214,29 +214,11 @@ impl Renderer {
             .offset(vk::Offset2D::default())
             .extent(self.data.swapchain_extent);
 
-        let color_clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        };
-
-        let depth_clear_value = vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue {
-                depth: 1.0,
-                stencil: 0,
-            },
-        };
-
-        let clear_values = &[
-            depth_clear_value,
-            color_clear_value,
-            depth_clear_value,
-        ];
         let info = vk::RenderPassBeginInfo::builder()
             .render_pass(self.data.render_pass)
             .framebuffer(self.data.framebuffers[image_index])
             .render_area(render_area)
-            .clear_values(clear_values);
+            .clear_values(&self.data.render_pass_builder.clear_values);
 
         begin_command_label(
             &self.instance,

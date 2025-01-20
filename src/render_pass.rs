@@ -296,6 +296,7 @@ pub struct RenderPassBuilder {
     dependencies: Vec<vk::SubpassDependency>,
 
     attachment_images: Vec<Image>,
+    pub clear_values: Vec<vk::ClearValue>,
 }
 
 impl RenderPassBuilder {
@@ -306,11 +307,13 @@ impl RenderPassBuilder {
             dependencies: vec![],
 
             attachment_images: vec![],
+            clear_values: vec![],
         }
     }
 
-    pub fn add_attachment(&mut self, attachment: vk::AttachmentDescription, attachment_use: AttachmentUse) -> &mut Self {
+    pub fn add_attachment(&mut self, attachment: vk::AttachmentDescription, attachment_use: AttachmentUse, clear_value: vk::ClearValue) -> &mut Self {
         self.attachments.push((attachment, attachment_use, None));
+        self.clear_values.push(clear_value);
         self
     }
 

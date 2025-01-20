@@ -143,6 +143,19 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
 
     attachments.iter_mut().for_each(|a| a.generate());
 
+    let color_clear_value = vk::ClearValue {
+        color: vk::ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0],
+        },
+    };
+
+    let depth_clear_value = vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+        },
+    };
+
     let subpass_1 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
         .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
         .build();
@@ -154,10 +167,10 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
         .build();
 
     let mut render_pass_builder = RenderPassBuilder::new()
-        .add_attachment(attachments[0].attachment_desc, AttachmentUse::Depth)
-        .add_attachment(attachments[1].attachment_desc, AttachmentUse::Color)
-        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Depth)
-        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Color)
+        .add_attachment(attachments[0].attachment_desc, AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[1].attachment_desc, AttachmentUse::Color, color_clear_value)
+        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Color, color_clear_value)
         .add_subpass(&subpass_1, &[(0, None)])
         .add_subpass(&subpass_2, &[(1, None), (2, None), (3, None)])
         .build();
