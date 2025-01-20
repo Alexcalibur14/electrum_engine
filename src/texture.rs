@@ -2,7 +2,8 @@
 
 use std::io::Read;
 
-use vulkanalia::prelude::v1_2::*;
+use ash::vk;
+use ash::{Device, Instance};
 
 use anyhow::{anyhow, Result};
 use image::ImageReader;
@@ -167,8 +168,8 @@ pub unsafe fn create_image(
     usage: vk::ImageUsageFlags,
     properties: vk::MemoryPropertyFlags,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
-    let info = vk::ImageCreateInfo::builder()
-        .image_type(vk::ImageType::_2D)
+    let info = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_2D)
         .extent(vk::Extent3D {
             width,
             height,
@@ -187,7 +188,7 @@ pub unsafe fn create_image(
 
     let requirements = device.get_image_memory_requirements(image);
 
-    let info = vk::MemoryAllocateInfo::builder()
+    let info = vk::MemoryAllocateInfo::default()
         .allocation_size(requirements.size)
         .memory_type_index(get_memory_type_index(
             instance,
@@ -237,7 +238,7 @@ pub unsafe fn create_texture_image(
         width,
         height,
         mip_levels,
-        vk::SampleCountFlags::_1,
+        vk::SampleCountFlags::TYPE_1,
         format,
         vk::ImageTiling::OPTIMAL,
         vk::ImageUsageFlags::SAMPLED
@@ -321,14 +322,14 @@ unsafe fn transition_image_layout(
         "Transition Image Layout",
     )?;
 
-    let subresource = vk::ImageSubresourceRange::builder()
+    let subresource = vk::ImageSubresourceRange::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
         .base_mip_level(0)
         .level_count(mip_levels)
         .base_array_layer(0)
         .layer_count(1);
 
-    let barrier = vk::ImageMemoryBarrier::builder()
+    let barrier = vk::ImageMemoryBarrier::default()
         .old_layout(old_layout)
         .new_layout(new_layout)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -365,13 +366,13 @@ unsafe fn copy_buffer_to_image(
     let command_buffer =
         begin_single_time_commands(instance, device, data, "Copy Buffer To Image")?;
 
-    let subresource = vk::ImageSubresourceLayers::builder()
+    let subresource = vk::ImageSubresourceLayers::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
         .mip_level(0)
         .base_array_layer(0)
         .layer_count(1);
 
-    let region = vk::BufferImageCopy::builder()
+    let region = vk::BufferImageCopy::default()
         .buffer_offset(0)
         .buffer_row_length(0)
         .buffer_image_height(0)
@@ -403,16 +404,16 @@ pub unsafe fn create_image_view(
     aspects: vk::ImageAspectFlags,
     mip_levels: u32,
 ) -> Result<vk::ImageView> {
-    let subresource_range = vk::ImageSubresourceRange::builder()
+    let subresource_range = vk::ImageSubresourceRange::default()
         .aspect_mask(aspects)
         .base_mip_level(0)
         .level_count(mip_levels)
         .base_array_layer(0)
         .layer_count(1);
 
-    let info = vk::ImageViewCreateInfo::builder()
+    let info = vk::ImageViewCreateInfo::default()
         .image(image)
-        .view_type(vk::ImageViewType::_2D)
+        .view_type(vk::ImageViewType::TYPE_2D)
         .format(format)
         .subresource_range(subresource_range);
 
@@ -425,7 +426,7 @@ pub unsafe fn create_texture_sampler(
     mip_level: &u32,
     name: &str,
 ) -> Result<vk::Sampler> {
-    let info = vk::SamplerCreateInfo::builder()
+    let info = vk::SamplerCreateInfo::default()
         .mag_filter(vk::Filter::LINEAR)
         .min_filter(vk::Filter::LINEAR)
         .address_mode_u(vk::SamplerAddressMode::REPEAT)
@@ -447,8 +448,7 @@ pub unsafe fn create_texture_sampler(
         instance,
         device,
         name,
-        vk::ObjectType::SAMPLER,
-        texture_sampler.as_raw(),
+        texture_sampler,
     )
     .unwrap();
 
@@ -482,13 +482,13 @@ unsafe fn generate_mipmaps(
     let command_buffer =
         begin_single_time_commands(instance, device, data, "Generate MipMaps")?;
 
-    let subresource = vk::ImageSubresourceRange::builder()
+    let subresource = vk::ImageSubresourceRange::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
         .base_array_layer(0)
         .layer_count(1)
         .level_count(1);
 
-    let mut barrier = vk::ImageMemoryBarrier::builder()
+    let mut barrier = vk::ImageMemoryBarrier::default()
         .image(image)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -514,19 +514,19 @@ unsafe fn generate_mipmaps(
             &[barrier],
         );
 
-        let src_subresource = vk::ImageSubresourceLayers::builder()
+        let src_subresource = vk::ImageSubresourceLayers::default()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
             .mip_level(i - 1)
             .base_array_layer(0)
             .layer_count(1);
 
-        let dst_subresource = vk::ImageSubresourceLayers::builder()
+        let dst_subresource = vk::ImageSubresourceLayers::default()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
             .mip_level(i)
             .base_array_layer(0)
             .layer_count(1);
 
-        let blit = vk::ImageBlit::builder()
+        let blit = vk::ImageBlit::default()
             .src_offsets([
                 vk::Offset3D { x: 0, y: 0, z: 0 },
                 vk::Offset3D {

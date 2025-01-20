@@ -1,7 +1,9 @@
 #![allow(clippy::too_many_arguments)]
 
 use glam::Mat4;
-use vulkanalia::prelude::v1_2::*;
+
+use ash::vk;
+use ash::{Device, Instance};
 
 use crate::{create_and_stage_buffer, BufferWrapper, Loadable, RenderStats, RendererData};
 

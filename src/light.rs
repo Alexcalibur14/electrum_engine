@@ -1,7 +1,9 @@
 use std::mem::size_of;
 
 use glam::Vec3;
-use vulkanalia::prelude::v1_2::*;
+
+use ash::vk;
+use ash::{Device, Instance};
 
 use crate::{
     buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
@@ -83,11 +85,10 @@ impl LightGroup {
         let mut descriptor_set_layout= Default::default();
 
         for i in 0..data.swapchain_images.len() {
-            let buffer_info = vk::DescriptorBufferInfo::builder()
+            let buffer_info = vk::DescriptorBufferInfo::default()
                 .buffer(buffers[i].buffer)
                 .offset(0)
-                .range((size_of::<PointLight>() * capacity) as u64)
-                .build();
+                .range((size_of::<PointLight>() * capacity) as u64);
 
             let (set, set_layout) = DescriptorBuilder::new()
                 .bind_buffer(0, capacity as u32, &[buffer_info], vk::DescriptorType::STORAGE_BUFFER, vk::ShaderStageFlags::FRAGMENT)

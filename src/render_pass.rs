@@ -1,9 +1,11 @@
 use std::ptr;
 
 use anyhow::{Ok, Result};
-use vulkanalia::prelude::v1_2::*;
 
-use crate::{generate_render_pass_images, get_c_ptr, get_c_ptr_slice, Image, RenderStats, Renderable, RendererData};
+use ash::vk;
+use ash::{Device, Instance};
+
+use crate::{generate_render_pass_images, get_c_ptr_slice, Image, RenderStats, Renderable, RendererData};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
@@ -24,7 +26,7 @@ impl Attachment {
     pub fn template_colour() -> Self {
         Attachment {
             format: vk::Format::R32G32B32A32_SFLOAT,
-            sample_count: vk::SampleCountFlags::_1,
+            sample_count: vk::SampleCountFlags::TYPE_1,
             load_op: vk::AttachmentLoadOp::CLEAR,
             store_op: vk::AttachmentStoreOp::STORE,
             stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
@@ -38,7 +40,7 @@ impl Attachment {
     pub fn template_depth() -> Self {
         Attachment {
             format: vk::Format::D32_SFLOAT,
-            sample_count: vk::SampleCountFlags::_1,
+            sample_count: vk::SampleCountFlags::TYPE_1,
             load_op: vk::AttachmentLoadOp::CLEAR,
             store_op: vk::AttachmentStoreOp::DONT_CARE,
             stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
@@ -52,7 +54,7 @@ impl Attachment {
     pub fn template_present() -> Self {
         Attachment {
             format: vk::Format::R8G8B8A8_SRGB,
-            sample_count: vk::SampleCountFlags::_1,
+            sample_count: vk::SampleCountFlags::TYPE_1,
             load_op: vk::AttachmentLoadOp::DONT_CARE,
             store_op: vk::AttachmentStoreOp::STORE,
             stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
@@ -64,7 +66,7 @@ impl Attachment {
     }
 
     pub fn generate(&mut self) {
-        self.attachment_desc = vk::AttachmentDescription::builder()
+        self.attachment_desc = vk::AttachmentDescription::default()
             .flags(self.flags)
             .format(self.format)
             .samples(self.sample_count)
@@ -74,7 +76,6 @@ impl Attachment {
             .stencil_store_op(self.stencil_store_op)
             .initial_layout(self.initial_layout)
             .final_layout(self.final_layout)
-            .build();
     }
 }
 
@@ -111,7 +112,7 @@ impl SubpassRenderData {
 
     pub fn setup_command_buffers(&mut self, device: &Device, data: &RendererData) {
         for i in 0..data.swapchain_images.len() {
-            let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            let allocate_info = vk::CommandBufferAllocateInfo::default()
                 .command_pool(data.command_pools[i])
                 .level(vk::CommandBufferLevel::SECONDARY)
                 .command_buffer_count(1);
@@ -130,16 +131,14 @@ impl SubpassRenderData {
     ) -> Result<()> {
         let command_buffer = self.command_buffers[image_index];
 
-        let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
+        let inheritance_info = vk::CommandBufferInheritanceInfo::default()
             .render_pass(data.render_pass)
             .subpass(self.subpass_id as u32)
-            .framebuffer(data.framebuffers[image_index])
-            .build();
+            .framebuffer(data.framebuffers[image_index]);
 
-        let begin_info = vk::CommandBufferBeginInfo::builder()
+        let begin_info = vk::CommandBufferBeginInfo::default()
             .inheritance_info(&inheritance_info)
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
-            .build();
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
 
         unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
 
@@ -274,17 +273,25 @@ struct SubpassDescriptionData {
 
 impl SubpassDescriptionData {
     fn description(&self) -> vk::SubpassDescription {
+
+        let depth_ptr = if self.depth_stencil_attachment.attachment == 0 && self.depth_stencil_attachment.layout == vk::ImageLayout::UNDEFINED {
+            ptr::null()
+        } else {
+            &self.depth_stencil_attachment
+        };
+
         vk::SubpassDescription {
             flags: vk::SubpassDescriptionFlags::empty(),
             pipeline_bind_point: self.bind_point,
             input_attachment_count: self.input_attachments.len() as u32,
-            input_attachments: get_c_ptr_slice(&self.input_attachments),
+            p_input_attachments: get_c_ptr_slice(&self.input_attachments),
             color_attachment_count: self.color_attachments.len() as u32,
-            color_attachments: get_c_ptr_slice(&self.color_attachments),
-            resolve_attachments: get_c_ptr_slice(&self.resolve_attachments),
-            depth_stencil_attachment: get_c_ptr(&self.depth_stencil_attachment),
+            p_color_attachments: get_c_ptr_slice(&self.color_attachments),
+            p_resolve_attachments: get_c_ptr_slice(&self.resolve_attachments),
+            p_depth_stencil_attachment: depth_ptr,
             preserve_attachment_count: self.preserve_attachments.len() as u32,
-            preserve_attachments: get_c_ptr_slice(&self.preserve_attachments),
+            p_preserve_attachments: get_c_ptr_slice(&self.preserve_attachments),
+            _marker: std::marker::PhantomData,
         }
     }
 }
@@ -328,10 +335,9 @@ impl RenderPassBuilder {
         };
 
         for ((attachment_type, layout), (index, dependency)) in subpass.attachments.iter().zip(attachment_indices) {
-            let attachment_ref = vk::AttachmentReference::builder()
+            let attachment_ref = vk::AttachmentReference::default()
                 .attachment(*index)
-                .layout(*layout)
-                .build();
+                .layout(*layout);
 
             match attachment_type {
                 AttachmentType::Input => {
@@ -376,14 +382,15 @@ impl RenderPassBuilder {
 
         let create_info = vk::RenderPassCreateInfo {
             s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
-            next: ptr::null(),
+            p_next: ptr::null(),
             flags: vk::RenderPassCreateFlags::empty(),
             attachment_count: attachment_descriptions.len() as u32,
-            attachments: get_c_ptr_slice(&attachment_descriptions),
+            p_attachments: get_c_ptr_slice(&attachment_descriptions),
             subpass_count: subpass_descriptors.len() as u32,
-            subpasses: get_c_ptr_slice(&subpass_descriptors),
+            p_subpasses: get_c_ptr_slice(&subpass_descriptors),
             dependency_count: self.dependencies.len() as u32,
-            dependencies: get_c_ptr_slice(&self.dependencies),
+            p_dependencies: get_c_ptr_slice(&self.dependencies),
+            _marker: std::marker::PhantomData,
         };
 
         let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
@@ -399,13 +406,12 @@ impl RenderPassBuilder {
                 let mut views = attachment_images.iter().map(|i| i.view).collect::<Vec<_>>();
                 views.push(*i);
 
-                let info = vk::FramebufferCreateInfo::builder()
+                let info = vk::FramebufferCreateInfo::default()
                     .render_pass(render_pass)
                     .attachments(&views)
                     .width(data.swapchain_extent.width)
                     .height(data.swapchain_extent.height)
-                    .layers(1)
-                    .build();
+                    .layers(1);
 
                 unsafe { device.create_framebuffer(&info, None) }
             })

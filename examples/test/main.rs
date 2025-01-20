@@ -1,5 +1,6 @@
 use electrum_engine::vertices::PCTVertex;
 use glam::{vec3, Mat4, Quat, Vec3};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::f32::consts::PI;
 use std::vec;
 
@@ -13,7 +14,8 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::window::Window;
 
-use vulkanalia::prelude::v1_2::*;
+use ash::vk;
+use ash::{Device, Instance};
 
 fn main() {
     tracing_subscriber::fmt::init();
@@ -41,7 +43,9 @@ impl ApplicationHandler for App {
         let window = event_loop
             .create_window(Window::default_attributes())
             .unwrap();
-        let mut renderer = Renderer::create(&window).unwrap();
+
+        let size = window.inner_size();
+        let mut renderer = Renderer::create(window.display_handle().unwrap(), window.window_handle().unwrap(), size.width, size.height).unwrap();
         setup_renderpass(&renderer.instance, &renderer.device, &mut renderer.data);
         pre_load_objects(&renderer.instance, &renderer.device, &mut renderer.data);
 
@@ -110,7 +114,8 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if !self.minimized {
-                    unsafe { renderer.render(&window) }.unwrap();
+                    let size = window.inner_size();
+                    unsafe { renderer.render(size.width, size.height) }.unwrap();
                     window.request_redraw();
                 }
             }
@@ -298,14 +303,13 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let shadow_subpass_state = SubpassPipelineState::new(
         vec![
-            vk::Viewport::builder()
+            vk::Viewport::default()
                 .x(0.0)
                 .y(0.0)
                 .width(data.swapchain_extent.width as f32)
                 .height(data.swapchain_extent.height as f32)
                 .min_depth(0.0)
-                .max_depth(1.0)
-                .build(),
+                .max_depth(1.0),
         ],
         vec![
             vk::Rect2D {
@@ -313,7 +317,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
                 extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
             }
         ],
-        vk::SampleCountFlags::_1,
+        vk::SampleCountFlags::TYPE_1,
         true,
         true,
         vec![],
@@ -324,14 +328,13 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let subpass_state = SubpassPipelineState::new(
         vec![
-            vk::Viewport::builder()
+            vk::Viewport::default()
                 .x(0.0)
                 .y(0.0)
                 .width(data.swapchain_extent.width as f32)
                 .height(data.swapchain_extent.height as f32)
                 .min_depth(0.0)
-                .max_depth(1.0)
-                .build(),
+                .max_depth(1.0),
         ],
         vec![
             vk::Rect2D {
@@ -343,10 +346,9 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         true,
         true,
         vec![
-            vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
+            vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
                 .blend_enable(false)
-                .build()
         ],
         false,
         vk::LogicOp::COPY,
@@ -355,31 +357,28 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let lit_bindings = vec![
         vec![
-            vk::DescriptorSetLayoutBinding::builder()
+            vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
+                .stage_flags(vk::ShaderStageFlags::VERTEX),
         ],
         vec![
-            vk::DescriptorSetLayoutBinding::builder()
+            vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         ],
     ];
 
     let shadow_bindings = vec![
         vec![
-            vk::DescriptorSetLayoutBinding::builder()
+            vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
+                .stage_flags(vk::ShaderStageFlags::VERTEX),
         ],
     ];
 
