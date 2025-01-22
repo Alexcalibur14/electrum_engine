@@ -136,12 +136,12 @@ impl Default for MeshData {
 #[derive(Debug, Clone)]
 pub struct DescriptorManager {
     pub descriptors: Vec<Vec<vk::DescriptorSet>>,
-    pub subpasses: Vec<Vec<usize>>,
+    pub subpasses: Vec<(u32, Vec<usize>)>,
 }
 
 impl DescriptorManager {
     fn get_descriptors(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
-        let ids = &self.subpasses[subpass as usize];
+        let ids = &self.subpasses.iter().find(|(s, _)| *s == subpass).unwrap().1;
         let mut descriptors = Vec::with_capacity(ids.len());
         for id in ids {
             descriptors.push(self.descriptors[image_index][*id]);

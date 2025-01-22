@@ -267,7 +267,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "res\\models\\MONKEY.obj",
         position,
         image_id,
-        vec![vec![0], vec![0, 1]],
+        vec![(0, vec![0]), (1, vec![0, 1])],
         "monkey".to_string(),
     );
 
@@ -288,7 +288,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         position,
-        vec![vec![0], vec![0, 1]],
+        vec![(0, vec![0]), (1, vec![0, 1])],
         "Quad".to_string(),
     );
 

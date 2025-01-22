@@ -40,7 +40,7 @@ impl MeshObject {
         model: Mat4,
         image: usize,
 
-        descriptor_layout: Vec<Vec<usize>>,
+        descriptor_layout: Vec<(u32, Vec<usize>)>,
 
         name: String,
     ) -> Self {
@@ -61,7 +61,7 @@ impl MeshObject {
 
         model: Mat4,
 
-        descriptor_layout: Vec<Vec<usize>>,
+        descriptor_layout: Vec<(u32, Vec<usize>)>,
 
         name: String,
     ) -> Self {
@@ -98,7 +98,7 @@ impl MeshObject {
         model: Mat4,
         image: usize,
 
-        descriptor_layout: Vec<Vec<usize>>,
+        descriptor_layout: Vec<(u32, Vec<usize>)>,
         name: String,
     ) -> Self {
         let mesh_data = MeshData::new(instance, device, data, vertices, indices, &name);
