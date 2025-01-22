@@ -5,6 +5,32 @@ use thiserror::Error;
 use ash::vk;
 use ash::Device;
 
+use crate::{BufferWrapper, Loadable};
+
+pub trait DescriptorSet{
+    fn descriptor_sets(&self) -> Vec<vk::DescriptorSet>;
+    fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout;
+    fn buffers(&mut self) -> Vec<BufferWrapper>;
+
+    fn destroy(&self, device: &Device);
+
+    fn clone_dyn(&self) -> Box<dyn DescriptorSet>;
+
+    fn loaded(&self) -> bool;
+}
+
+impl Clone for Box<dyn DescriptorSet> {
+    fn clone(&self) -> Self {
+        self.clone_dyn()
+    }
+}
+
+impl Loadable for Box<dyn DescriptorSet> {
+    fn is_loaded(&self) -> bool {
+        self.loaded()
+    }
+}
+
 const STANDARD_SIZES: [(vk::DescriptorType, u32); 11] = [
     (vk::DescriptorType::SAMPLER, 1),
     (vk::DescriptorType::COMBINED_IMAGE_SAMPLER, 50),

@@ -35,7 +35,7 @@ impl Loadable for Box<dyn Shader> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct GraphicsShader {
     pub vertex: vk::ShaderModule,
     pub fragment: vk::ShaderModule,

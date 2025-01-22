@@ -355,11 +355,6 @@ impl Renderer {
         self.data.objects = objects;
 
         self.data
-            .light_groups
-            .iter()
-            .for_each(|l| l.destroy(&self.device));
-
-        self.data
             .shaders
             .iter()
             .for_each(|s| s.destroy(&self.device));
@@ -373,6 +368,8 @@ impl Renderer {
             .cameras
             .iter()
             .for_each(|c| c.destroy(&self.device));
+
+        self.data.other_descriptors.iter().for_each(|d| d.destroy(&self.device));
 
         self.data.global_descriptor_pools.destroy(&self.device);
         self.data.global_layout_cache.destroy(&self.device);
@@ -446,11 +443,11 @@ pub struct RendererData {
     pub shaders: Record<Box<dyn Shader>>,
     pub textures: Record<Image>,
     pub point_light_data: Record<PointLight>,
-    pub light_groups: Record<LightGroup>,
 
     pub objects: Record<Box<dyn Renderable>>,
     pub materials: Record<Box<dyn Material>>,
     pub cameras: Record<Box<dyn Camera>>,
+    pub other_descriptors: Record<Box<dyn DescriptorSet>>,
 
     pub global_descriptor_pools: DescriptorAllocator,
     pub global_layout_cache: DescriptorLayoutCache,

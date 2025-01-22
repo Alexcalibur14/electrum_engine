@@ -53,12 +53,6 @@ impl Clone for Box<dyn Camera> {
     }
 }
 
-impl Default for Box<dyn Camera> {
-    fn default() -> Self {
-        Box::new(SimpleCamera::blank())
-    }
-}
-
 impl Loadable for Box<dyn Camera> {
     fn is_loaded(&self) -> bool {
         self.loaded()
@@ -147,21 +141,6 @@ impl SimpleCamera {
             buffers,
 
             loaded: true,
-        }
-    }
-
-    fn blank() -> Self {
-        SimpleCamera {
-            position: Vec3::default(),
-            rotation: Vec3::default(),
-            view: Mat4::default(),
-            projection: Projection::default(),
-            
-            descriptor_set_layout: Default::default(),
-            descriptor_sets: vec![],
-            buffers: vec![],
-
-            loaded: false,
         }
     }
 

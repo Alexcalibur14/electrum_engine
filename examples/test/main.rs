@@ -215,7 +215,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         5,
     );
 
-    let light_group_id = data.light_groups.push(light_group.clone());
+    let _ = data.other_descriptors.push(Box::new(light_group.clone()));
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
@@ -416,14 +416,12 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         0,
         vec![(plane_id, shadow_mat_id), (monkey_id, shadow_mat_id)],
         camera_id,
-        light_group_id
     );
 
     let render_data_1 = SubpassRenderData::new(
         1,
         vec![(plane_id, mat_id), (monkey_id, mat_id)],
         camera_id,
-        light_group_id,
     );
     
     data.subpass_render_data = vec![render_data_0, render_data_1];

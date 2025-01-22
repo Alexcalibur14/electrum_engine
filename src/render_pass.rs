@@ -90,124 +90,6 @@ pub enum AttachmentType {
 }
 
 #[derive(Debug, Clone)]
-pub struct SubpassRenderData {
-    pub subpass_id: u32,
-    pub objects: Vec<(usize, usize)>,
-    pub light_group: usize,
-    pub camera: usize,
-
-    pub command_buffers: Vec<vk::CommandBuffer>,
-}
-
-impl SubpassRenderData {
-    pub fn new(id: u32, objects: Vec<(usize, usize)>, camera: usize, light_group: usize) -> Self {
-        SubpassRenderData {
-            subpass_id: id,
-            objects,
-            light_group,
-            camera,
-            command_buffers: vec![],
-        }
-    }
-
-    pub fn setup_command_buffers(&mut self, device: &Device, data: &RendererData) {
-        for i in 0..data.swapchain_images.len() {
-            let allocate_info = vk::CommandBufferAllocateInfo::default()
-                .command_pool(data.command_pools[i])
-                .level(vk::CommandBufferLevel::SECONDARY)
-                .command_buffer_count(1);
-
-            self.command_buffers
-                .push(unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0])
-        }
-    }
-
-    pub fn record_command_buffers(
-        &mut self,
-        instance: &Instance,
-        device: &Device,
-        data: &RendererData,
-        image_index: usize,
-    ) -> Result<()> {
-        let command_buffer = self.command_buffers[image_index];
-
-        let inheritance_info = vk::CommandBufferInheritanceInfo::default()
-            .render_pass(data.render_pass)
-            .subpass(self.subpass_id as u32)
-            .framebuffer(data.framebuffers[image_index]);
-
-        let begin_info = vk::CommandBufferBeginInfo::default()
-            .inheritance_info(&inheritance_info)
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
-
-        unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
-
-        let light_group = data.light_groups.get_loaded(self.light_group).unwrap();
-        let camera = data.cameras.get_loaded(self.camera).unwrap();
-        let other_descriptors = vec![
-            camera.get_descriptor_sets()[image_index],
-            light_group.get_descriptor_sets()[image_index],
-        ];
-
-        self.objects
-            .iter()
-            .map(|(k_o, k_m)| (data.objects.get_loaded(*k_o).unwrap(), data.materials.get_loaded(*k_m).unwrap()))
-            .for_each(|(o, m)| {
-                let scene_descriptors = m.get_scene_descriptor_ids().iter().map(|id| other_descriptors[*id]).collect::<Vec<_>>();
-
-                m.draw(
-                    instance,
-                    device,
-                    command_buffer,
-                    o.descriptor_set(self.subpass_id, image_index),
-                    scene_descriptors,
-                    o.mesh_data(),
-                    &o.name(),
-                )
-            });
-
-        unsafe { device.end_command_buffer(command_buffer) }?;
-
-        Ok(())
-    }
-
-    pub fn destroy_swapchain(&self, device: &Device, data: &RendererData) {
-        data.materials.get_loaded(self.objects[0].1).unwrap().destroy_swapchain(device);
-    }
-
-    pub fn recreate_swapchain(&self, instance: &Instance, device: &Device, data: &mut RendererData) {
-        let mut mat = data.materials.get_mut_loaded(self.objects[0].1).unwrap().clone();
-        mat.recreate_swapchain(instance, device, data);
-        data.materials[self.objects[0].1] = mat;
-    }
-
-    pub fn update(
-        &self,
-        device: &Device,
-        data: &mut RendererData,
-        stats: &RenderStats,
-        image_index: usize,
-    ) {
-        let camera = data.cameras.get_mut_loaded(self.camera).unwrap();
-        camera.calculate_view(device, image_index);
-
-        let objects = self
-            .objects
-            .iter()
-            .map(|(k, _)| (*k, data.objects.get_loaded(*k).unwrap().clone()))
-            .collect::<Vec<(usize, Box<dyn Renderable>)>>();
-
-        objects
-            .into_iter()
-            .for_each(|(id, mut o)| {
-                o.update(device, data, stats, image_index);
-                data.objects[id] = o;
-            });
-    }
-}
-
-
-#[derive(Debug, Clone)]
 pub struct SubpassBuilder {
     bind_point: vk::PipelineBindPoint,
     attachments: Vec<(AttachmentType, vk::ImageLayout)>,
@@ -449,5 +331,121 @@ impl AttachmentUse {
             AttachmentUse::Depth => vk::ImageAspectFlags::DEPTH,
             AttachmentUse::DepthStencil => vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
         }
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct SubpassRenderData {
+    pub subpass_id: u32,
+    pub objects: Vec<(usize, usize)>,
+    pub camera: usize,
+
+    pub command_buffers: Vec<vk::CommandBuffer>,
+}
+
+impl SubpassRenderData {
+    pub fn new(id: u32, objects: Vec<(usize, usize)>, camera: usize) -> Self {
+        SubpassRenderData {
+            subpass_id: id,
+            objects,
+            camera,
+            command_buffers: vec![],
+        }
+    }
+
+    pub fn setup_command_buffers(&mut self, device: &Device, data: &RendererData) {
+        for i in 0..data.swapchain_images.len() {
+            let allocate_info = vk::CommandBufferAllocateInfo::default()
+                .command_pool(data.command_pools[i])
+                .level(vk::CommandBufferLevel::SECONDARY)
+                .command_buffer_count(1);
+
+            self.command_buffers
+                .push(unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0])
+        }
+    }
+
+    pub fn record_command_buffers(
+        &mut self,
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        image_index: usize,
+    ) -> Result<()> {
+        let command_buffer = self.command_buffers[image_index];
+
+        let inheritance_info = vk::CommandBufferInheritanceInfo::default()
+            .render_pass(data.render_pass)
+            .subpass(self.subpass_id as u32)
+            .framebuffer(data.framebuffers[image_index]);
+
+        let begin_info = vk::CommandBufferBeginInfo::default()
+            .inheritance_info(&inheritance_info)
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
+
+        unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
+
+        let camera = data.cameras.get_loaded(self.camera).unwrap();
+        let mut other_descriptors = vec![
+            camera.get_descriptor_sets()[image_index],
+        ];
+
+        other_descriptors.append(&mut data.other_descriptors.iter().map(|d| d.descriptor_sets()[image_index]).collect::<Vec<_>>());
+
+        self.objects
+            .iter()
+            .map(|(k_o, k_m)| (data.objects.get_loaded(*k_o).unwrap(), data.materials.get_loaded(*k_m).unwrap()))
+            .for_each(|(o, m)| {
+                let scene_descriptors = m.get_scene_descriptor_ids().iter().map(|id| other_descriptors[*id]).collect::<Vec<_>>();
+
+                m.draw(
+                    instance,
+                    device,
+                    command_buffer,
+                    o.descriptor_set(self.subpass_id, image_index),
+                    scene_descriptors,
+                    o.mesh_data(),
+                    &o.name(),
+                )
+            });
+
+        unsafe { device.end_command_buffer(command_buffer) }?;
+
+        Ok(())
+    }
+
+    pub fn destroy_swapchain(&self, device: &Device, data: &RendererData) {
+        data.materials.get_loaded(self.objects[0].1).unwrap().destroy_swapchain(device);
+    }
+
+    pub fn recreate_swapchain(&self, instance: &Instance, device: &Device, data: &mut RendererData) {
+        let mut mat = data.materials.get_mut_loaded(self.objects[0].1).unwrap().clone();
+        mat.recreate_swapchain(instance, device, data);
+        data.materials[self.objects[0].1] = mat;
+    }
+
+    pub fn update(
+        &self,
+        device: &Device,
+        data: &mut RendererData,
+        stats: &RenderStats,
+        image_index: usize,
+    ) {
+        let camera = data.cameras.get_mut_loaded(self.camera).unwrap();
+        camera.calculate_view(device, image_index);
+
+        let objects = self
+            .objects
+            .iter()
+            .map(|(k, _)| (*k, data.objects.get_loaded(*k).unwrap().clone()))
+            .collect::<Vec<(usize, Box<dyn Renderable>)>>();
+
+        objects
+            .into_iter()
+            .for_each(|(id, mut o)| {
+                o.update(device, data, stats, image_index);
+                data.objects[id] = o;
+            });
     }
 }

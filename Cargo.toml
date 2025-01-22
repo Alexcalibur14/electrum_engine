@@ -15,7 +15,6 @@ shaderc = "0.8.3"
 thiserror = "1.0.67"
 tobj = { version = "4.0.2", features = ["log"] }
 tracing = "0.1.40"
-winit = "0.30.5"
 image = "0.25.4"
 
 electrum_engine_macros = { path = "electrum_engine_macros"}
@@ -24,3 +23,4 @@ raw-window-handle = "0.6.2"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
+winit = "0.30.5"

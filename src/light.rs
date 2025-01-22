@@ -5,6 +5,7 @@ use glam::Vec3;
 use ash::vk;
 use ash::{Device, Instance};
 
+use crate::DescriptorSet;
 use crate::{
     buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
 };
@@ -139,8 +140,28 @@ impl LightGroup {
     }
 }
 
-impl Loadable for LightGroup {
-    fn is_loaded(&self) -> bool {
+impl DescriptorSet for LightGroup {
+    fn descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
+        self.descriptor_sets.clone()
+    }
+
+    fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
+        self.descriptor_set_layout
+    }
+
+    fn buffers(&mut self) -> Vec<BufferWrapper> {
+        self.buffers.clone()
+    }
+
+    fn destroy(&self, device: &Device) {
+        self.destroy(device);
+    }
+
+    fn clone_dyn(&self) -> Box<dyn DescriptorSet> {
+        Box::new(self.clone())
+    }
+
+    fn loaded(&self) -> bool {
         self.loaded
     }
 }
