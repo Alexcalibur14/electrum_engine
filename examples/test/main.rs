@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, Vertex
+    get_depth_format, Attachment, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -128,6 +128,8 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
     let mut attachments = vec![
         Attachment {
             format: get_depth_format(&instance, &data).unwrap(),
+            x: AttachmentSize::Absolute(1024),
+            y: AttachmentSize::Absolute(1024),
             ..Attachment::template_depth()
         },
         Attachment {
@@ -172,10 +174,10 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
         .build();
 
     let mut render_pass_builder = RenderPassBuilder::new()
-        .add_attachment(attachments[0].attachment_desc, AttachmentUse::Depth, depth_clear_value)
-        .add_attachment(attachments[1].attachment_desc, AttachmentUse::Color, color_clear_value)
-        .add_attachment(attachments[2].attachment_desc, AttachmentUse::Depth, depth_clear_value)
-        .add_attachment(attachments[3].attachment_desc, AttachmentUse::Color, color_clear_value)
+        .add_attachment(attachments[0], AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[1], AttachmentUse::Color, color_clear_value)
+        .add_attachment(attachments[2], AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[3], AttachmentUse::Color, color_clear_value)
         .add_subpass(&subpass_1, &[(0, None)])
         .add_subpass(&subpass_2, &[(1, None), (2, None), (3, None)])
         .build();

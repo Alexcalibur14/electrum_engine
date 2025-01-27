@@ -11,14 +11,14 @@ use crate::{
     QueueFamilyIndices, RendererData, SwapchainSupport,
 };
 
-use crate::texture::*;
+use crate::{texture::*, Attachment, AttachmentSize};
 
 pub fn generate_render_pass_images(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
     attachments: &[(
-        vk::AttachmentDescription,
+        Attachment,
         vk::ImageUsageFlags,
         vk::ImageAspectFlags,
     )],
@@ -26,15 +26,25 @@ pub fn generate_render_pass_images(
     let mut images = vec![];
 
     for attachment in attachments {
+        let width = match attachment.0.x {
+            AttachmentSize::Absolute(w) => w,
+            AttachmentSize::Relative(w) => (data.swapchain_extent.width as f32 * w) as u32,
+        };
+
+        let height = match attachment.0.y {
+            AttachmentSize::Absolute(h) => h,
+            AttachmentSize::Relative(h) => (data.swapchain_extent.height as f32 * h) as u32,
+        };
+
         let image = Image::new(
             instance,
             device,
             data,
-            data.swapchain_extent.width,
-            data.swapchain_extent.height,
+            width,
+            height,
             MipLevels::One,
-            attachment.0.samples,
-            attachment.0.format,
+            attachment.0.attachment_desc.samples,
+            attachment.0.attachment_desc.format,
             vk::ImageTiling::OPTIMAL,
             attachment.1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,

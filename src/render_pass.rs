@@ -9,6 +9,9 @@ use crate::{generate_render_pass_images, get_c_ptr_slice, Image, RenderStats, Re
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
+    pub x: AttachmentSize,
+    pub y: AttachmentSize,
+
     pub flags: vk::AttachmentDescriptionFlags,
     pub format: vk::Format,
     pub sample_count: vk::SampleCountFlags,
@@ -76,6 +79,18 @@ impl Attachment {
             .stencil_store_op(self.stencil_store_op)
             .initial_layout(self.initial_layout)
             .final_layout(self.final_layout)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AttachmentSize {
+    Relative(f32),
+    Absolute(u32),
+}
+
+impl Default for AttachmentSize {
+    fn default() -> Self {
+        AttachmentSize::Relative(1.0)
     }
 }
 
@@ -180,7 +195,7 @@ impl SubpassDescriptionData {
 
 #[derive(Clone, Default)]
 pub struct RenderPassBuilder {
-    attachments: Vec<(vk::AttachmentDescription, AttachmentUse, Option<usize>)>,
+    attachments: Vec<(Attachment, AttachmentUse, Option<usize>)>,
     subpasses: Vec<SubpassDescriptionData>,
     dependencies: Vec<vk::SubpassDependency>,
 
@@ -200,7 +215,7 @@ impl RenderPassBuilder {
         }
     }
 
-    pub fn add_attachment(&mut self, attachment: vk::AttachmentDescription, attachment_use: AttachmentUse, clear_value: vk::ClearValue) -> &mut Self {
+    pub fn add_attachment(&mut self, attachment: Attachment, attachment_use: AttachmentUse, clear_value: vk::ClearValue) -> &mut Self {
         self.attachments.push((attachment, attachment_use, None));
         self.clear_values.push(clear_value);
         self
@@ -260,7 +275,7 @@ impl RenderPassBuilder {
     pub fn create_render_pass(&mut self, instance: &Instance, device: &Device, data: &RendererData) -> Result<(vk::RenderPass, Vec<vk::Framebuffer>)> {
         let subpass_descriptors = self.subpasses.iter().map(|s| s.description()).collect::<Vec<vk::SubpassDescription>>();
 
-        let attachment_descriptions = self.attachments.iter().map(|(description, _, _)| *description).collect::<Vec<vk::AttachmentDescription>>();
+        let attachment_descriptions = self.attachments.iter().map(|(attachment, _, _)| attachment.attachment_desc).collect::<Vec<vk::AttachmentDescription>>();
 
         let create_info = vk::RenderPassCreateInfo {
             s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
@@ -277,7 +292,7 @@ impl RenderPassBuilder {
 
         let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
 
-        let image_attachments = self.attachments.iter().map(|(description, a_use, _)| (*description, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
+        let image_attachments = self.attachments.iter().map(|(attachment, a_use, _)| (*attachment, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
         // the last attachment must be the swapchain image
         let attachment_images = generate_render_pass_images(instance, device, data, &image_attachments[..(image_attachments.len() - 1)]);
 
