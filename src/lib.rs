@@ -200,14 +200,8 @@ impl Renderer {
 
         let command_buffer = self.data.command_buffers[image_index];
 
-        let inheritance_info = vk::CommandBufferInheritanceInfo::default()
-            .render_pass(self.data.render_pass)
-            .subpass(0)
-            .framebuffer(self.data.framebuffers[image_index]);
-
         let info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
-            .inheritance_info(&inheritance_info);
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
