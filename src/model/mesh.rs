@@ -40,7 +40,7 @@ impl MeshObject {
         model: Mat4,
         image: usize,
 
-        descriptor_layout: Vec<(u32, Vec<usize>)>,
+        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
 
         name: String,
     ) -> Self {
@@ -61,7 +61,7 @@ impl MeshObject {
 
         model: Mat4,
 
-        descriptor_layout: Vec<(u32, Vec<usize>)>,
+        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
 
         name: String,
     ) -> Self {
@@ -98,7 +98,7 @@ impl MeshObject {
         model: Mat4,
         image: usize,
 
-        descriptor_layout: Vec<(u32, Vec<usize>)>,
+        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
         name: String,
     ) -> Self {
         let mesh_data = MeshData::new(instance, device, data, vertices, indices, &name);
@@ -196,8 +196,8 @@ impl Renderable for MeshObject {
         Box::new(self.clone())
     }
 
-    fn descriptor_set(&self, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
-        self.descriptor_manager.get_descriptors(subpass, image_index)
+    fn descriptor_set(&self, render_pass: u32, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
+        self.descriptor_manager.get_descriptors(render_pass, subpass, image_index)
     }
 
     fn mesh_data(&self) -> &MeshData {

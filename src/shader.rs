@@ -423,7 +423,7 @@ pub trait Material {
         mesh_data: &MeshData,
         object_mane: &str,
     );
-    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData);
+    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData, render_pass: vk::RenderPass);
 
     fn get_scene_descriptor_ids(&self) -> &[usize];
 
@@ -463,8 +463,9 @@ pub struct BasicMaterial {
 
     pub scene_descriptors: Vec<usize>,
 
-    loaded: bool,
     subpass: u32,
+
+    loaded: bool,
 }
 
 impl BasicMaterial {
@@ -479,6 +480,7 @@ impl BasicMaterial {
         mesh_state: PipelineMeshState,
         other_layouts: Vec<vk::DescriptorSetLayout>,
         scene_descriptors: Vec<usize>,
+        render_pass: vk::RenderPass,
         subpass: u32,
     ) -> Self {
         let mut push_constant_ranges = vec![];
@@ -507,7 +509,7 @@ impl BasicMaterial {
 
         let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.unwrap();
 
-        let pipeline = create_pipeline_from_states(instance, device, pipeline_layout, &subpass_state, &shader_state, &mesh_state, subpass, data.render_pass, "").unwrap();
+        let pipeline = create_pipeline_from_states(instance, device, pipeline_layout, &subpass_state, &shader_state, &mesh_state, subpass, render_pass, "").unwrap();
 
         BasicMaterial {
             pipeline,
@@ -522,8 +524,9 @@ impl BasicMaterial {
             descriptor_set_layout,
             other_set_layouts: other_layouts.clone(),
             scene_descriptors,
-            
+
             subpass,
+
             loaded: true,
         }
     }
@@ -591,7 +594,7 @@ impl Material for BasicMaterial {
         }
     }
 
-    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
+    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData, render_pass: vk::RenderPass) {
         self.subpass_state.viewports[0].width = data.swapchain_extent.width as f32;
         self.subpass_state.viewports[0].height = data.swapchain_extent.height as f32;
         self.subpass_state.scissors[0].extent = data.swapchain_extent;
@@ -614,7 +617,7 @@ impl Material for BasicMaterial {
             &self.shader_state,
             &self.mesh_state,
             self.subpass,
-            data.render_pass,
+            render_pass,
             "",
         )
         .unwrap();

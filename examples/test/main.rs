@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassBuilder, SubpassPipelineState, SubpassRenderData, Vertex
+    get_depth_format, Attachment, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassLayoutBuilder, SubpassPipelineState, SubpassRenderData, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -163,28 +163,37 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
         },
     };
 
-    let subpass_1 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
+    let subpass_1 = SubpassLayoutBuilder::new(vk::PipelineBindPoint::GRAPHICS)
         .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
         .build();
 
-    let subpass_2 = SubpassBuilder::new(vk::PipelineBindPoint::GRAPHICS)
+    let subpass_2 = SubpassLayoutBuilder::new(vk::PipelineBindPoint::GRAPHICS)
         .add_color_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
         .add_resolve_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .build();
 
-    let mut render_pass_builder = RenderPassBuilder::new()
+    let mut render_pass_builder0 = RenderPassBuilder::new(false, String::from("Shadow"))
         .add_attachment(attachments[0], AttachmentUse::Depth, depth_clear_value)
+        .add_subpass(&subpass_1, &[(0, None)])
+        .build();
+    
+    let mut render_pass_builder1 = RenderPassBuilder::new(true, String::from("Lit"))
         .add_attachment(attachments[1], AttachmentUse::Color, color_clear_value)
         .add_attachment(attachments[2], AttachmentUse::Depth, depth_clear_value)
         .add_attachment(attachments[3], AttachmentUse::Color, color_clear_value)
-        .add_subpass(&subpass_1, &[(0, None)])
-        .add_subpass(&subpass_2, &[(1, None), (2, None), (3, None)])
+        .add_subpass(&subpass_2, &[(0, None), (1, None), (2, None)])
         .build();
 
-    (data.render_pass, data.framebuffers) = render_pass_builder.create_render_pass(instance, device, data).unwrap();
+    let (render_pass, framebuffers) = render_pass_builder0.create_render_pass(instance, device, data).unwrap();
+    data.render_passes.push(render_pass);
+    data.framebuffers.push(framebuffers);
+    data.render_pass_builders.push(render_pass_builder0);
 
-    data.render_pass_builder = render_pass_builder;
+    let (render_pass, framebuffers) = render_pass_builder1.create_render_pass(instance, device, data).unwrap();
+    data.render_passes.push(render_pass);
+    data.framebuffers.push(framebuffers);
+    data.render_pass_builders.push(render_pass_builder1);
 }
 
 fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererData) {
@@ -269,7 +278,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "res\\models\\MONKEY.obj",
         position,
         image_id,
-        vec![(0, vec![0]), (1, vec![0, 1])],
+        vec![(0, vec![(0, vec![0])]), (1, vec![(0, vec![0, 1])])],
         "monkey".to_string(),
     );
 
@@ -290,7 +299,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         position,
-        vec![(0, vec![0]), (1, vec![0, 1])],
+        vec![(0, vec![(0, vec![0])]), (1, vec![(0, vec![0, 1])])],
         "Quad".to_string(),
     );
 
@@ -395,6 +404,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         mesh_state.clone(),
         vec![camera.get_set_layout()],
         vec![0],
+        data.render_passes[0],
         0
     );
     let shadow_mat_id = data.materials.push(Box::new(shadow_material));
@@ -410,27 +420,32 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         mesh_state,
         vec![camera.get_set_layout(), light_group.get_set_layout()],
         vec![0, 1],
-        1
+        data.render_passes[1],
+        0
     );
     let mat_id = data.materials.push(Box::new(material));
 
     let render_data_0 = SubpassRenderData::new(
         0,
+        0,
         vec![(plane_id, shadow_mat_id), (monkey_id, shadow_mat_id)],
         camera_id,
+        "Shadow Subpass".to_string(),
     );
 
     let render_data_1 = SubpassRenderData::new(
         1,
+        0,
         vec![(plane_id, mat_id), (monkey_id, mat_id)],
         camera_id,
+        "Lighting Subpass".to_string(),
     );
     
-    data.subpass_render_data = vec![render_data_0, render_data_1];
+    data.subpass_render_data = vec![vec![render_data_0], vec![render_data_1]];
 
     let mut render_data = data.subpass_render_data.clone();
     render_data
         .iter_mut()
-        .for_each(|s| s.setup_command_buffers(&device, &data));
+        .for_each(|s| s.iter_mut().for_each(|s| s.setup_command_buffers(&device, &data)));
     data.subpass_render_data = render_data;
 }
