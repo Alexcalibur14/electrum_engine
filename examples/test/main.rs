@@ -109,7 +109,6 @@ impl ApplicationHandler for App {
                 unsafe {
                     renderer.device.device_wait_idle().unwrap();
                 }
-                unsafe { renderer.destroy() };
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {

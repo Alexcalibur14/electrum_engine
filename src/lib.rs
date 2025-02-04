@@ -256,7 +256,7 @@ impl Renderer {
 
             self.device.cmd_end_render_pass(command_buffer);
             
-            end_command_label(&self.instance, &self.device, command_buffer);
+            end_command_label(&self.instance, &self.device, command_buffer);   
         }
 
         self.device.end_command_buffer(command_buffer)?;
@@ -345,7 +345,7 @@ impl Renderer {
     /// # Safety
     /// This function **MUST** be called befoore the end of the program
     /// and **MUST** be the last function called on the renderer
-    pub unsafe fn destroy(&mut self) {
+    unsafe fn destroy(&mut self) {
         self.destroy_swapchain();
         
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
@@ -410,6 +410,12 @@ impl Renderer {
         }
 
         self.instance.destroy_instance(None);
+    }
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        unsafe { self.destroy() };
     }
 }
 
