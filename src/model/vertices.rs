@@ -6,11 +6,11 @@ use glam::{Vec2, Vec3};
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Vertex)]
 pub struct PCTVertex {
-    #[vertex(format = "R32G32B32_SFLOAT")]
+    #[vertex(format = 106)]
     pub pos: Vec3,
-    #[vertex(format = "R32G32_SFLOAT")]
+    #[vertex(format = 103)]
     pub tex_coord: Vec2,
-    #[vertex(format = "R32G32B32_SFLOAT")]
+    #[vertex(format = 106)]
     pub normal: Vec3,
 }
 

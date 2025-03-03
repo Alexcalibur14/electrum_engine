@@ -47,8 +47,6 @@ pub fn generate_render_pass_images(
             attachment.0.attachment_desc.format,
             vk::ImageTiling::OPTIMAL,
             attachment.1,
-            vk::ImageViewType::TYPE_2D,
-            1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             attachment.2,
             false,
@@ -176,8 +174,6 @@ pub(crate) unsafe fn create_swapchain_image_views(
                 *i,
                 data.swapchain_format,
                 vk::ImageAspectFlags::COLOR,
-                vk::ImageViewType::TYPE_2D,
-                1,
                 1,
             )
         })

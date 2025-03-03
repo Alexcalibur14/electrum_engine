@@ -7,33 +7,86 @@ use glam::{vec2, vec3, Mat4, Vec3};
 use ash::vk;
 use ash::{Device, Instance};
 
-use crate::{Loadable, RenderStats};
 use crate::{
-    buffer::{create_buffer, BufferWrapper}, vertices::PCTVertex, DescriptorBuilder, RendererData
+    buffer::{create_buffer, BufferWrapper}, vertices::PCTVertex, DescriptorBuilder, RenderStats, Renderable, RendererData
 };
 
 use super::{DescriptorManager, MeshData, ModelData, ModelMVP};
 
-#[derive(Clone, Debug)]
-pub struct Mesh {
-    pub name: String,
-    pub mesh_data: MeshData,
-    pub ubo: ModelMVP,
-    pub ubo_buffers: Vec<BufferWrapper>,
+#[derive(Clone)]
+pub struct MeshObject {
+    name: String,
 
-    pub image: usize,
-    pub descriptor_manager: DescriptorManager,
+    mesh_data: MeshData,
 
-    pub loaded: bool,
+    ubo: ModelMVP,
+    ubo_buffers: Vec<BufferWrapper>,
+
+    image: usize,
+
+    descriptor_manager: DescriptorManager,
+
+    loaded: bool,
 }
 
-impl Loadable for Mesh {
-    fn is_loaded(&self) -> bool {
-        self.loaded
+impl MeshObject {
+    pub fn from_obj(
+        instance: &Instance,
+        device: &Device,
+        data: &mut RendererData,
+
+        file_path: &str,
+
+        model: Mat4,
+        image: usize,
+
+        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
+
+        name: String,
+    ) -> Self {
+        let (vertices, indices) = load_model_temp(file_path).unwrap();
+
+        MeshObject::new(instance, device, data, &vertices, &indices, model, image, descriptor_layout, name)
     }
-}
 
-impl Mesh {
+    pub fn new_quad(
+        instance: &Instance,
+        device: &Device,
+        data: &mut RendererData,
+
+        points: [Vec3; 4],
+        normal: Vec3,
+
+        image: usize,
+
+        model: Mat4,
+
+        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
+
+        name: String,
+    ) -> Self {
+        let mut vertices = vec![];
+
+        let uvs = [
+            vec2(0.0, 0.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 1.0),
+        ];
+
+        for (i, point) in points.iter().enumerate() {
+            vertices.push(PCTVertex {
+                pos: *point,
+                tex_coord: uvs[i],
+                normal,
+            })
+        }
+
+        let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
+
+        MeshObject::new(instance, device, data, &vertices, &indices, model, image, descriptor_layout, name)
+    }
+
     pub fn new(
         instance: &Instance,
         device: &Device,
@@ -103,7 +156,7 @@ impl Mesh {
             subpasses: descriptor_layout,
         };
 
-        Mesh {
+        MeshObject {
             name,
             mesh_data,
             ubo,
@@ -113,83 +166,50 @@ impl Mesh {
             loaded: true,
         }
     }
+}
 
-    pub fn from_obj(
-        instance: &Instance,
+impl Renderable for MeshObject {
+    fn update(
+        &mut self,
         device: &Device,
-        data: &mut RendererData,
-
-        file_path: &str,
-
-        model: Mat4,
-        image: usize,
-
-        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
-
-        name: String,
-    ) -> Self {
-        let (vertices, indices) = load_model_temp(file_path).unwrap();
-
-        Mesh::new(instance, device, data, &vertices, &indices, model, image, descriptor_layout, name)
-    }
-
-    pub fn new_quad(
-        instance: &Instance,
-        device: &Device,
-        data: &mut RendererData,
-
-        points: [Vec3; 4],
-        normal: Vec3,
-
-        image: usize,
-
-        model: Mat4,
-
-        descriptor_layout: Vec<(u32, Vec<(u32, Vec<usize>)>)>,
-
-        name: String,
-    ) -> Self {
-        let mut vertices = vec![];
-
-        let uvs = [
-            vec2(0.0, 0.0),
-            vec2(1.0, 0.0),
-            vec2(0.0, 1.0),
-            vec2(1.0, 1.0),
-        ];
-
-        for (i, point) in points.iter().enumerate() {
-            vertices.push(PCTVertex {
-                pos: *point,
-                tex_coord: uvs[i],
-                normal,
-            })
-        }
-
-        let indices: Vec<u32> = vec![0, 3, 1, 0, 2, 3];
-
-        Mesh::new(instance, device, data, &vertices, &indices, model, image, descriptor_layout, name)
-    }
-
-    pub fn update(&mut self, device: &Device, _data: &RendererData, _stats: &RenderStats, index: usize) {
+        _data: &RendererData,
+        _stats: &RenderStats,
+        index: usize,
+    ) {
         let model_data = self.ubo.get_data();
 
         self.ubo_buffers[index].copy_data_into_buffer(device, &model_data);
     }
 
-    pub fn descriptor_set(&self, render_pass: u32, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
+    fn destroy_swapchain(&self, _device: &Device) {
+    }
+
+    fn recreate_swapchain(&mut self, _device: &Device, _data: &mut RendererData) {
+    }
+
+    fn destroy(&mut self, device: &Device) {
+        self.mesh_data.destroy(device);
+        self.ubo_buffers.iter().for_each(|b| b.destroy(device));
+    }
+
+    fn clone_dyn(&self) -> Box<dyn Renderable> {
+        Box::new(self.clone())
+    }
+
+    fn descriptor_set(&self, render_pass: u32, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
         self.descriptor_manager.get_descriptors(render_pass, subpass, image_index)
     }
 
-    pub fn destroy_swapchain(&self, _device: &Device) {
+    fn mesh_data(&self) -> &MeshData {
+        &self.mesh_data
     }
 
-    pub fn recreate_swapchain(&mut self, _device: &Device, _data: &mut RendererData) {
+    fn name(&self) -> String {
+        self.name.clone()
     }
 
-    pub fn destroy(&mut self, device: &Device) {
-        self.mesh_data.destroy(device);
-        self.ubo_buffers.iter().for_each(|b| b.destroy(device));
+    fn loaded(&self) -> bool {
+        self.loaded
     }
 }
 

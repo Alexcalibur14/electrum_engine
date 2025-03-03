@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use syn::{DeriveInput, Item, Type};
+use syn::{DeriveInput, Type};
 
 #[proc_macro_derive(Vertex, attributes(vertex))]
 pub fn vertex_derive_macro(item: TokenStream) -> TokenStream {
@@ -66,7 +66,7 @@ fn impl_vertex_trait(mut ast: DeriveInput) -> proc_macro2::TokenStream {
                         ash::vk::VertexInputAttributeDescription {
                             location: #locations,
                             binding: #field_bindings,
-                            format: #field_formats,
+                            format: ash::vk::Format::from_raw(#field_formats),
                             offset: #offsets,
                         },
                     )*
@@ -76,7 +76,7 @@ fn impl_vertex_trait(mut ast: DeriveInput) -> proc_macro2::TokenStream {
     }
 }
 
-fn extract_field_attributes(ast: &mut DeriveInput) -> (Vec<u32>, Vec<Item>) {
+fn extract_field_attributes(ast: &mut DeriveInput) -> (Vec<u32>, Vec<i32>) {
     let mut field_bindings = Vec::new();
     let mut field_formats = Vec::new();
 
@@ -85,7 +85,7 @@ fn extract_field_attributes(ast: &mut DeriveInput) -> (Vec<u32>, Vec<Item>) {
             let VertexFieldAttributes { binding, format } =
                 deluxe::extract_attributes(&mut field.attrs).unwrap();
             field_bindings.push(binding);
-            field_formats.push(syn::Item::Verbatim(syn::parse_str(&format!("ash::vk::Format::{}", format)).unwrap()));
+            field_formats.push(format);
         }
     }
 
@@ -104,5 +104,5 @@ struct VertexStructAttributes {
 struct VertexFieldAttributes {
     #[deluxe(default = 0)]
     binding: u32,
-    format: String,
+    format: i32,
 }
