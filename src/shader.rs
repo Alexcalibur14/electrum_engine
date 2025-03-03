@@ -180,7 +180,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Vertex Shader"),
+            &format!("{} Vertex Shader", self.name),
             vertex,
         )
         .unwrap();
@@ -199,7 +199,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Vertex Shader"),
+            &format!("{} Vertex Shader", self.name),
             vertex,
         )
         .unwrap();
@@ -217,7 +217,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Fragment Shader"),
+            &format!("{} Fragment Shader", self.name),
             fragment,
         )
         .unwrap();
@@ -236,7 +236,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Fragment Shader"),
+            &format!("{} Fragment Shader", self.name),
             fragment,
         )
         .unwrap();
@@ -255,7 +255,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Geometry Shader"),
+            &format!("{} Geometry Shader", self.name),
             geometry,
         )
         .unwrap();
@@ -274,7 +274,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Geometry Shader"),
+            &format!("{} Geometry Shader", self.name),
             geometry,
         )
         .unwrap();
@@ -293,7 +293,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Tessalation Control Shader"),
+            &format!("{} Tessalation Control Shader", self.name),
             tessalation_control,
         )
         .unwrap();
@@ -312,7 +312,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Tessallation Control Shader"),
+            &format!("{} Tessalation Control Shader", self.name),
             tess_ctrl,
         )
         .unwrap();
@@ -331,7 +331,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Tessalation Evaluation Shader"),
+            &format!("{} Tessalation Evaluation Shader", self.name),
             tessalation_evaluation,
         )
         .unwrap();
@@ -350,7 +350,7 @@ impl<'a> GraphicsShaderBuilder<'a> {
         set_object_name(
             &self.instance,
             &self.device,
-            &(self.name.clone() + " Tessallation Evaluation Shader"),
+            &format!("{} Tessalation Evaluation Shader", self.name),
             tess_eval,
         )
         .unwrap();

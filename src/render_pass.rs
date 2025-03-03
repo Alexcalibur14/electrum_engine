@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use ash::vk;
 use ash::{Device, Instance};
 
-use crate::{begin_command_label, end_command_label, generate_render_pass_images, get_c_ptr_slice, set_object_name, Image, RenderStats, Renderable, RendererData};
+use crate::{begin_command_label, end_command_label, generate_render_pass_images, get_c_ptr_slice, set_object_name, Image, Mesh, RenderStats, RendererData};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
@@ -277,8 +277,62 @@ impl RenderPassBuilder {
         self.clone()
     }
 
-    pub fn create_render_pass(&mut self) -> RenderPass {
-        RenderPass::new(&self.name, vec![], self.subpasses.clone(), self.clear_values.clone(), self.dependencies.clone(), self.attachments.iter().map(|(a, b, _)| (*a, *b)).collect::<Vec<_>>(), self.swapchain_output)
+    pub fn create_render_pass(&mut self, instance: &Instance, device: &Device, data: &RendererData) -> Result<(vk::RenderPass, Vec<vk::Framebuffer>)> {
+        let subpass_descriptors = self.subpasses.iter().map(|s| s.description()).collect::<Vec<vk::SubpassDescription>>();
+
+        let attachment_descriptions = self.attachments.iter().map(|(attachment, _, _)| attachment.attachment_desc).collect::<Vec<vk::AttachmentDescription>>();
+
+        let create_info = vk::RenderPassCreateInfo {
+            s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::RenderPassCreateFlags::empty(),
+            attachment_count: attachment_descriptions.len() as u32,
+            p_attachments: get_c_ptr_slice(&attachment_descriptions),
+            subpass_count: subpass_descriptors.len() as u32,
+            p_subpasses: get_c_ptr_slice(&subpass_descriptors),
+            dependency_count: self.dependencies.len() as u32,
+            p_dependencies: get_c_ptr_slice(&self.dependencies),
+            _marker: std::marker::PhantomData,
+        };
+
+        let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
+        set_object_name(instance, device, &format!("{} Render Pass", self.name), render_pass).unwrap();
+
+        let image_attachments = self.attachments.iter().map(|(attachment, a_use, _)| (*attachment, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
+        // the last attachment must be the swapchain image
+        let attachment_images = if self.swapchain_output{
+            generate_render_pass_images(instance, device, data, &image_attachments[..(image_attachments.len() - 1)])
+        } else {
+            generate_render_pass_images(instance, device, data, &image_attachments)
+        };
+
+        let framebuffers = data
+            .swapchain_image_views
+            .iter()
+            .enumerate()
+            .map(|(index, i)| {
+                let mut views = attachment_images.iter().map(|i| i.view).collect::<Vec<_>>();
+                
+                if self.swapchain_output{
+                    views.push(*i);
+                }
+
+                let info = vk::FramebufferCreateInfo::default()
+                    .render_pass(render_pass)
+                    .attachments(&views)
+                    .width(data.swapchain_extent.width)
+                    .height(data.swapchain_extent.height)
+                    .layers(1);
+
+                let framebuffer = unsafe { device.create_framebuffer(&info, None) };
+                set_object_name(instance, device, &format!("{} Framebuffer({})", self.name.clone(), index), framebuffer.unwrap()).unwrap();
+                framebuffer
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.attachment_images = attachment_images;
+        
+        Ok((render_pass, framebuffers))
     }
 
     pub fn destroy_swapchain(&self, device: &Device) {
@@ -390,8 +444,8 @@ impl SubpassRenderData {
                     command_buffer,
                     o.descriptor_set(self.render_pass_id, self.subpass_id, image_index),
                     scene_descriptors,
-                    o.mesh_data(),
-                    &o.name(),
+                    &o.mesh_data,
+                    &o.name,
                 )
             });
         
@@ -426,7 +480,7 @@ impl SubpassRenderData {
             .objects
             .iter()
             .map(|(k, _)| (*k, data.objects.get_loaded(*k).unwrap().clone()))
-            .collect::<Vec<(usize, Box<dyn Renderable>)>>();
+            .collect::<Vec<(usize, Mesh)>>();
 
         objects
             .into_iter()
