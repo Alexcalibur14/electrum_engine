@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use ash::vk;
 use ash::{Device, Instance};
 
-use crate::{begin_command_label, end_command_label, generate_render_pass_images, get_c_ptr_slice, set_object_name, Image, RenderStats, Renderable, RendererData};
+use crate::{begin_command_label, end_command_label, generate_render_pass_images, get_c_ptr_slice, set_object_name, Image, Mesh, RenderStats, RendererData};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Attachment {
@@ -390,8 +390,8 @@ impl SubpassRenderData {
                     command_buffer,
                     o.descriptor_set(self.render_pass_id, self.subpass_id, image_index),
                     scene_descriptors,
-                    o.mesh_data(),
-                    &o.name(),
+                    &o.mesh_data,
+                    &o.name,
                 )
             });
         
@@ -426,7 +426,7 @@ impl SubpassRenderData {
             .objects
             .iter()
             .map(|(k, _)| (*k, data.objects.get_loaded(*k).unwrap().clone()))
-            .collect::<Vec<(usize, Box<dyn Renderable>)>>();
+            .collect::<Vec<(usize, Mesh)>>();
 
         objects
             .into_iter()
@@ -502,7 +502,7 @@ impl RenderPass {
         };
 
         let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
-        set_object_name(instance, device, &self.name, render_pass).unwrap();
+        set_object_name(instance, device, &format!("{} Render Pass", self.name), render_pass).unwrap();
 
         let image_attachments = self.attachments.iter().map(|(attachment, a_use)| (*attachment, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
         // the last attachment must be the swapchain image
@@ -515,7 +515,8 @@ impl RenderPass {
         let framebuffers = data
             .swapchain_image_views
             .iter()
-            .map(|i| {
+            .enumerate()
+            .map(|(index, i)| {
                 let mut views = attachment_images.iter().map(|i| i.view).collect::<Vec<_>>();
 
                 if self.swapchain_output {
@@ -530,7 +531,7 @@ impl RenderPass {
                     .layers(1);
 
                 let framebuffer = unsafe { device.create_framebuffer(&info, None) };
-                set_object_name(instance, device, &(self.name.clone() + "Framebuffer"), framebuffer.unwrap()).unwrap();
+                set_object_name(instance, device, &format!("{} Framebuffer({})", self.name, index), framebuffer.unwrap()).unwrap();
                 framebuffer
             })
             .collect::<Result<Vec<_>, _>>()?;

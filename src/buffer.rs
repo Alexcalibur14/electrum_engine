@@ -104,14 +104,14 @@ pub fn create_buffer(
     set_object_name(
         instance,
         device,
-        name,
+        &format!("{} Buffer", name),
         buffer,
     )?;
 
     set_object_name(
         instance,
         device,
-        &(name.to_owned() + " Memory"),
+        &format!("{} Buffer Memory", name.to_owned()),
         buffer_memory,
     )?;
 

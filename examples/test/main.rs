@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, MeshObject, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassLayoutBuilder, SubpassPipelineState, SubpassRenderData, Vertex
+    get_depth_format, Attachment, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, Mesh, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassLayoutBuilder, SubpassPipelineState, SubpassRenderData, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -268,7 +268,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     let image_2077_id = data.textures.push(image_2077);
 
-    let monkey = MeshObject::from_obj(
+    let monkey = Mesh::from_obj(
         instance,
         device,
         data,
@@ -279,11 +279,11 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "monkey".to_string(),
     );
 
-    let monkey_id = data.objects.push(Box::new(monkey));
+    let monkey_id = data.objects.push(monkey);
 
     let position = Mat4::from_rotation_translation(Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
 
-    let plane = MeshObject::new_quad(
+    let plane = Mesh::new_quad(
         instance,
         device,
         data,
@@ -300,7 +300,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "Quad".to_string(),
     );
 
-    let plane_id = data.objects.push(Box::new(plane));
+    let plane_id = data.objects.push(plane);
 
     let mesh_state = PipelineMeshState::new(
         PCTVertex::binding_descriptions(),
