@@ -286,7 +286,7 @@ impl<'a> DescriptorBuilder<'a> {
             write.dst_set = set;
         }
 
-        unsafe { device.update_descriptor_sets(&self.writes, &[] as &[vk::CopyDescriptorSet]) };
+        unsafe { device.update_descriptor_sets(&self.writes, &[]) };
 
         Ok((set, layout))
     }
