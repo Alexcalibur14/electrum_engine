@@ -5,47 +5,10 @@ use glam::Mat4;
 use ash::vk;
 use ash::{Device, Instance};
 
-use crate::{create_and_stage_buffer, BufferWrapper, Loadable, RenderStats, RendererData};
+use crate::{create_and_stage_buffer, BufferWrapper, RendererData};
 
 pub mod mesh;
 pub mod vertices;
-
-pub trait Renderable {
-    fn update(
-        &mut self,
-        device: &Device,
-        data: &RendererData,
-        stats: &RenderStats,
-        index: usize
-    );
-    fn destroy_swapchain(&self, device: &Device);
-    fn recreate_swapchain(&mut self, device: &Device, data: &mut RendererData);
-    fn destroy(&mut self, device: &Device);
-    
-    fn descriptor_set(&self, render_pass: u32, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet>;
-    
-    fn mesh_data(&self) -> &MeshData;
-    
-    /// Used for debugging
-    /// Not used in release builds
-    /// Can be empty
-    fn name(&self) -> String;
-    
-    fn clone_dyn(&self) -> Box<dyn Renderable>;
-    fn loaded(&self) -> bool;
-}
-
-impl Clone for Box<dyn Renderable> {
-    fn clone(&self) -> Self {
-        self.clone_dyn()
-    }
-}
-
-impl Loadable for Box<dyn Renderable> {
-    fn is_loaded(&self) -> bool {
-        self.loaded()
-    }
-}
 
 pub trait Vertex {
     fn binding_descriptions() -> Vec<vk::VertexInputBindingDescription>;
@@ -54,7 +17,7 @@ pub trait Vertex {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-struct ModelMVP {
+pub struct ModelMVP {
     model: Mat4,
 }
 
@@ -69,7 +32,7 @@ impl ModelMVP {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-struct ModelData {
+pub struct ModelData {
     model: Mat4,
     normal: Mat4,
 }
