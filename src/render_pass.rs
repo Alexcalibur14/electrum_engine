@@ -502,7 +502,7 @@ impl RenderPass {
         };
 
         let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
-        set_object_name(instance, device, &self.name, render_pass).unwrap();
+        set_object_name(instance, device, &format!("{} Render Pass", self.name), render_pass).unwrap();
 
         let image_attachments = self.attachments.iter().map(|(attachment, a_use)| (*attachment, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
         // the last attachment must be the swapchain image
@@ -515,7 +515,8 @@ impl RenderPass {
         let framebuffers = data
             .swapchain_image_views
             .iter()
-            .map(|i| {
+            .enumerate()
+            .map(|(index, i)| {
                 let mut views = attachment_images.iter().map(|i| i.view).collect::<Vec<_>>();
 
                 if self.swapchain_output {
@@ -530,7 +531,7 @@ impl RenderPass {
                     .layers(1);
 
                 let framebuffer = unsafe { device.create_framebuffer(&info, None) };
-                set_object_name(instance, device, &(self.name.clone() + "Framebuffer"), framebuffer.unwrap()).unwrap();
+                set_object_name(instance, device, &format!("{} Framebuffer({})", self.name, index), framebuffer.unwrap()).unwrap();
                 framebuffer
             })
             .collect::<Result<Vec<_>, _>>()?;

@@ -478,7 +478,7 @@ pub unsafe fn create_texture_sampler(
     set_object_name(
         instance,
         device,
-        name,
+        &format!("{} Texture Sampler", name),
         texture_sampler,
     )
     .unwrap();
