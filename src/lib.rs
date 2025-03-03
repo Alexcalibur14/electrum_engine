@@ -438,7 +438,7 @@ pub struct RendererData {
     pub textures: Record<Image>,
     pub point_light_data: Record<PointLight>,
 
-    pub objects: Record<Mesh>,
+    pub objects: Record<Box<dyn Renderable>>,
     pub materials: Record<Box<dyn Material>>,
     pub cameras: Record<Box<dyn Camera>>,
     pub other_descriptors: Record<Box<dyn DescriptorSet>>,
