@@ -43,6 +43,8 @@ impl Image {
         format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
+        view_type: vk::ImageViewType,
+        layer_count: u32,
         properties: vk::MemoryPropertyFlags,
         aspects: vk::ImageAspectFlags,
         generate_sampler: bool,
@@ -55,13 +57,31 @@ impl Image {
 
         let (image, image_memory) = unsafe {
             create_image(
-                instance, device, data, width, height, mips, samples, format, tiling, usage,
+                instance,
+                device,
+                data,
+                width,
+                height,
+                mips,
+                layer_count,
+                samples,
+                format,
+                tiling,
+                usage,
                 properties,
             )
         }
         .unwrap();
 
-        let view = unsafe { create_image_view(device, image, format, aspects, mips) }.unwrap();
+        let view = unsafe { create_image_view(
+            device,
+            image,
+            format,
+            aspects,
+            view_type,
+            mips,
+            layer_count,
+        ) }.unwrap();
 
         let sampler = if generate_sampler {
             Some(
@@ -116,8 +136,15 @@ impl Image {
         .unwrap();
 
         let view =
-            unsafe { create_image_view(device, image, format, vk::ImageAspectFlags::COLOR, mips) }
-                .unwrap();
+            unsafe { create_image_view(
+                device,
+                image,
+                format,
+                vk::ImageAspectFlags::COLOR,
+                vk::ImageViewType::TYPE_2D,
+                mips,
+                1,
+            ) }.unwrap();
 
         let sampler = if generate_sampler {
             Some(
@@ -162,6 +189,7 @@ pub unsafe fn create_image(
     width: u32,
     height: u32,
     mip_levels: u32,
+    layers: u32,
     samples: vk::SampleCountFlags,
     format: vk::Format,
     tiling: vk::ImageTiling,
@@ -176,7 +204,7 @@ pub unsafe fn create_image(
             depth: 1,
         })
         .mip_levels(mip_levels)
-        .array_layers(1)
+        .array_layers(layers)
         .format(format)
         .tiling(tiling)
         .initial_layout(vk::ImageLayout::UNDEFINED)
@@ -238,6 +266,7 @@ pub unsafe fn create_texture_image(
         width,
         height,
         mip_levels,
+        1,
         vk::SampleCountFlags::TYPE_1,
         format,
         vk::ImageTiling::OPTIMAL,
@@ -344,8 +373,8 @@ unsafe fn transition_image_layout(
         src_stage_mask,
         dst_stage_mask,
         vk::DependencyFlags::empty(),
-        &[] as &[vk::MemoryBarrier],
-        &[] as &[vk::BufferMemoryBarrier],
+        &[],
+        &[],
         &[barrier],
     );
 
@@ -402,18 +431,20 @@ pub unsafe fn create_image_view(
     image: vk::Image,
     format: vk::Format,
     aspects: vk::ImageAspectFlags,
+    view_type: vk::ImageViewType,
     mip_levels: u32,
+    layer_count: u32,
 ) -> Result<vk::ImageView> {
     let subresource_range = vk::ImageSubresourceRange::default()
         .aspect_mask(aspects)
         .base_mip_level(0)
         .level_count(mip_levels)
         .base_array_layer(0)
-        .layer_count(1);
+        .layer_count(layer_count);
 
     let info = vk::ImageViewCreateInfo::default()
         .image(image)
-        .view_type(vk::ImageViewType::TYPE_2D)
+        .view_type(view_type)
         .format(format)
         .subresource_range(subresource_range);
 
@@ -509,8 +540,8 @@ unsafe fn generate_mipmaps(
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
-            &[] as &[vk::MemoryBarrier],
-            &[] as &[vk::BufferMemoryBarrier],
+            &[],
+            &[],
             &[barrier],
         );
 
@@ -566,8 +597,8 @@ unsafe fn generate_mipmaps(
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::FRAGMENT_SHADER,
             vk::DependencyFlags::empty(),
-            &[] as &[vk::MemoryBarrier],
-            &[] as &[vk::BufferMemoryBarrier],
+            &[],
+            &[],
             &[barrier],
         );
 
@@ -591,8 +622,8 @@ unsafe fn generate_mipmaps(
         vk::PipelineStageFlags::TRANSFER,
         vk::PipelineStageFlags::FRAGMENT_SHADER,
         vk::DependencyFlags::empty(),
-        &[] as &[vk::MemoryBarrier],
-        &[] as &[vk::BufferMemoryBarrier],
+        &[],
+        &[],
         &[barrier],
     );
 
