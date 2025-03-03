@@ -1,6 +1,6 @@
 pub use ash::vk;
 use ash::ext::debug_utils;
-use ash::vk::Handle;
+use ash::vk::{Extent2D, Handle};
 use ash::{Entry, Instance, Device};
 use ash_window;
 use ash::khr::{surface, swapchain};
@@ -141,11 +141,13 @@ impl Renderer {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
-        let mut render_data = self.data.subpass_render_data.clone();
-        render_data
-            .iter_mut()
-            .for_each(|s| s.iter_mut().for_each(|r| r.update(&self.device, &mut self.data, &self.stats, image_index)));
-        self.data.subpass_render_data = render_data;
+        let mut render_passes = self.data.render_passes.clone();
+        for render_pass in render_passes.iter_mut() {
+            for subpass in render_pass.subpasses.iter_mut() {
+                subpass.update(&self.device, &mut self.data, &self.stats, image_index);
+            }
+        }
+        self.data.render_passes = render_passes;
 
         self.update_command_buffer(image_index)?;
 
@@ -205,25 +207,28 @@ impl Renderer {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        let render_area = vk::Rect2D::default()
-            .offset(vk::Offset2D::default())
-            .extent(self.data.swapchain_extent);
+        
+        let mut render_passes = self.data.render_passes.clone();
+        for render_pass in render_passes.iter_mut() {
 
-        for (i, render_pass) in self.data.render_passes.iter().enumerate() {
-            let builder = &self.data.render_pass_builders[i];
-            let mut render_data = self.data.subpass_render_data[i].clone();
+            let render_area = vk::Rect2D::default()
+                .offset(vk::Offset2D::default())
+                .extent(Extent2D {
+                    width: render_pass.width,
+                    height: render_pass.height,
+                });
 
             let info = vk::RenderPassBeginInfo::default()
-                .render_pass(*render_pass)
-                .framebuffer(self.data.framebuffers[i][image_index])
+                .render_pass(render_pass.render_pass)
+                .framebuffer(render_pass.framebuffers[image_index])
                 .render_area(render_area)
-                .clear_values(&builder.clear_values);
-            
+                .clear_values(&render_pass.clear_values);
+
             begin_command_label(
                 &self.instance,
                 &self.device,
                 command_buffer,
-                &builder.name,
+                &render_pass.name,
                 [0.0, 0.1, 0.5, 1.0],
             );
 
@@ -233,12 +238,12 @@ impl Renderer {
                 vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
             );
 
-            render_data.iter_mut().for_each(|s| {
-                s.record_command_buffers(&self.instance, &self.device, &self.data, *render_pass, self.data.framebuffers[i][image_index], image_index)
+            render_pass.subpasses.iter_mut().for_each(|s| {
+                s.record_command_buffers(&self.instance, &self.device, &self.data, render_pass.render_pass, render_pass.framebuffers[image_index], image_index)
                     .unwrap()
             });
 
-            for (i, render_data) in render_data.iter().enumerate() {
+            for (i, render_data) in render_pass.subpasses.iter().enumerate() {
                 if i > 0 {
                     self.device.cmd_next_subpass(
                         command_buffer,
@@ -255,12 +260,12 @@ impl Renderer {
             }
 
             self.device.cmd_end_render_pass(command_buffer);
-            
+
             end_command_label(&self.instance, &self.device, command_buffer);   
         }
+        self.data.render_passes = render_passes;
 
         self.device.end_command_buffer(command_buffer)?;
-
 
         Ok(())
     }
@@ -281,17 +286,11 @@ impl Renderer {
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
-        let mut new_render_passes = vec![];
-        let mut new_framebuffers = vec![];
-        let mut render_pass_builders = self.data.render_pass_builders.clone();
-        render_pass_builders.iter_mut().for_each(|r| {
-            let (render_pass, framebuffers) = r.create_render_pass(&self.instance, &self.device, &self.data).unwrap();
-            new_render_passes.push(render_pass);
-            new_framebuffers.push(framebuffers);
-        });
-        self.data.render_pass_builders = render_pass_builders;
-        self.data.render_passes = new_render_passes;
-        self.data.framebuffers = new_framebuffers;
+        let mut render_passes = self.data.render_passes.clone();
+        for render_pass in render_passes.iter_mut() {
+            render_pass.recreate_swapchain(&self.instance, &self.device, &mut self.data)?;
+        }
+        self.data.render_passes = render_passes;
 
         let mut objects = self.data.objects.clone();
 
@@ -300,14 +299,6 @@ impl Renderer {
             .for_each(|o| o.recreate_swapchain(&self.device, &mut self.data));
 
         self.data.objects = objects;
-
-        let subpass_render_data = self.data.subpass_render_data.clone();
-        for (i, s_render_data) in subpass_render_data.into_iter().enumerate() {
-            let render_pass  = self.data.render_passes[i];
-            for render_data in s_render_data {
-                render_data.recreate_swapchain(&self.instance, &self.device, &mut self.data, render_pass);
-            }
-        }
 
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
@@ -318,21 +309,14 @@ impl Renderer {
     }
 
     unsafe fn destroy_swapchain(&mut self) {
-        self.data.render_pass_builders.iter().for_each(|r| r.destroy_swapchain(&self.device));
-
-        self.data
-            .framebuffers
-            .iter()
-            .for_each(|f| f.iter().for_each(|f| self.device.destroy_framebuffer(*f, None)));
+        let render_passes = self.data.render_passes.clone();
+        render_passes.iter().for_each(|r| r.destroy_swapchain(&self.device, &mut self.data));
+        self.data.render_passes = render_passes;
 
         self.data
             .objects
             .iter()
             .for_each(|o| o.destroy_swapchain(&self.device));
-
-        self.data.subpass_render_data.iter().for_each(|s| s.iter().for_each(|r| r.destroy_swapchain(&self.device, &self.data)));
-
-        self.data.render_passes.iter().for_each(|r| self.device.destroy_render_pass(*r, None));
 
         self.data
             .swapchain_image_views
@@ -441,13 +425,7 @@ pub struct RendererData {
     pub swapchain_image_views: Vec<vk::ImageView>,
 
     // Pipeline
-    pub render_passes: Vec<vk::RenderPass>,
-    pub render_pass_builders: Vec<RenderPassBuilder>,
-    pub attachments: Vec<Vec<vk::AttachmentDescription>>,
-    pub subpass_render_data: Vec<Vec<SubpassRenderData>>,
-
-    // Framebuffers
-    pub framebuffers: Vec<Vec<vk::Framebuffer>>,
+    pub render_passes: Vec<RenderPass>,
 
     // Command Buffers
     pub command_pool: vk::CommandPool,

@@ -184,15 +184,13 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
         .add_subpass(&subpass_2, &[(0, None), (1, None), (2, None)])
         .build();
 
-    let (render_pass, framebuffers) = render_pass_builder0.create_render_pass(instance, device, data).unwrap();
+    let mut render_pass = render_pass_builder0.create_render_pass();
+    render_pass.recreate_swapchain(instance, device, data).unwrap();
     data.render_passes.push(render_pass);
-    data.framebuffers.push(framebuffers);
-    data.render_pass_builders.push(render_pass_builder0);
 
-    let (render_pass, framebuffers) = render_pass_builder1.create_render_pass(instance, device, data).unwrap();
+    let mut render_pass = render_pass_builder1.create_render_pass();
+    render_pass.recreate_swapchain(instance, device, data).unwrap();
     data.render_passes.push(render_pass);
-    data.framebuffers.push(framebuffers);
-    data.render_pass_builders.push(render_pass_builder1);
 }
 
 fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererData) {
@@ -316,15 +314,15 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
             vk::Viewport::default()
                 .x(0.0)
                 .y(0.0)
-                .width(data.swapchain_extent.width as f32)
-                .height(data.swapchain_extent.height as f32)
+                .width(1024 as f32)
+                .height(1024 as f32)
                 .min_depth(0.0)
                 .max_depth(1.0),
         ],
         vec![
             vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
+                extent: vk::Extent2D { width: 1024, height: 1024 },
             }
         ],
         vk::SampleCountFlags::TYPE_1,
@@ -403,7 +401,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         mesh_state.clone(),
         vec![camera.get_set_layout()],
         vec![0],
-        data.render_passes[0],
+        data.render_passes[0].render_pass,
         0
     );
     let shadow_mat_id = data.materials.push(Box::new(shadow_material));
@@ -419,7 +417,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         mesh_state,
         vec![camera.get_set_layout(), light_group.get_set_layout()],
         vec![0, 1],
-        data.render_passes[1],
+        data.render_passes[1].render_pass,
         0
     );
     let mat_id = data.materials.push(Box::new(material));
@@ -440,11 +438,10 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "Lighting Subpass".to_string(),
     );
     
-    data.subpass_render_data = vec![vec![render_data_0], vec![render_data_1]];
+    data.render_passes[0].subpasses = vec![render_data_0.clone()];
+    data.render_passes[1].subpasses = vec![render_data_1.clone()];
 
-    let mut render_data = data.subpass_render_data.clone();
-    render_data
-        .iter_mut()
-        .for_each(|s| s.iter_mut().for_each(|s| s.setup_command_buffers(&device, &data)));
-    data.subpass_render_data = render_data;
+    let mut render_passes = data.render_passes.clone();
+    render_passes.iter_mut().for_each(|r| r.subpasses.iter_mut().for_each(|s| s.setup_command_buffers(device, data)));
+    data.render_passes = render_passes;
 }

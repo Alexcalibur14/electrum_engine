@@ -159,13 +159,13 @@ impl SubpassLayoutBuilder {
 }
 
 #[derive(Debug, Clone)]
-struct SubpassDescriptionData {
-    bind_point: vk::PipelineBindPoint,
-    input_attachments: Vec<vk::AttachmentReference>,
-    color_attachments: Vec<vk::AttachmentReference>,
-    resolve_attachments: Vec<vk::AttachmentReference>,
-    depth_stencil_attachment: vk::AttachmentReference,
-    preserve_attachments: Vec<u32>,
+pub struct SubpassDescriptionData {
+    pub bind_point: vk::PipelineBindPoint,
+    pub input_attachments: Vec<vk::AttachmentReference>,
+    pub color_attachments: Vec<vk::AttachmentReference>,
+    pub resolve_attachments: Vec<vk::AttachmentReference>,
+    pub depth_stencil_attachment: vk::AttachmentReference,
+    pub preserve_attachments: Vec<u32>,
 }
 
 impl SubpassDescriptionData {
@@ -340,7 +340,7 @@ impl RenderPassBuilder {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentUse {
     Color,
     Depth,
@@ -488,5 +488,120 @@ impl SubpassRenderData {
                 o.update(device, data, stats, image_index);
                 data.objects[id] = o;
             });
+    }
+}
+
+
+#[derive(Clone)]
+pub struct RenderPass {
+    pub name: String,
+    pub render_pass: vk::RenderPass,
+    pub framebuffers: Vec<vk::Framebuffer>,
+    pub subpasses: Vec<SubpassRenderData>,
+    pub clear_values: Vec<vk::ClearValue>,
+    pub dependencies: Vec<vk::SubpassDependency>,
+    pub subpass_data: Vec<SubpassDescriptionData>,
+    pub swapchain_output: bool,
+    
+    pub width: u32,
+    pub height: u32,
+    attachments: Vec<(Attachment, AttachmentUse)>,
+    attachment_images: Vec<Image>,
+}
+
+impl RenderPass {
+    pub fn new(name: &str, subpasses: Vec<SubpassRenderData>, subpass_data: Vec<SubpassDescriptionData>, clear_values: Vec<vk::ClearValue>, dependencies: Vec<vk::SubpassDependency>, attachments: Vec<(Attachment, AttachmentUse)>, swapchain_output: bool) -> Self {
+        RenderPass {
+            name: name.into(),
+            render_pass: vk::RenderPass::null(),
+            framebuffers: vec![],
+            subpasses,
+            clear_values,
+            dependencies,
+            subpass_data,
+            swapchain_output,
+            attachments,
+            attachment_images: vec![],
+            width: 0,
+            height: 0,
+        }
+    }
+
+    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &mut RendererData) -> Result<()> {
+        let subpass_descriptors = self.subpass_data.iter().map(|s| s.description()).collect::<Vec<vk::SubpassDescription>>();
+
+        let attachment_descriptions = self.attachments.iter().map(|(attachment, _)| attachment.attachment_desc).collect::<Vec<vk::AttachmentDescription>>();
+
+        self.width = self.attachments.iter().map(|(a, _)| match a.x {
+            AttachmentSize::Relative(r) => (r * data.swapchain_extent.width as f32) as u32,
+            AttachmentSize::Absolute(a) => a,
+        }).max().unwrap();
+
+        self.height = self.attachments.iter().map(|(a, _)| match a.y {
+            AttachmentSize::Relative(r) => (r * data.swapchain_extent.height as f32) as u32,
+            AttachmentSize::Absolute(a) => a,
+        }).max().unwrap();
+
+        let create_info = vk::RenderPassCreateInfo {
+            s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::RenderPassCreateFlags::empty(),
+            attachment_count: attachment_descriptions.len() as u32,
+            p_attachments: get_c_ptr_slice(&attachment_descriptions),
+            subpass_count: subpass_descriptors.len() as u32,
+            p_subpasses: get_c_ptr_slice(&subpass_descriptors),
+            dependency_count: self.dependencies.len() as u32,
+            p_dependencies: get_c_ptr_slice(&self.dependencies),
+            _marker: std::marker::PhantomData,
+        };
+
+        let render_pass = unsafe { device.create_render_pass(&create_info, None) }?;
+        set_object_name(instance, device, &self.name, render_pass).unwrap();
+
+        let image_attachments = self.attachments.iter().map(|(attachment, a_use)| (*attachment, a_use.get_usage_flags(), a_use.get_aspect_flags())).collect::<Vec<_>>();
+        // the last attachment must be the swapchain image
+        let attachment_images = if self.swapchain_output{
+            generate_render_pass_images(instance, device, data, &image_attachments[..(image_attachments.len() - 1)])
+        } else {
+            generate_render_pass_images(instance, device, data, &image_attachments)
+        };
+
+        let framebuffers = data
+            .swapchain_image_views
+            .iter()
+            .map(|i| {
+                let mut views = attachment_images.iter().map(|i| i.view).collect::<Vec<_>>();
+
+                if self.swapchain_output {
+                    views.push(*i);
+                }
+
+                let info = vk::FramebufferCreateInfo::default()
+                    .render_pass(render_pass)
+                    .attachments(&views)
+                    .width(self.width)
+                    .height(self.height)
+                    .layers(1);
+
+                let framebuffer = unsafe { device.create_framebuffer(&info, None) };
+                set_object_name(instance, device, &(self.name.clone() + "Framebuffer"), framebuffer.unwrap()).unwrap();
+                framebuffer
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.framebuffers = framebuffers;
+        self.render_pass = render_pass;
+        self.attachment_images = attachment_images;
+
+        self.subpasses.iter_mut().for_each(|s| s.recreate_swapchain(instance, device, data, self.render_pass));
+
+        Ok(())
+    }
+
+    pub fn destroy_swapchain(&self, device: &Device, data: &mut RendererData) {
+        self.attachment_images.iter().for_each(|a| a.destroy(device));
+        self.framebuffers.iter().for_each(|f| unsafe { device.destroy_framebuffer(*f, None) });
+        unsafe { device.destroy_render_pass(self.render_pass, None) };
+        self.subpasses.iter().for_each(|s| s.destroy_swapchain(device, data));
     }
 }
