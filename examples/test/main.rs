@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, Attachment, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, Mesh, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Shader, SimpleCamera, SubpassLayoutBuilder, SubpassPipelineState, SubpassRenderData, Vertex
+    get_depth_format, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, Mesh, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Resource, ResourceType, Shader, SimpleCamera, SubpassLayoutBuilder, SubpassPipelineState, SubpassRenderData, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -124,30 +124,56 @@ impl ApplicationHandler for App {
 }
 
 fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererData) {
-    let mut attachments = vec![
-        Attachment {
+    let attachments = vec![
+        Resource::new("Light Depth", ResourceType::Attachment {
+            width: AttachmentSize::Absolute(1024),
+            height: AttachmentSize::Absolute(1024),
             format: get_depth_format(&instance, &data).unwrap(),
-            x: AttachmentSize::Absolute(1024),
-            y: AttachmentSize::Absolute(1024),
-            ..Attachment::template_depth()
-        },
-        Attachment {
+            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            samples: vk::SampleCountFlags::TYPE_1,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            view_type: vk::ImageViewType::TYPE_2D,
+            layer_count: 1,
+            aspects: vk::ImageAspectFlags::DEPTH,
+        }),
+        Resource::new("Scene Color", ResourceType::Attachment {
+            width: AttachmentSize::Relative(1.0),
+            height: AttachmentSize::Relative(1.0),
             format: data.swapchain_format,
-            sample_count: data.msaa_samples,
-            ..Attachment::template_colour()
-        },
-        Attachment {
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            samples: data.msaa_samples,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            view_type: vk::ImageViewType::TYPE_2D,
+            layer_count: 1,
+            aspects: vk::ImageAspectFlags::COLOR,
+        }),
+        Resource::new("Scene Depth", ResourceType::Attachment {
+            width: AttachmentSize::Relative(1.0),
+            height: AttachmentSize::Relative(1.0),
             format: get_depth_format(&instance, &data).unwrap(),
-            sample_count: data.msaa_samples,
-            ..Attachment::template_depth()
-        },
-        Attachment {
+            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            samples: data.msaa_samples,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            view_type: vk::ImageViewType::TYPE_2D,
+            layer_count: 1,
+            aspects: vk::ImageAspectFlags::DEPTH,
+        }),
+        Resource::new("Swapchain output", ResourceType::Attachment {
+            width: AttachmentSize::Relative(1.0),
+            height: AttachmentSize::Relative(1.0),
             format: data.swapchain_format,
-            ..Attachment::template_present()
-        },
+            layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            samples: vk::SampleCountFlags::TYPE_1,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            view_type: vk::ImageViewType::TYPE_2D,
+            layer_count: 1,
+            aspects: vk::ImageAspectFlags::COLOR,
+        }),
     ];
-
-    attachments.iter_mut().for_each(|a| a.generate());
 
     let color_clear_value = vk::ClearValue {
         color: vk::ClearColorValue {
@@ -173,14 +199,14 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
         .build();
 
     let mut render_pass_builder0 = RenderPassBuilder::new(false, String::from("Shadow"))
-        .add_attachment(attachments[0], AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[0].clone(), AttachmentUse::Depth, depth_clear_value)
         .add_subpass(&subpass_1, &[(0, None)])
         .build();
     
     let mut render_pass_builder1 = RenderPassBuilder::new(true, String::from("Lit"))
-        .add_attachment(attachments[1], AttachmentUse::Color, color_clear_value)
-        .add_attachment(attachments[2], AttachmentUse::Depth, depth_clear_value)
-        .add_attachment(attachments[3], AttachmentUse::Color, color_clear_value)
+        .add_attachment(attachments[1].clone(), AttachmentUse::Color, color_clear_value)
+        .add_attachment(attachments[2].clone(), AttachmentUse::Depth, depth_clear_value)
+        .add_attachment(attachments[3].clone(), AttachmentUse::Color, color_clear_value)
         .add_subpass(&subpass_2, &[(0, None), (1, None), (2, None)])
         .build();
 
