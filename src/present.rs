@@ -7,58 +7,8 @@ use ash::{Device, Instance};
 use anyhow::{Ok, Result};
 
 use crate::{
-    texture::{Image, MipLevels},
-    QueueFamilyIndices, RendererData, SwapchainSupport,
+    create_image_view, QueueFamilyIndices, RendererData, SwapchainSupport
 };
-
-use crate::{texture::*, Attachment, AttachmentSize};
-
-pub fn generate_render_pass_images(
-    instance: &Instance,
-    device: &Device,
-    data: &RendererData,
-    attachments: &[(
-        Attachment,
-        vk::ImageUsageFlags,
-        vk::ImageAspectFlags,
-    )],
-) -> Vec<Image> {
-    let mut images = vec![];
-
-    for attachment in attachments {
-        let width = match attachment.0.x {
-            AttachmentSize::Absolute(w) => w,
-            AttachmentSize::Relative(w) => (data.swapchain_extent.width as f32 * w) as u32,
-        };
-
-        let height = match attachment.0.y {
-            AttachmentSize::Absolute(h) => h,
-            AttachmentSize::Relative(h) => (data.swapchain_extent.height as f32 * h) as u32,
-        };
-
-        let image = Image::new(
-            instance,
-            device,
-            data,
-            width,
-            height,
-            MipLevels::One,
-            attachment.0.attachment_desc.samples,
-            attachment.0.attachment_desc.format,
-            vk::ImageTiling::OPTIMAL,
-            attachment.1,
-            vk::ImageViewType::TYPE_2D,
-            1,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            attachment.2,
-            false,
-        );
-        
-        images.push(image)
-    }
-
-    images
-}
 
 pub(crate) unsafe fn create_swapchain(
     entry: &Entry,

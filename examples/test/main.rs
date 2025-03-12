@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, AttachmentSize, AttachmentUse, BasicMaterial, Camera, GraphicsShader, Image, LightGroup, Mesh, MipLevels, PipelineMeshState, PointLight, Projection, RenderPassBuilder, Renderer, RendererData, Resource, ResourceType, Shader, SimpleCamera, SubpassLayoutBuilder, SubpassPipelineState, SubpassRenderData, Vertex
+    get_depth_format, AttachmentSize, BasicMaterial, BindPoint, Camera, FrameGraph, GraphicsShader, Image, LightGroup, Mesh, MipLevels, Pass, PipelineMeshState, PointLight, Projection, Renderer, RendererData, Resource, ResourceType, ResourceUsage, Shader, SimpleCamera, SubpassPipelineState, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -124,99 +124,83 @@ impl ApplicationHandler for App {
 }
 
 fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererData) {
-    let attachments = vec![
-        Resource::new("Light Depth", ResourceType::Attachment {
-            width: AttachmentSize::Absolute(1024),
-            height: AttachmentSize::Absolute(1024),
-            format: get_depth_format(&instance, &data).unwrap(),
-            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            samples: vk::SampleCountFlags::TYPE_1,
-            tiling: vk::ImageTiling::OPTIMAL,
-            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            view_type: vk::ImageViewType::TYPE_2D,
-            layer_count: 1,
-            aspects: vk::ImageAspectFlags::DEPTH,
-        }),
-        Resource::new("Scene Color", ResourceType::Attachment {
-            width: AttachmentSize::Relative(1.0),
-            height: AttachmentSize::Relative(1.0),
-            format: data.swapchain_format,
-            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            samples: data.msaa_samples,
-            tiling: vk::ImageTiling::OPTIMAL,
-            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            view_type: vk::ImageViewType::TYPE_2D,
-            layer_count: 1,
-            aspects: vk::ImageAspectFlags::COLOR,
-        }),
-        Resource::new("Scene Depth", ResourceType::Attachment {
-            width: AttachmentSize::Relative(1.0),
-            height: AttachmentSize::Relative(1.0),
-            format: get_depth_format(&instance, &data).unwrap(),
-            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            samples: data.msaa_samples,
-            tiling: vk::ImageTiling::OPTIMAL,
-            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            view_type: vk::ImageViewType::TYPE_2D,
-            layer_count: 1,
-            aspects: vk::ImageAspectFlags::DEPTH,
-        }),
-        Resource::new("Swapchain output", ResourceType::Attachment {
-            width: AttachmentSize::Relative(1.0),
-            height: AttachmentSize::Relative(1.0),
-            format: data.swapchain_format,
-            layout: vk::ImageLayout::PRESENT_SRC_KHR,
-            samples: vk::SampleCountFlags::TYPE_1,
-            tiling: vk::ImageTiling::OPTIMAL,
-            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            view_type: vk::ImageViewType::TYPE_2D,
-            layer_count: 1,
-            aspects: vk::ImageAspectFlags::COLOR,
-        }),
-    ];
+    let mut frame_graph = FrameGraph::new("Frame Graph");
+    frame_graph.add_pass(
+        Pass::new("Main Draw", BindPoint::Graphics)
+            .create_resource(
+                Resource::new(
+                    "Scene Depth",
+                    Some(vk::ClearValue {
+                        depth_stencil: vk::ClearDepthStencilValue {
+                            depth: 1.0,
+                            stencil: 0,
+                        },
+                    }),
+                    ResourceType::Attachment {
+                        width: AttachmentSize::Relative(1.0),
+                        height: AttachmentSize::Relative(1.0),
+                        format: get_depth_format(&instance, &data).unwrap(),
+                        layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        samples: data.msaa_samples,
+                        tiling: vk::ImageTiling::OPTIMAL,
+                        usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                        view_type: vk::ImageViewType::TYPE_2D,
+                        layer_count: 1,
+                        aspects: vk::ImageAspectFlags::DEPTH,
+                    }
+                ),
+                ResourceUsage::Write,
+            )
+            .create_resource(
+                Resource::new(
+                    "Scene Color",
+                    Some(vk::ClearValue {
+                        color: vk::ClearColorValue {
+                            float32: [0.0, 0.0, 0.0, 1.0],
+                        },
+                    }),
+                    ResourceType::Attachment {
+                        width: AttachmentSize::Relative(1.0),
+                        height: AttachmentSize::Relative(1.0),
+                        format: data.swapchain_format,
+                        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        samples: data.msaa_samples,
+                        tiling: vk::ImageTiling::OPTIMAL,
+                        usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                        view_type: vk::ImageViewType::TYPE_2D,
+                        layer_count: 1,
+                        aspects: vk::ImageAspectFlags::COLOR,
+                    }
+                ),
+            ResourceUsage::Write,
+            )
+            .create_resource(
+                Resource::new(
+                    "Swapchain output",
+                    Some(vk::ClearValue {
+                        color: vk::ClearColorValue {
+                            float32: [0.0, 0.0, 0.0, 1.0],
+                        },
+                    }),
+                    ResourceType::Attachment {
+                        width: AttachmentSize::Relative(1.0),
+                        height: AttachmentSize::Relative(1.0),
+                        format: data.swapchain_format,
+                        layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                        samples: vk::SampleCountFlags::TYPE_1,
+                        tiling: vk::ImageTiling::OPTIMAL,
+                        usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                        view_type: vk::ImageViewType::TYPE_2D,
+                        layer_count: 1,
+                        aspects: vk::ImageAspectFlags::COLOR,
+                    }
+                ), 
+                ResourceUsage::Write,
+            )
+            .build(),
+    );
 
-    let color_clear_value = vk::ClearValue {
-        color: vk::ClearColorValue {
-            float32: [0.0, 0.0, 0.0, 1.0],
-        },
-    };
-
-    let depth_clear_value = vk::ClearValue {
-        depth_stencil: vk::ClearDepthStencilValue {
-            depth: 1.0,
-            stencil: 0,
-        },
-    };
-
-    let subpass_1 = SubpassLayoutBuilder::new(vk::PipelineBindPoint::GRAPHICS)
-        .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-        .build();
-
-    let subpass_2 = SubpassLayoutBuilder::new(vk::PipelineBindPoint::GRAPHICS)
-        .add_color_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        .add_depth_stencil_attachment(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-        .add_resolve_attachment(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        .build();
-
-    let mut render_pass_builder0 = RenderPassBuilder::new(false, String::from("Shadow"))
-        .add_attachment(attachments[0].clone(), AttachmentUse::Depth, depth_clear_value)
-        .add_subpass(&subpass_1, &[(0, None)])
-        .build();
-    
-    let mut render_pass_builder1 = RenderPassBuilder::new(true, String::from("Lit"))
-        .add_attachment(attachments[1].clone(), AttachmentUse::Color, color_clear_value)
-        .add_attachment(attachments[2].clone(), AttachmentUse::Depth, depth_clear_value)
-        .add_attachment(attachments[3].clone(), AttachmentUse::Color, color_clear_value)
-        .add_subpass(&subpass_2, &[(0, None), (1, None), (2, None)])
-        .build();
-
-    let mut render_pass = render_pass_builder0.create_render_pass();
-    render_pass.recreate_swapchain(instance, device, data).unwrap();
-    data.render_passes.push(render_pass);
-
-    let mut render_pass = render_pass_builder1.create_render_pass();
-    render_pass.recreate_swapchain(instance, device, data).unwrap();
-    data.render_passes.push(render_pass);
+    data.render_passes = frame_graph.generate_render_pass(instance, device, data);
 }
 
 fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererData) {
@@ -262,14 +246,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
 
     data.shaders.push(Box::new(lit_shader));
 
-    let shadow_shader = GraphicsShader::builder(instance, device, "Shadow".to_string())
-        .load_vertex("res\\shaders\\test_shadow.vert.spv") 
-        .build();
-
-    let shadow_state = shadow_shader.state();
-
-    data.shaders.push(Box::new(shadow_shader));
-
     let image = Image::from_path(
         instance,
         device,
@@ -301,7 +277,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         "res\\models\\MONKEY.obj",
         position,
         image_id,
-        vec![(0, vec![(0, vec![0])]), (1, vec![(0, vec![0, 1])])],
+        vec![(0, vec![(0, vec![0, 1])])],
         "monkey".to_string(),
     );
 
@@ -322,7 +298,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         vec3(0.0, 1.0, 0.0),
         image_2077_id,
         position,
-        vec![(0, vec![(0, vec![0])]), (1, vec![(0, vec![0, 1])])],
+        vec![(0, vec![(0, vec![0, 1])])],
         "Quad".to_string(),
     );
 
@@ -333,31 +309,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         PCTVertex::attribute_descriptions(),
         false,
         vk::PrimitiveTopology::TRIANGLE_LIST,
-    );
-
-    let shadow_subpass_state = SubpassPipelineState::new(
-        vec![
-            vk::Viewport::default()
-                .x(0.0)
-                .y(0.0)
-                .width(1024 as f32)
-                .height(1024 as f32)
-                .min_depth(0.0)
-                .max_depth(1.0),
-        ],
-        vec![
-            vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: vk::Extent2D { width: 1024, height: 1024 },
-            }
-        ],
-        vk::SampleCountFlags::TYPE_1,
-        true,
-        true,
-        vec![],
-        false,
-        vk::LogicOp::COPY,
-        [0.0, 0.0, 0.0, 0.0],
     );
 
     let subpass_state = SubpassPipelineState::new(
@@ -406,32 +357,6 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         ],
     ];
 
-    let shadow_bindings = vec![
-        vec![
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX),
-        ],
-    ];
-
-    let shadow_material = BasicMaterial::new(
-        instance,
-        device,
-        data,
-        shadow_bindings,
-        vec![],
-        shadow_state,
-        shadow_subpass_state,
-        mesh_state.clone(),
-        vec![camera.get_set_layout()],
-        vec![0],
-        data.render_passes[0].render_pass,
-        0
-    );
-    let shadow_mat_id = data.materials.push(Box::new(shadow_material));
-
     let material = BasicMaterial::new(
         instance,
         device,
@@ -443,31 +368,11 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         mesh_state,
         vec![camera.get_set_layout(), light_group.get_set_layout()],
         vec![0, 1],
-        data.render_passes[1].render_pass,
+        data.render_passes[0].render_pass,
         0
     );
     let mat_id = data.materials.push(Box::new(material));
-
-    let render_data_0 = SubpassRenderData::new(
-        0,
-        0,
-        vec![(plane_id, shadow_mat_id), (monkey_id, shadow_mat_id)],
-        camera_id,
-        "Shadow Subpass".to_string(),
-    );
-
-    let render_data_1 = SubpassRenderData::new(
-        1,
-        0,
-        vec![(plane_id, mat_id), (monkey_id, mat_id)],
-        camera_id,
-        "Lighting Subpass".to_string(),
-    );
     
-    data.render_passes[0].subpasses = vec![render_data_0.clone()];
-    data.render_passes[1].subpasses = vec![render_data_1.clone()];
-
-    let mut render_passes = data.render_passes.clone();
-    render_passes.iter_mut().for_each(|r| r.subpasses.iter_mut().for_each(|s| s.setup_command_buffers(device, data)));
-    data.render_passes = render_passes;
+    data.render_passes[0].subpasses[0].camera = camera_id;
+    data.render_passes[0].subpasses[0].objects = vec![(plane_id, mat_id), (monkey_id, mat_id)];
 }

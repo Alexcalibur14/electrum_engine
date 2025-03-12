@@ -33,7 +33,7 @@ pub use camera::*;
 pub use light::*;
 pub use mesh::*;
 pub use model::*;
-pub use present::*;
+use present::*;
 pub use render_pass::*;
 pub use shader::*;
 pub use texture::*;

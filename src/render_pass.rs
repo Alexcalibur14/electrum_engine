@@ -9,81 +9,6 @@ use thiserror::Error;
 
 use crate::{begin_command_label, end_command_label, get_c_ptr_slice, set_object_name, Image, Mesh, MipLevels, RenderStats, RendererData};
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Attachment {
-    pub x: AttachmentSize,
-    pub y: AttachmentSize,
-
-    pub flags: vk::AttachmentDescriptionFlags,
-    pub format: vk::Format,
-    pub sample_count: vk::SampleCountFlags,
-    pub load_op: vk::AttachmentLoadOp,
-    pub store_op: vk::AttachmentStoreOp,
-    pub stencil_load_op: vk::AttachmentLoadOp,
-    pub stencil_store_op: vk::AttachmentStoreOp,
-    pub initial_layout: vk::ImageLayout,
-    pub final_layout: vk::ImageLayout,
-
-    pub attachment_desc: vk::AttachmentDescription,
-}
-
-impl Attachment {
-    pub fn template_colour() -> Self {
-        Attachment {
-            format: vk::Format::R32G32B32A32_SFLOAT,
-            sample_count: vk::SampleCountFlags::TYPE_1,
-            load_op: vk::AttachmentLoadOp::CLEAR,
-            store_op: vk::AttachmentStoreOp::STORE,
-            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            ..Default::default()
-        }
-    }
-
-    pub fn template_depth() -> Self {
-        Attachment {
-            format: vk::Format::D32_SFLOAT,
-            sample_count: vk::SampleCountFlags::TYPE_1,
-            load_op: vk::AttachmentLoadOp::CLEAR,
-            store_op: vk::AttachmentStoreOp::DONT_CARE,
-            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            ..Default::default()
-        }
-    }
-
-    pub fn template_present() -> Self {
-        Attachment {
-            format: vk::Format::R8G8B8A8_SRGB,
-            sample_count: vk::SampleCountFlags::TYPE_1,
-            load_op: vk::AttachmentLoadOp::DONT_CARE,
-            store_op: vk::AttachmentStoreOp::STORE,
-            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-            ..Default::default()
-        }
-    }
-
-    pub fn generate(&mut self) {
-        self.attachment_desc = vk::AttachmentDescription::default()
-            .flags(self.flags)
-            .format(self.format)
-            .samples(self.sample_count)
-            .load_op(self.load_op)
-            .store_op(self.store_op)
-            .stencil_load_op(self.stencil_load_op)
-            .stencil_store_op(self.stencil_store_op)
-            .initial_layout(self.initial_layout)
-            .final_layout(self.final_layout)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttachmentSize {
     Relative(f32),
@@ -93,70 +18,6 @@ pub enum AttachmentSize {
 impl Default for AttachmentSize {
     fn default() -> Self {
         AttachmentSize::Relative(1.0)
-    }
-}
-
-#[allow(unused)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachmentType {
-    Input,
-    Color,
-    Resolve,
-    DepthStencil,
-    Preserve,
-}
-
-#[derive(Debug, Clone)]
-pub struct SubpassLayoutBuilder {
-    bind_point: vk::PipelineBindPoint,
-    attachments: Vec<(AttachmentType, vk::ImageLayout)>,
-}
-
-impl SubpassLayoutBuilder {
-    pub fn new(bind_point: vk::PipelineBindPoint) -> Self {
-        SubpassLayoutBuilder {
-            bind_point,
-            attachments: vec![],
-        }
-    }
-
-    pub fn add_attachment(&mut self, attachment_type: AttachmentType, layout: vk::ImageLayout) -> &mut Self {
-        self.attachments.push((attachment_type, layout));
-        self
-    }
-
-    pub fn add_attachments(&mut self, attachments: &[(AttachmentType, vk::ImageLayout)]) -> &mut Self {
-        self.attachments.append(&mut attachments.into());
-        self
-    }
-
-    pub fn add_input_attachment(&mut self, layout: vk::ImageLayout) -> &mut Self {
-        self.attachments.push((AttachmentType::Input, layout));
-        self
-    }
-
-    pub fn add_color_attachment(&mut self, layout: vk::ImageLayout) -> &mut Self {
-        self.attachments.push((AttachmentType::Color, layout));
-        self
-    }
-
-    pub fn add_resolve_attachment(&mut self, layout: vk::ImageLayout) -> &mut Self {
-        self.attachments.push((AttachmentType::Resolve, layout));
-        self
-    }
-
-    pub fn add_depth_stencil_attachment(&mut self, layout: vk::ImageLayout) -> &mut Self {
-        self.attachments.push((AttachmentType::DepthStencil, layout));
-        self
-    }
-    
-    pub fn add_preserve_attachment(&mut self) -> &mut Self {
-        self.attachments.push((AttachmentType::DepthStencil, vk::ImageLayout::UNDEFINED));
-        self
-    }
-
-    pub fn build(&mut self) -> Self {
-        self.clone()
     }
 }
 
@@ -192,107 +53,6 @@ impl SubpassDescriptionData {
             p_preserve_attachments: get_c_ptr_slice(&self.preserve_attachments),
             _marker: std::marker::PhantomData,
         }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct RenderPassBuilder {
-    attachments: Vec<(Resource, AttachmentUse, Option<usize>)>,
-    subpasses: Vec<SubpassDescriptionData>,
-    dependencies: Vec<vk::SubpassDependency>,
-
-    attachment_images: Vec<Image>,
-    pub clear_values: Vec<vk::ClearValue>,
-    swapchain_output: bool,
-    pub name: String,
-}
-
-impl RenderPassBuilder {
-    pub fn new(swapchain_output: bool, name: String) -> Self {
-        RenderPassBuilder {
-            attachments: vec![],
-            subpasses: vec![],
-            dependencies: vec![],
-
-            attachment_images: vec![],
-            clear_values: vec![],
-
-            swapchain_output,
-            name,
-        }
-    }
-
-    pub fn add_attachment(&mut self, attachment: Resource, attachment_use: AttachmentUse, clear_value: vk::ClearValue) -> &mut Self {
-        self.attachments.push((attachment, attachment_use, None));
-        self.clear_values.push(clear_value);
-        self
-    }
-
-    pub fn add_subpass(&mut self, subpass: &SubpassLayoutBuilder, attachment_indices: &[(u32, Option<vk::SubpassDependency>)]) -> &mut Self {
-        let mut description_data = SubpassDescriptionData {
-            bind_point: subpass.bind_point,
-            input_attachments: vec![],
-            color_attachments: vec![],
-            resolve_attachments: vec![],
-            depth_stencil_attachment: vk::AttachmentReference::default(),
-            preserve_attachments: vec![],
-        };
-
-        for ((attachment_type, layout), (index, dependency)) in subpass.attachments.iter().zip(attachment_indices) {
-            let attachment_ref = vk::AttachmentReference::default()
-                .attachment(*index)
-                .layout(*layout);
-
-            match attachment_type {
-                AttachmentType::Input => {
-                    description_data.input_attachments.push(attachment_ref);
-                },
-                AttachmentType::Color => {
-                    description_data.color_attachments.push(attachment_ref);
-                },
-                AttachmentType::Resolve => {
-                    description_data.resolve_attachments.push(attachment_ref);
-                },
-                AttachmentType::DepthStencil => {
-                    description_data.depth_stencil_attachment = attachment_ref
-                },
-                AttachmentType::Preserve => {
-                    description_data.preserve_attachments.push(*index);
-                },
-            }
-
-            match dependency {
-                Some(dependency) => {
-                    self.dependencies.push(*dependency);
-                    self.attachments[*index as usize].2 = Some(self.subpasses.len());
-                },
-                None => {},
-            }
-        }
-
-        self.subpasses.push(description_data);
-
-        self
-    }
-
-    pub fn build(&mut self) -> Self {
-        self.clone()
-    }
-
-    pub fn create_render_pass(&mut self) -> RenderPass {
-        RenderPass::new(
-            &self.name,
-            vec![],
-            self.subpasses.clone(),
-            self.clear_values.clone(),
-            self.dependencies.clone(),
-            self.attachments.iter().map(|(a, _, _)| a.clone()).collect::<Vec<_>>(),
-            self.swapchain_output
-        )
-    }
-
-    pub fn destroy_swapchain(&self, device: &Device) {
-        self.attachment_images.iter().for_each(|a| a.destroy(device));
     }
 }
 
@@ -334,14 +94,14 @@ pub struct SubpassRenderData {
 }
 
 impl SubpassRenderData {
-    pub fn new(render_pass_id: u32, id: u32, objects: Vec<(usize, usize)>, camera: usize, name: String) -> Self {
+    pub fn new(render_pass_id: u32, id: u32, objects: Vec<(usize, usize)>, camera: usize, name: &str) -> Self {
         SubpassRenderData {
             render_pass_id,
             subpass_id: id,
             objects,
             camera,
             command_buffers: vec![],
-            name,
+            name: name.into(),
         }
     }
 
@@ -448,7 +208,7 @@ impl SubpassRenderData {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FrameGraph {
     pub name: String,
     pub passes: Vec<Pass>,
@@ -469,6 +229,18 @@ impl FrameGraph {
         self
     }
 
+    pub fn get_attachment(&self, name: &str) -> Resource {
+        let mut name = name.to_string();
+        loop {
+            let resource = self.resources.iter().find(|r| r.name == name).unwrap();
+            match resource.resource.clone() {
+                ResourceType::Attachment { .. } => return resource.clone(),
+                ResourceType::Transitioned { attachment, .. } => name = attachment.clone(),
+                ResourceType::Texture { attachment, .. } => name = attachment.clone(),
+            }
+        }
+    }
+
     pub fn validate(&mut self) -> Result<(), FrameGraphError> {
         for pass in &self.passes {
             for resource in &pass.created_resources {
@@ -487,7 +259,145 @@ impl FrameGraph {
         Ok(())
     }
 
-    
+    pub fn generate_render_pass(&mut self, instance: &Instance, device: &Device, data: &mut RendererData) -> Vec<RenderPass> {
+        self.validate().unwrap();
+
+        let mut passes = self.passes.clone();
+
+        for pass in passes.iter_mut() {
+            for resource_ref in pass.resource_refs.iter() {
+                let usage = resource_ref.usage;
+                let resource = self.resources.iter().find(|r| r.name == resource_ref.name).unwrap();
+
+                match resource.resource.clone() {
+                    ResourceType::Attachment { samples, .. } => {
+                        if usage == ResourceUsage::Read {
+                            continue;
+                        }
+                        if samples > pass.samples {
+                            pass.samples = samples;
+                        }
+                    },
+                    ResourceType::Transitioned { attachment, .. } => {
+                        let root = self.get_attachment(&attachment);
+                        if usage == ResourceUsage::Read {
+                            continue;
+                        }
+                        if let ResourceType::Attachment { samples, .. } = root.resource {
+                            if samples > pass.samples {
+                                pass.samples = samples;
+                            }
+                        }
+                    },
+                    ResourceType::Texture { attachment, .. } => {
+                        let root = self.get_attachment(&attachment);
+                        if usage == ResourceUsage::Read {
+                            continue;
+                        }
+                        if let ResourceType::Attachment { samples, .. } = root.resource {
+                            if samples > pass.samples {
+                                pass.samples = samples;
+                            }
+                        }
+                    },
+                }
+            }
+        }
+
+        self.passes = passes;
+
+        let name = "Render Pass";
+        let mut subpasses = vec![];
+        let mut subpass_data = vec![];
+        let dependencies = vec![];
+        let attachments = self.resources.clone();
+        let swapchain_output = true;
+
+        for (subpass_id, pass) in self.passes.iter().enumerate() {
+            let bind_point = match pass.bind_point {
+                BindPoint::Graphics => vk::PipelineBindPoint::GRAPHICS,
+            };
+
+            let mut subpass = SubpassDescriptionData {
+                bind_point,
+                input_attachments: vec![],
+                color_attachments: vec![],
+                resolve_attachments: vec![],
+                depth_stencil_attachment: vk::AttachmentReference::default(),
+                preserve_attachments: vec![],
+            };
+
+            for resource_ref in &pass.resource_refs {
+                let resource = self.resources.iter().find(|r| r.name == resource_ref.name).unwrap();
+
+                let mut layout = match self.resources.iter().find(|r| r.name == resource_ref.name).unwrap().resource {
+                    ResourceType::Attachment { layout, .. } => layout,
+                    ResourceType::Transitioned { layout, .. } => layout,
+                    ResourceType::Texture { layout, .. } => layout,
+                };
+
+                let samples = if let ResourceType::Attachment { samples, .. } = self.get_attachment(&resource_ref.name).resource {
+                    samples
+                } else {
+                    vk::SampleCountFlags::TYPE_1
+                };
+
+                if layout == vk::ImageLayout::PRESENT_SRC_KHR {
+                    layout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
+                }
+
+                let attachment_ref = vk::AttachmentReference::default()
+                    .attachment(attachments.iter().position(|a| a.name == resource.name).unwrap() as u32)
+                    .layout(layout);
+
+                if is_depth_layout(layout) {
+                    subpass.depth_stencil_attachment = attachment_ref;
+                    continue;
+                }
+
+                match resource_ref.usage {
+                    ResourceUsage::Read => {
+                        subpass.input_attachments.push(attachment_ref);
+                    },
+                    ResourceUsage::Write => {
+                        if samples == pass.samples {
+                            subpass.color_attachments.push(attachment_ref);
+                        } else {
+                            subpass.resolve_attachments.push(attachment_ref);
+                        }
+                    },
+                }
+            }
+
+            subpass_data.push(subpass);
+            let mut render_data = SubpassRenderData::new(
+                0,
+                subpass_id as u32,
+                vec![],
+                0,
+                &pass.name,
+            );
+            render_data.setup_command_buffers(device, data);
+            subpasses.push(
+                render_data
+            );
+        }
+
+        let mut render_passes = vec![RenderPass::new(
+            name,
+            vec![],
+            subpass_data,
+            dependencies,
+            attachments,
+            swapchain_output,
+        )];
+
+        render_passes.iter_mut().for_each(|rp| rp.recreate_swapchain(instance, device, data).unwrap());
+
+        render_passes[0].subpasses = subpasses;
+
+        render_passes
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -496,19 +406,24 @@ pub enum FrameGraphError {
     ResourceNotCreated(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Pass {
     pub name: String,
+    pub bind_point: BindPoint,
     pub resource_refs: Vec<ResourceRef>,
     pub created_resources: Vec<Resource>,
+
+    pub samples: vk::SampleCountFlags,
 }
 
 impl Pass {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, bind_point: BindPoint) -> Self {
         Pass {
             name: name.into(),
+            bind_point,
             resource_refs: vec![],
             created_resources: vec![],
+            samples: vk::SampleCountFlags::TYPE_1,
         }
     }
 
@@ -521,16 +436,26 @@ impl Pass {
         self
     }
 
-    pub fn create_resource(&mut self, resource: Resource) -> &mut Self {
+    pub fn create_resource(&mut self, resource: Resource, usage: ResourceUsage) -> &mut Self {
+        let name = resource.name.clone();
         self.created_resources.push(resource);
+        self.resource_refs.push(ResourceRef {
+            name,
+            usage,
+        });
 
         self
     }
+
+    pub fn build(&mut self) -> Self {
+        self.clone()
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Resource {
     pub name: String,
+    pub clear_value: Option<vk::ClearValue>,
     pub resource: ResourceType,
 
     pub width: u32,
@@ -541,9 +466,10 @@ pub struct Resource {
 }
 
 impl Resource {
-    pub fn new(name: &str, resource: ResourceType) -> Self {
+    pub fn new(name: &str, clear_value: Option<vk::ClearValue>, resource: ResourceType) -> Self {
         Resource {
             name: name.into(),
+            clear_value,
             resource,
             width: 0,
             height: 0,
@@ -760,10 +686,25 @@ pub struct ResourceRef {
     pub usage: ResourceUsage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceUsage {
     Read,
     Write,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindPoint {
+    Graphics,
+}
+
+pub fn is_depth_layout(layout: vk::ImageLayout) -> bool {
+    match layout {
+        vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL => true,
+        vk::ImageLayout::DEPTH_READ_ONLY_OPTIMAL => true,
+        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => true,
+        vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL => true,
+        _ => false,
+    }
 }
 
 #[derive(Clone)]
@@ -787,11 +728,15 @@ impl RenderPass {
         name: &str,
         subpasses: Vec<SubpassRenderData>,
         subpass_data: Vec<SubpassDescriptionData>,
-        clear_values: Vec<vk::ClearValue>,
         dependencies: Vec<vk::SubpassDependency>,
         attachments: Vec<Resource>,
         swapchain_output: bool
     ) -> Self {
+        let clear_values = attachments.iter().map(|r| match r.clear_value {
+            Some(c) => c,
+            None => vk::ClearValue::default(),
+        }).collect::<Vec<_>>();
+
         RenderPass {
             name: name.into(),
             render_pass: vk::RenderPass::null(),
