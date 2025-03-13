@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use std::vec;
 
 use electrum_engine::{
-    get_depth_format, AttachmentSize, BasicMaterial, BindPoint, Camera, FrameGraph, GraphicsShader, Image, LightGroup, Mesh, MipLevels, Pass, PipelineMeshState, PointLight, Projection, Renderer, RendererData, Resource, ResourceType, ResourceUsage, Shader, SimpleCamera, SubpassPipelineState, Vertex
+    get_depth_format, Attachment, AttachmentSize, BasicMaterial, BindPoint, Camera, FrameGraph, GraphicsShader, Image, LightGroup, Mesh, MipLevels, Pass, PipelineMeshState, PointLight, Projection, Renderer, RendererData, Resource, ResourceType, ResourceUsage, Shader, SimpleCamera, SubpassPipelineState, Vertex
 };
 
 use winit::application::ApplicationHandler;
@@ -124,76 +124,60 @@ impl ApplicationHandler for App {
 }
 
 fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererData) {
+    let depth_clear = vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+        },
+    };
+
+    let color_clear = vk::ClearValue {
+        color: vk::ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0],
+        },
+    };
+
     let mut frame_graph = FrameGraph::new("Frame Graph");
     frame_graph.add_pass(
         Pass::new("Main Draw", BindPoint::Graphics)
             .create_resource(
                 Resource::new(
                     "Scene Depth",
-                    Some(vk::ClearValue {
-                        depth_stencil: vk::ClearDepthStencilValue {
-                            depth: 1.0,
-                            stencil: 0,
-                        },
-                    }),
-                    ResourceType::Attachment {
+                    Some(depth_clear),
+                    ResourceType::Attachment(Attachment {
                         width: AttachmentSize::Relative(1.0),
                         height: AttachmentSize::Relative(1.0),
                         format: get_depth_format(&instance, &data).unwrap(),
-                        layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                         samples: data.msaa_samples,
-                        tiling: vk::ImageTiling::OPTIMAL,
-                        usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        view_type: vk::ImageViewType::TYPE_2D,
-                        layer_count: 1,
-                        aspects: vk::ImageAspectFlags::DEPTH,
-                    }
+                        ..Attachment::depth()
+                    })
                 ),
                 ResourceUsage::Write,
             )
             .create_resource(
                 Resource::new(
                     "Scene Color",
-                    Some(vk::ClearValue {
-                        color: vk::ClearColorValue {
-                            float32: [0.0, 0.0, 0.0, 1.0],
-                        },
-                    }),
-                    ResourceType::Attachment {
+                    Some(color_clear),
+                    ResourceType::Attachment(Attachment {
                         width: AttachmentSize::Relative(1.0),
                         height: AttachmentSize::Relative(1.0),
                         format: data.swapchain_format,
-                        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                         samples: data.msaa_samples,
-                        tiling: vk::ImageTiling::OPTIMAL,
-                        usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        view_type: vk::ImageViewType::TYPE_2D,
-                        layer_count: 1,
-                        aspects: vk::ImageAspectFlags::COLOR,
-                    }
+                        ..Attachment::color()
+                    })
                 ),
             ResourceUsage::Write,
             )
             .create_resource(
                 Resource::new(
                     "Swapchain output",
-                    Some(vk::ClearValue {
-                        color: vk::ClearColorValue {
-                            float32: [0.0, 0.0, 0.0, 1.0],
-                        },
-                    }),
-                    ResourceType::Attachment {
+                    Some(color_clear),
+                    ResourceType::Attachment(Attachment {
                         width: AttachmentSize::Relative(1.0),
                         height: AttachmentSize::Relative(1.0),
                         format: data.swapchain_format,
-                        layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                        samples: vk::SampleCountFlags::TYPE_1,
-                        tiling: vk::ImageTiling::OPTIMAL,
-                        usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        view_type: vk::ImageViewType::TYPE_2D,
-                        layer_count: 1,
-                        aspects: vk::ImageAspectFlags::COLOR,
-                    }
+                        ..Attachment::present()
+                    })
                 ), 
                 ResourceUsage::Write,
             )

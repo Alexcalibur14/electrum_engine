@@ -235,8 +235,8 @@ impl FrameGraph {
             let resource = self.resources.iter().find(|r| r.name == name).unwrap();
             match resource.resource.clone() {
                 ResourceType::Attachment { .. } => return resource.clone(),
-                ResourceType::Transitioned { attachment, .. } => name = attachment.clone(),
-                ResourceType::Texture { attachment, .. } => name = attachment.clone(),
+                ResourceType::Transitioned(Transitioned { attachment, .. }) => name = attachment.clone(),
+                ResourceType::Texture(Texture { attachment, .. }) => name = attachment.clone(),
             }
         }
     }
@@ -288,7 +288,7 @@ impl FrameGraph {
                 }
 
                 match resource.resource.clone() {
-                    ResourceType::Attachment { samples, .. } => {
+                    ResourceType::Attachment(Attachment { samples, .. }) => {
                         if usage == ResourceUsage::Read {
                             continue;
                         }
@@ -296,23 +296,23 @@ impl FrameGraph {
                             pass.samples = samples;
                         }
                     },
-                    ResourceType::Transitioned { attachment, .. } => {
+                    ResourceType::Transitioned(Transitioned { attachment, .. }) => {
                         let root = self.get_attachment(&attachment);
                         if usage == ResourceUsage::Read {
                             continue;
                         }
-                        if let ResourceType::Attachment { samples, .. } = root.resource {
+                        if let ResourceType::Attachment(Attachment { samples, .. }) = root.resource {
                             if samples > pass.samples {
                                 pass.samples = samples;
                             }
                         }
                     },
-                    ResourceType::Texture { attachment, .. } => {
+                    ResourceType::Texture(Texture { attachment, .. }) => {
                         let root = self.get_attachment(&attachment);
                         if usage == ResourceUsage::Read {
                             continue;
                         }
-                        if let ResourceType::Attachment { samples, .. } = root.resource {
+                        if let ResourceType::Attachment(Attachment { samples, .. }) = root.resource {
                             if samples > pass.samples {
                                 pass.samples = samples;
                             }
@@ -349,12 +349,12 @@ impl FrameGraph {
                 let resource = self.resources.iter().find(|r| r.name == resource_ref.name).unwrap();
 
                 let mut layout = match self.resources.iter().find(|r| r.name == resource_ref.name).unwrap().resource {
-                    ResourceType::Attachment { layout, .. } => layout,
-                    ResourceType::Transitioned { layout, .. } => layout,
-                    ResourceType::Texture { layout, .. } => layout,
+                    ResourceType::Attachment(Attachment { layout, .. }) => layout,
+                    ResourceType::Transitioned(Transitioned { layout, .. }) => layout,
+                    ResourceType::Texture(Texture { layout, .. }) => layout,
                 };
 
-                let samples = if let ResourceType::Attachment { samples, .. } = self.get_attachment(&resource_ref.name).resource {
+                let samples = if let ResourceType::Attachment(Attachment { samples, .. }) = self.get_attachment(&resource_ref.name).resource {
                     samples
                 } else {
                     vk::SampleCountFlags::TYPE_1
@@ -501,7 +501,7 @@ impl Resource {
 
     pub fn generate_description(&mut self, resources: HashMap<String, Resource>) {
         match &self.resource {
-            ResourceType::Attachment {
+            ResourceType::Attachment(Attachment{
                 width: _,
                 height: _,
                 layout,
@@ -512,7 +512,7 @@ impl Resource {
                 view_type: _,
                 layer_count: _,
                 aspects: _,
-            } => {
+            }) => {
                 self.description = Some(vk::AttachmentDescription::default()
                     .format(*format)
                     .samples(*samples)
@@ -523,13 +523,13 @@ impl Resource {
                     .initial_layout(vk::ImageLayout::UNDEFINED)
                     .final_layout(*layout));
             },
-            ResourceType::Transitioned {
+            ResourceType::Transitioned(Transitioned {
                 attachment,
                 layout,
                 format,
                 aspects: _,
                 view_type: _,
-            } => {
+            }) => {
                 let attachment = resources.get(attachment).unwrap();
 
                 self.description = Some(vk::AttachmentDescription::default()
@@ -548,7 +548,7 @@ impl Resource {
 
     pub fn create_image(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         match &self.resource {
-            ResourceType::Attachment {
+            ResourceType::Attachment(Attachment {
                 width,
                 height,
                 layout: _,
@@ -559,7 +559,7 @@ impl Resource {
                 view_type,
                 layer_count,
                 aspects,
-            } => {
+            }) => {
                 let width = match width {
                     AttachmentSize::Absolute(w) => *w,
                     AttachmentSize::Relative(w) => (data.swapchain_extent.width as f32 * w) as u32,
@@ -601,7 +601,7 @@ impl Resource {
 
     pub fn destroy(&self, device: &Device) {
         match &self.resource {
-            ResourceType::Attachment {
+            ResourceType::Attachment(Attachment {
                 width: _,
                 height: _,
                 layout: _,
@@ -612,7 +612,7 @@ impl Resource {
                 view_type: _,
                 layer_count: _,
                 aspects: _,
-            } => {
+            }) => {
                 self.image.as_ref().unwrap().destroy(device);
             },
             a => panic!("Resource type {:?} not supported", a),
@@ -622,40 +622,29 @@ impl Resource {
 
 #[derive(Debug, Clone)]
 pub enum ResourceType {
-    Attachment {
-        width: AttachmentSize,
-        height: AttachmentSize,
-
-        layout: vk::ImageLayout,
-        samples: vk::SampleCountFlags,
-        format: vk::Format,
-        tiling: vk::ImageTiling,
-        usage: vk::ImageUsageFlags,
-        view_type: vk::ImageViewType,
-        layer_count: u32,
-        aspects: vk::ImageAspectFlags,
-    },
-    Transitioned {
-        attachment: String,
-        
-        layout: vk::ImageLayout,
-        format: vk::Format,
-        aspects: vk::ImageAspectFlags,
-        view_type: vk::ImageViewType,
-    },
-    Texture {
-        attachment: String,
-
-        layout: vk::ImageLayout,
-        format: vk::Format,
-        aspects: vk::ImageAspectFlags,
-        view_type: vk::ImageViewType,
-    },
+    Attachment(Attachment),
+    Transitioned(Transitioned),
+    Texture(Texture),
 }
 
-impl ResourceType {
+#[derive(Debug, Clone, Copy)]
+pub struct Attachment {
+    pub width: AttachmentSize,
+    pub height: AttachmentSize,
+
+    pub layout: vk::ImageLayout,
+    pub samples: vk::SampleCountFlags,
+    pub format: vk::Format,
+    pub tiling: vk::ImageTiling,
+    pub usage: vk::ImageUsageFlags,
+    pub view_type: vk::ImageViewType,
+    pub layer_count: u32,
+    pub aspects: vk::ImageAspectFlags,
+}
+
+impl Attachment {
     pub fn color() -> Self {
-        ResourceType::Attachment {
+        Attachment{
             width: AttachmentSize::default(),
             height: AttachmentSize::default(),
             layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -670,7 +659,7 @@ impl ResourceType {
     }
 
     pub fn depth() -> Self {
-        ResourceType::Attachment {
+        Attachment {
             width: AttachmentSize::default(),
             height: AttachmentSize::default(),
             layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -685,7 +674,7 @@ impl ResourceType {
     }
 
     pub fn present() -> Self {
-        ResourceType::Attachment {
+        Attachment {
             width: AttachmentSize::default(),
             height: AttachmentSize::default(),
             layout: vk::ImageLayout::PRESENT_SRC_KHR,
@@ -698,6 +687,26 @@ impl ResourceType {
             aspects: vk::ImageAspectFlags::COLOR,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Transitioned {
+    pub attachment: String,
+
+    pub layout: vk::ImageLayout,
+    pub format: vk::Format,
+    pub aspects: vk::ImageAspectFlags,
+    pub view_type: vk::ImageViewType,
+}
+
+#[derive(Debug, Clone)]
+pub struct Texture {
+    pub attachment: String,
+
+    pub layout: vk::ImageLayout,
+    pub format: vk::Format,
+    pub aspects: vk::ImageAspectFlags,
+    pub view_type: vk::ImageViewType,
 }
 
 #[derive(Debug, Clone)]
