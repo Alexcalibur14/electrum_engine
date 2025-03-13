@@ -277,7 +277,7 @@ impl FrameGraph {
                     Some(previous_use) => {
                         let difference = pass_id - previous_use;
                         if difference > 1 {
-                            for i in previous_use..pass_id {
+                            for i in (previous_use + 1)..pass_id {
                                 preserves[i].push(resource_id as u32);
                             }
                         }
