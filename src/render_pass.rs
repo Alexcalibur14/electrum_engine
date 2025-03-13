@@ -264,10 +264,28 @@ impl FrameGraph {
 
         let mut passes = self.passes.clone();
 
-        for pass in passes.iter_mut() {
+        let mut previous_uses = vec![None; self.resources.len()];
+        let mut preserves = vec![vec![]; passes.len()];
+
+        for (pass_id, pass) in passes.iter_mut().enumerate() {
             for resource_ref in pass.resource_refs.iter() {
                 let usage = resource_ref.usage;
                 let resource = self.resources.iter().find(|r| r.name == resource_ref.name).unwrap();
+
+                let resource_id = self.resources.iter().position(|r| r.name == resource_ref.name).unwrap();
+                match previous_uses[resource_id] {
+                    Some(previous_use) => {
+                        let difference = pass_id - previous_use;
+                        if difference > 1 {
+                            for i in previous_use..pass_id {
+                                preserves[i].push(resource_id as u32);
+                            }
+                        }
+                    },
+                    None => {
+                        previous_uses[resource_id] = Some(pass_id);
+                    },
+                }
 
                 match resource.resource.clone() {
                     ResourceType::Attachment { samples, .. } => {
@@ -368,6 +386,8 @@ impl FrameGraph {
                     },
                 }
             }
+
+            preserves[subpass_id].iter().for_each(|p| subpass.preserve_attachments.push(*p));
 
             subpass_data.push(subpass);
             let mut render_data = SubpassRenderData::new(
