@@ -41,7 +41,7 @@ struct App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window = event_loop
-            .create_window(Window::default_attributes())
+            .create_window(Window::default_attributes().with_title("Renderer test"))
             .unwrap();
 
         let size = window.inner_size();
