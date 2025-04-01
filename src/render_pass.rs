@@ -798,6 +798,7 @@ pub struct RenderPass {
     pub width: u32,
     pub height: u32,
     attachments: Vec<Resource>,
+    attachment_descriptors: Vec<usize>,
 }
 
 impl RenderPass {
@@ -823,9 +824,12 @@ impl RenderPass {
             dependencies,
             subpass_data,
             swapchain_output,
-            attachments,
+
             width: 0,
             height: 0,
+
+            attachments,
+            attachment_descriptors: vec![],
         }
     }
 
@@ -838,17 +842,18 @@ impl RenderPass {
         self.attachments.iter_mut().for_each(|attachment| attachment.create_image(instance, device, &data));
 
         for descriptor in self.subpass_data.iter() {
-            for reference in descriptor.input_attachments.iter() {
+            for (i, reference) in descriptor.input_attachments.iter().enumerate() {
                 let attachment = self.attachments[reference.attachment as usize].clone();
 
                 let input_descriptor = AttachmentDescriptor::new(instance, device, data, attachment.image.as_ref().unwrap().clone(), &format!("{} Input Attachment", &attachment.name));
-                if let Ok(_) = data.other_descriptors.get(0){
-                    data.other_descriptors[0] = Box::new(input_descriptor);
+                if let Some(index) = self.attachment_descriptors.get(i) {
+                    data.other_descriptors[*index] = Box::new(input_descriptor);
                 }
                 else {
-                    data.other_descriptors.push(
+                    let id = data.other_descriptors.push(
                         Box::new(input_descriptor)
                     );
+                    self.attachment_descriptors.push(id);
                 }
             }
         }
