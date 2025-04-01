@@ -104,7 +104,10 @@ pub struct DescriptorManager {
 
 impl DescriptorManager {
     fn get_descriptors(&self, render_pass: u32, subpass: u32, image_index: usize) -> Vec<vk::DescriptorSet> {
-        let ids = &self.subpasses.iter().find(|(s, _)| *s == render_pass).unwrap().1.iter().find(|(s, _)| *s == subpass).unwrap().1;
+        if self.subpasses.is_empty() {
+            return vec![];
+        }
+        let ids = &self.subpasses.iter().find(|(s, _)| *s == render_pass).expect("Could not find renderpass").1.iter().find(|(s, _)| *s == subpass).unwrap().1;
         let mut descriptors = Vec::with_capacity(ids.len());
         for id in ids {
             descriptors.push(self.descriptors[image_index][*id]);

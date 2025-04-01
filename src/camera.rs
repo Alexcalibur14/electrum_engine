@@ -5,6 +5,7 @@ use glam::{Mat4, Quat, Vec3};
 use ash::vk;
 use ash::{Device, Instance};
 
+use crate::DescriptorSet;
 use crate::{
     buffer::{create_buffer, BufferWrapper}, DescriptorBuilder, Loadable, RendererData
 };
@@ -18,8 +19,7 @@ pub trait Camera {
     fn inv_proj(&self) -> Mat4;
 
     fn get_data(&self) -> CameraData;
-    fn get_descriptor_sets(&self) -> Vec<vk::DescriptorSet>;
-    fn get_set_layout(&self) -> vk::DescriptorSetLayout;
+    fn get_descriptor(&self) -> CameraDescriptor;
 
     /// Calculate the view matrix and update the view buffer with the new matrix
     fn calculate_view(&mut self, device: &Device, image_index: usize);
@@ -37,6 +37,52 @@ pub trait Camera {
 
     fn loaded(&self) -> bool;
 }
+
+#[derive(Debug, Clone)]
+pub struct CameraDescriptor {
+    name: String,
+
+    descriptor_sets: Vec<vk::DescriptorSet>,
+    set_layout: vk::DescriptorSetLayout,
+
+    buffers: Vec<BufferWrapper>,
+    loaded: bool,
+}
+
+impl DescriptorSet for CameraDescriptor {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
+        self.descriptor_sets.clone()
+    }
+
+    fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
+        self.set_layout
+    }
+
+    fn buffers(&mut self) -> Vec<BufferWrapper> {
+        self.buffers.clone()
+    }
+
+    fn images(&mut self) -> Vec<crate::Image> {
+        todo!()
+    }
+
+    fn destroy(&self, device: &Device) {
+        self.buffers.iter().for_each(|b| b.destroy(device));
+    }
+
+    fn clone_dyn(&self) -> Box<dyn DescriptorSet> {
+        Box::new(self.clone())
+    }
+
+    fn loaded(&self) -> bool {
+        self.loaded
+    }
+}
+
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -59,17 +105,14 @@ impl Loadable for Box<dyn Camera> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SimpleCamera {
     pub position: Vec3,
     pub rotation: Vec3,
     pub view: Mat4,
     pub projection: Projection,
 
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    pub descriptor_sets: Vec<vk::DescriptorSet>,
-    pub buffers: Vec<BufferWrapper>,
-
+    descriptor: CameraDescriptor,
     loaded: bool,
 }
 
@@ -122,13 +165,21 @@ impl SimpleCamera {
                 .offset(0)
                 .range(size_of::<CameraData>() as u64);
 
-            let (descriptor_set, new_set_layout) = DescriptorBuilder::new()
+            let (descriptor_set, new_set_layout) = DescriptorBuilder::new("Camera Data")
                 .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+                .build(instance, device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
             descriptor_sets.push(descriptor_set);
             descriptor_set_layout = new_set_layout;
         }
+
+        let descriptor = CameraDescriptor {
+            name: "Camera".into(),
+            descriptor_sets,
+            set_layout: descriptor_set_layout,
+            buffers,
+            loaded: true,
+        };
 
         SimpleCamera {
             position,
@@ -136,9 +187,7 @@ impl SimpleCamera {
             view,
             projection,
 
-            descriptor_set_layout,
-            descriptor_sets,
-            buffers,
+            descriptor,
 
             loaded: true,
         }
@@ -187,7 +236,7 @@ impl Camera for SimpleCamera {
             proj: self.proj(),
         };
 
-        let buffer = self.buffers[image_index];
+        let buffer = self.descriptor.buffers[image_index];
 
         buffer.copy_data_into_buffer(device, &camera_data);
     }
@@ -202,7 +251,7 @@ impl Camera for SimpleCamera {
             proj: self.proj(),
         };
 
-        for buffer in self.buffers.clone() {
+        for buffer in self.descriptor.buffers.clone() {
             buffer.copy_data_into_buffer(device, &camera_data);
         }
     }
@@ -212,7 +261,7 @@ impl Camera for SimpleCamera {
     }
 
     fn destroy(&self, device: &Device) {
-        self.buffers.iter().for_each(|b| b.destroy(device));
+        self.descriptor.destroy(device);
     }
 
     fn clone_dyn(&self) -> Box<dyn Camera> {
@@ -228,12 +277,8 @@ impl Camera for SimpleCamera {
         }
     }
 
-    fn get_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
-        self.descriptor_sets.clone()
-    }
-
-    fn get_set_layout(&self) -> vk::DescriptorSetLayout {
-        self.descriptor_set_layout
+    fn get_descriptor(&self) -> CameraDescriptor {
+        self.descriptor.clone()
     }
     
     fn loaded(&self) -> bool {

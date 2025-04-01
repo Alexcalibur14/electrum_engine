@@ -91,9 +91,9 @@ impl LightGroup {
                 .offset(0)
                 .range((size_of::<PointLight>() * capacity) as u64);
 
-            let (set, set_layout) = DescriptorBuilder::new()
+            let (set, set_layout) = DescriptorBuilder::new("Light Group")
                 .bind_buffer(0, capacity as u32, &[buffer_info], vk::DescriptorType::STORAGE_BUFFER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+                .build(instance, device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
             descriptor_sets.push(set);
             descriptor_set_layout = set_layout;
@@ -141,12 +141,20 @@ impl LightGroup {
 }
 
 impl DescriptorSet for LightGroup {
+    fn name(&self) -> &str {
+        "Light Group"
+    }
+
     fn descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
         self.descriptor_sets.clone()
     }
 
     fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
         self.descriptor_set_layout
+    }
+
+    fn images(&mut self) -> Vec<crate::Image> {
+        vec![]
     }
 
     fn buffers(&mut self) -> Vec<BufferWrapper> {

@@ -41,7 +41,7 @@ struct App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window = event_loop
-            .create_window(Window::default_attributes())
+            .create_window(Window::default_attributes().with_title("Renderer Test"))
             .unwrap();
 
         let size = window.inner_size();
@@ -91,13 +91,13 @@ impl ApplicationHandler for App {
                     self.minimized = false;
                     renderer.resized = true;
 
-                    
                     let aspect = size.width as f32 / size.height as f32;
 
                     renderer.data
                         .cameras
                         .iter_mut()
                         .for_each(|c| c.set_aspect(aspect));
+
                     renderer.data
                         .cameras
                         .iter_mut()
@@ -148,7 +148,6 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
                         width: AttachmentSize::Relative(1.0),
                         height: AttachmentSize::Relative(1.0),
                         format: get_depth_format(&instance, &data).unwrap(),
-                        samples: data.msaa_samples,
                         ..Attachment::depth()
                     })
                 ),
@@ -162,23 +161,30 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
                         width: AttachmentSize::Relative(1.0),
                         height: AttachmentSize::Relative(1.0),
                         format: data.swapchain_format,
-                        samples: data.msaa_samples,
                         ..Attachment::color()
                     })
                 ),
             ResourceUsage::Write,
             )
+            .build(),
+        
+    )
+    .add_pass(
+        Pass::new("Output", BindPoint::Graphics)
+            .add_resource("Scene Color", ResourceUsage::Read)
             .create_resource(
                 Resource::new(
-                    "Swapchain output",
+                    "Swapchain Output",
                     Some(color_clear),
-                    ResourceType::Attachment(Attachment {
-                        width: AttachmentSize::Relative(1.0),
-                        height: AttachmentSize::Relative(1.0),
-                        format: data.swapchain_format,
-                        ..Attachment::present()
-                    })
-                ), 
+                    ResourceType::Attachment(
+                        Attachment {
+                            width: AttachmentSize::Relative(1.0),
+                            height: AttachmentSize::Relative(1.0),
+                            format: data.swapchain_format,
+                            ..Attachment::present()
+                        }
+                    )
+                ),
                 ResourceUsage::Write,
             )
             .build(),
@@ -201,7 +207,12 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
     );
     camera.look_at(vec3(0.0, 0.0, 0.0), Vec3::NEG_Y);
 
-    let camera_id = data.cameras.push(Box::new(camera.clone()));
+    camera.calculate_proj(&device);
+    for i in 0..data.swapchain_images.len() {
+        camera.calculate_view(device, i);
+    }
+
+    let _ = data.other_descriptors.push(Box::new(camera.get_descriptor()));
 
     let red_light = PointLight::new(vec3(3.0, 3.0, 0.0), vec3(1.0, 0.0, 0.0), 5.0);
     let red_light_id = data.point_light_data.push(red_light);
@@ -283,7 +294,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         image_2077_id,
         position,
         vec![(0, vec![(0, vec![0, 1])])],
-        "Quad".to_string(),
+        "Plane".to_string(),
     );
 
     let plane_id = data.objects.push(plane);
@@ -311,7 +322,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
                 extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
             }
         ],
-        data.msaa_samples,
+        vk::SampleCountFlags::TYPE_1,
         true,
         true,
         vec![
@@ -350,13 +361,96 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         lit_state,
         subpass_state,
         mesh_state,
-        vec![camera.get_set_layout(), light_group.get_set_layout()],
-        vec![0, 1],
+        vec![1, 2],
         data.render_passes[0].render_pass,
-        0
+        0,
+        "Draw",
     );
     let mat_id = data.materials.push(Box::new(material));
     
-    data.render_passes[0].subpasses[0].camera = camera_id;
     data.render_passes[0].subpasses[0].objects = vec![(plane_id, mat_id), (monkey_id, mat_id)];
+
+
+    let post_process_shader = GraphicsShader::builder(instance, device, "Post Process".to_string())
+        .load_vertex("res\\shaders\\post_process.vert.spv")
+        .load_fragment("res\\shaders\\post_process.frag.spv")
+        .build();
+
+    let mut post_process_shader_state = post_process_shader.state();
+    post_process_shader_state.rasterisation.cull_mode = vk::CullModeFlags::NONE;
+    data.shaders.push(Box::new(post_process_shader));
+
+    let full_quad = Mesh::new_quad(
+        instance,
+        device,
+        data,
+        [
+            vec3(-1.0, -1.0, 0.0),
+            vec3(1.0, -1.0, 0.0),
+            vec3(-1.0, 1.0, 0.0),
+            vec3(1.0, 1.0, 0.0),
+        ],
+        vec3(0.0, 0.0, 0.0),
+        image_2077_id,
+        Mat4::IDENTITY,
+        vec![],
+        "Quad".to_string(),
+    );
+
+    let full_quad_id = data.objects.push(full_quad);
+
+    let full_quad_state = PipelineMeshState::new(
+        PCTVertex::binding_descriptions(),
+        PCTVertex::attribute_descriptions(),
+        false,
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+    );
+
+    let post_process_state = SubpassPipelineState::new(
+        vec![
+            vk::Viewport::default()
+                .x(0.0)
+                .y(0.0)
+                .width(data.swapchain_extent.width as f32)
+                .height(data.swapchain_extent.height as f32)
+                .min_depth(0.0)
+                .max_depth(1.0),
+        ],
+        vec![
+            vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D { width: data.swapchain_extent.width, height: data.swapchain_extent.height },
+            }
+        ],
+        vk::SampleCountFlags::TYPE_1,
+        true,
+        true,
+        vec![
+            vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+                .blend_enable(false)
+        ],
+        false,
+        vk::LogicOp::COPY,
+        [0.0, 0.0, 0.0, 0.0],
+    );
+
+    let full_quad_material = BasicMaterial::new(
+        instance,
+        device,
+        data,
+        vec![],
+        vec![],
+        post_process_shader_state,
+        post_process_state,
+        full_quad_state,
+        vec![0],
+        data.render_passes[0].render_pass,
+        1,
+        "Post process"
+    );
+
+    let full_quad_mat_id = data.materials.push(Box::new(full_quad_material));
+
+    data.render_passes[0].subpasses[1].objects = vec![(full_quad_id, full_quad_mat_id)];
 }

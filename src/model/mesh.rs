@@ -87,13 +87,13 @@ impl Mesh {
                 .image_view(texture.view)
                 .sampler(sampler);
 
-            let (model_set, _) = DescriptorBuilder::new()
+            let (model_set, _) = DescriptorBuilder::new(&format!("{} Model", name))
                 .bind_buffer(0, 1, &[buffer_info], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+                .build(instance, device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
-            let (image_set, _) = DescriptorBuilder::new()
+            let (image_set, _) = DescriptorBuilder::new(&format!("{} Image", name))
                 .bind_image(0, 1, &[image_info], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
-                .build(device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+                .build(instance, device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
 
             descriptor_sets.push(vec![model_set, image_set]);
         }

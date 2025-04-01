@@ -2,15 +2,17 @@ use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, marker::Pha
 
 use thiserror::Error;
 
-use ash::vk;
+use ash::{vk, Instance};
 use ash::Device;
 
-use crate::{BufferWrapper, Loadable};
+use crate::{set_object_name, BufferWrapper, Image, Loadable};
 
-pub trait DescriptorSet{
+pub trait DescriptorSet {
+    fn name(&self) -> &str;
     fn descriptor_sets(&self) -> Vec<vk::DescriptorSet>;
     fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout;
     fn buffers(&mut self) -> Vec<BufferWrapper>;
+    fn images(&mut self) -> Vec<Image>;
 
     fn destroy(&self, device: &Device);
 
@@ -226,14 +228,16 @@ impl Default for DescriptorLayoutCache {
 
 #[derive(Debug, Clone)]
 pub struct DescriptorBuilder<'a> {
+    name: String,
     writes: Vec<vk::WriteDescriptorSet<'a>>,
     bindings: Vec<vk::DescriptorSetLayoutBinding<'a>>,
     phantom: PhantomData<&'a u8>,
 }
 
 impl<'a> DescriptorBuilder<'a> {
-    pub fn new() -> Self {
+    pub fn new(name: &str) -> Self {
         DescriptorBuilder {
+            name: name.to_string(),
             writes: vec![],
             bindings: vec![],
             phantom: PhantomData,
@@ -278,9 +282,11 @@ impl<'a> DescriptorBuilder<'a> {
         self
     }
 
-    pub fn build(&'a mut self, device: &Device, layout_cache: &mut DescriptorLayoutCache, allocator: &mut DescriptorAllocator) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
+    pub fn build(&'a mut self, instance: &Instance, device: &Device, layout_cache: &mut DescriptorLayoutCache, allocator: &mut DescriptorAllocator) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
         let layout = layout_cache.create_descriptor_set_layout(device, &self.bindings);
+        set_object_name(instance, device, &(self.name.clone() + " Descriptor Set Layout"), layout).unwrap();
         let set = allocator.allocate(device, &layout)?;
+        set_object_name(instance, device, &(self.name.clone() + " Descriptor Set"), set).unwrap();
 
         for write in self.writes.iter_mut() {
             write.dst_set = set;
@@ -294,6 +300,6 @@ impl<'a> DescriptorBuilder<'a> {
 
 impl<'a> Default for DescriptorBuilder<'a> {
     fn default() -> Self {
-        Self::new()
+        Self::new("")
     }
 }

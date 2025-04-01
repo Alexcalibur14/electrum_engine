@@ -449,13 +449,14 @@ impl Loadable for Box<dyn Material> {
 
 #[derive(Debug, Clone)]
 pub struct BasicMaterial {
+    pub name: String,
+
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
     pub push_constant_ranges: Vec<vk::PushConstantRange>,
 
     pub descriptor_set_layout: Vec<vk::DescriptorSetLayout>,
-    pub other_set_layouts: Vec<vk::DescriptorSetLayout>,
 
     pub mesh_state: PipelineMeshState,
     pub shader_state: PipelineShaderState,
@@ -478,10 +479,10 @@ impl BasicMaterial {
         shader_state: PipelineShaderState,
         subpass_state: SubpassPipelineState,
         mesh_state: PipelineMeshState,
-        other_layouts: Vec<vk::DescriptorSetLayout>,
         scene_descriptors: Vec<usize>,
         render_pass: vk::RenderPass,
         subpass: u32,
+        name: &str,
     ) -> Self {
         let mut push_constant_ranges = vec![];
         let mut offset = 0u32;
@@ -501,7 +502,9 @@ impl BasicMaterial {
         }
 
         let mut set_layouts = descriptor_set_layout.clone();
-        set_layouts.append(&mut other_layouts.clone());
+        for descriptor in &scene_descriptors {
+            set_layouts.push(data.other_descriptors[*descriptor].descriptor_set_layout());
+        }
 
         let layout_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&set_layouts)
@@ -512,6 +515,8 @@ impl BasicMaterial {
         let pipeline = create_pipeline_from_states(instance, device, pipeline_layout, &subpass_state, &shader_state, &mesh_state, subpass, render_pass, "").unwrap();
 
         BasicMaterial {
+            name: name.into(),
+
             pipeline,
             pipeline_layout,
 
@@ -521,8 +526,7 @@ impl BasicMaterial {
             shader_state: shader_state.clone(),
             subpass_state: subpass_state.clone(),
 
-            descriptor_set_layout,
-            other_set_layouts: other_layouts.clone(),
+            descriptor_set_layout: set_layouts,
             scene_descriptors,
 
             subpass,
@@ -550,14 +554,16 @@ impl Material for BasicMaterial {
                 self.pipeline,
             );
 
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &descriptor_set,
-                &[],
-            );
+            if !descriptor_set.is_empty() {
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &descriptor_set,
+                    &[],
+                );
+            }
 
             let mut set = descriptor_set.len() as u32;
 
@@ -599,9 +605,7 @@ impl Material for BasicMaterial {
         self.subpass_state.viewports[0].height = data.swapchain_extent.height as f32;
         self.subpass_state.scissors[0].extent = data.swapchain_extent;
 
-        let mut set_layouts = self.descriptor_set_layout.clone();
-
-        set_layouts.append(&mut self.other_set_layouts.clone());
+        let set_layouts = self.descriptor_set_layout.clone();
 
         let layout_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&set_layouts)

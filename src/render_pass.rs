@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::ptr;
 
 use anyhow::Result;
+use std::hash::Hash;
 
 use ash::vk;
 use ash::{Device, Instance};
 use thiserror::Error;
 
-use crate::{begin_command_label, end_command_label, get_c_ptr_slice, set_object_name, Image, Mesh, MipLevels, RenderStats, RendererData};
+use crate::{begin_command_label, end_command_label, get_c_ptr_slice, set_object_name, DescriptorBuilder, DescriptorSet, Image, Mesh, MipLevels, RenderStats, RendererData};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttachmentSize {
@@ -56,50 +57,23 @@ impl SubpassDescriptionData {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachmentUse {
-    Color,
-    Depth,
-    DepthStencil,
-}
-
-impl AttachmentUse {
-    pub fn get_usage_flags(&self) -> vk::ImageUsageFlags {
-        match self {
-            AttachmentUse::Color => vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            AttachmentUse::Depth => vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            AttachmentUse::DepthStencil => vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-        }
-    }
-
-    pub fn get_aspect_flags(&self) -> vk::ImageAspectFlags {
-        match self {
-            AttachmentUse::Color => vk::ImageAspectFlags::COLOR,
-            AttachmentUse::Depth => vk::ImageAspectFlags::DEPTH,
-            AttachmentUse::DepthStencil => vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
-        }
-    }
-}
-
 
 #[derive(Debug, Clone)]
 pub struct SubpassRenderData {
     pub render_pass_id: u32,
     pub subpass_id: u32,
     pub objects: Vec<(usize, usize)>,
-    pub camera: usize,
 
     pub command_buffers: Vec<vk::CommandBuffer>,
     pub name: String,
 }
 
 impl SubpassRenderData {
-    pub fn new(render_pass_id: u32, id: u32, objects: Vec<(usize, usize)>, camera: usize, name: &str) -> Self {
+    pub fn new(render_pass_id: u32, id: u32, objects: Vec<(usize, usize)>, name: &str) -> Self {
         SubpassRenderData {
             render_pass_id,
             subpass_id: id,
             objects,
-            camera,
             command_buffers: vec![],
             name: name.into(),
         }
@@ -139,12 +113,7 @@ impl SubpassRenderData {
 
         unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
 
-        let camera = data.cameras.get_loaded(self.camera).unwrap();
-        let mut other_descriptors = vec![
-            camera.get_descriptor_sets()[image_index],
-        ];
-
-        other_descriptors.append(&mut data.other_descriptors.iter().map(|d| d.descriptor_sets()[image_index]).collect::<Vec<_>>());
+        let other_descriptors = &mut data.other_descriptors.iter().map(|d| d.descriptor_sets()[image_index]).collect::<Vec<_>>();
 
         begin_command_label(instance, device, command_buffer, &self.name, [1.0, 1.0, 0.0, 1.0]);
 
@@ -189,9 +158,6 @@ impl SubpassRenderData {
         stats: &RenderStats,
         image_index: usize,
     ) {
-        let camera = data.cameras.get_mut_loaded(self.camera).unwrap();
-        camera.calculate_view(device, image_index);
-
         let objects = self
             .objects
             .iter()
@@ -324,11 +290,11 @@ impl FrameGraph {
 
         self.passes = passes;
 
-        let name = "Render Pass";
+        let name = &self.name;
         let mut subpasses = vec![];
         let mut subpass_data = vec![];
         let dependencies = vec![];
-        let attachments = self.resources.clone();
+        let mut attachments = self.resources.clone();
         let swapchain_output = true;
 
         for (subpass_id, pass) in self.passes.iter().enumerate() {
@@ -346,26 +312,29 @@ impl FrameGraph {
             };
 
             for resource_ref in &pass.resource_refs {
-                let resource = self.resources.iter().find(|r| r.name == resource_ref.name).unwrap();
+                let resource_id = self.resources.iter().position(|r| r.name == resource_ref.name).unwrap();
+                let resource = attachments.iter_mut().find(|r| r.name == resource_ref.name).unwrap();
 
-                let mut layout = match self.resources.iter().find(|r| r.name == resource_ref.name).unwrap().resource {
+                let mut layout = match resource.resource {
                     ResourceType::Attachment(Attachment { layout, .. }) => layout,
                     ResourceType::Transitioned(Transitioned { layout, .. }) => layout,
                     ResourceType::Texture(Texture { layout, .. }) => layout,
                 };
 
-                let samples = if let ResourceType::Attachment(Attachment { samples, .. }) = self.get_attachment(&resource_ref.name).resource {
-                    samples
+                let samples = if let ResourceType::Attachment(Attachment { samples, .. }) = &self.get_attachment(&resource_ref.name).resource {
+                    *samples
                 } else {
                     vk::SampleCountFlags::TYPE_1
                 };
 
                 if layout == vk::ImageLayout::PRESENT_SRC_KHR {
                     layout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
+                } else if resource_ref.usage == ResourceUsage::Read {
+                    layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
                 }
 
                 let attachment_ref = vk::AttachmentReference::default()
-                    .attachment(attachments.iter().position(|a| a.name == resource.name).unwrap() as u32)
+                    .attachment(resource_id as u32)
                     .layout(layout);
 
                 if is_depth_layout(layout) {
@@ -376,6 +345,9 @@ impl FrameGraph {
                 match resource_ref.usage {
                     ResourceUsage::Read => {
                         subpass.input_attachments.push(attachment_ref);
+                        if let ResourceType::Attachment(attachment) = &mut resource.resource {
+                            attachment.usage |= vk::ImageUsageFlags::INPUT_ATTACHMENT;
+                        }
                     },
                     ResourceUsage::Write => {
                         if samples == pass.samples {
@@ -394,7 +366,6 @@ impl FrameGraph {
                 0,
                 subpass_id as u32,
                 vec![],
-                0,
                 &pass.name,
             );
             render_data.setup_command_buffers(device, data);
@@ -424,6 +395,83 @@ impl FrameGraph {
 pub enum FrameGraphError {
     #[error("Resource {0} not created")]
     ResourceNotCreated(String),
+}
+
+#[derive(Clone)]
+pub struct AttachmentDescriptor {
+    image: Image,
+    descriptor_sets: Vec<vk::DescriptorSet>,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    loaded: bool,
+}
+
+impl AttachmentDescriptor {
+    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, image: Image, name: &str) -> Self {
+        let mut descriptor_sets = vec![];
+        let mut descriptor_set_layout = vk::DescriptorSetLayout::default();
+
+        for _ in 0..data.swapchain_images.len() {
+            let image_info = vk::DescriptorImageInfo::default()
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image_view(image.view)
+                .sampler(vk::Sampler::null());
+        
+            let (descriptor_set, layout) = DescriptorBuilder::new(name)
+                .bind_image(0, 1, &[image_info], vk::DescriptorType::INPUT_ATTACHMENT, vk::ShaderStageFlags::FRAGMENT)
+                .build(instance, device, &mut data.global_layout_cache, &mut data.global_descriptor_pools).unwrap();
+
+            descriptor_sets.push(descriptor_set);
+            descriptor_set_layout = layout;
+        }
+
+        AttachmentDescriptor {
+            image,
+            descriptor_sets,
+            descriptor_set_layout,
+            loaded: true,
+        }
+    }
+}
+
+impl DescriptorSet for AttachmentDescriptor {
+    fn name(&self) -> &str {
+        "Attachment Descriptor"
+    }
+
+    fn descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
+        self.descriptor_sets.clone()
+    }
+
+    fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
+        self.descriptor_set_layout
+    }
+
+    fn buffers(&mut self) -> Vec<crate::BufferWrapper> {
+        vec![]
+    }
+
+    fn images(&mut self) -> Vec<Image> {
+        vec![self.image.clone()]
+    }
+
+    fn destroy(&self, _device: &Device) {
+        
+    }
+
+    fn clone_dyn(&self) -> Box<dyn DescriptorSet> {
+        Box::new(self.clone())
+    }
+
+    fn loaded(&self) -> bool {
+        self.loaded
+    }
+}
+
+impl Hash for AttachmentDescriptor {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.descriptor_sets.hash(state);
+        self.descriptor_set_layout.hash(state);
+    }
 }
 
 #[derive(Clone)]
@@ -789,6 +837,22 @@ impl RenderPass {
         self.attachments.iter_mut().for_each(|attachment| attachment.generate_description(hashmap.clone()));
         self.attachments.iter_mut().for_each(|attachment| attachment.create_image(instance, device, &data));
 
+        for descriptor in self.subpass_data.iter() {
+            for reference in descriptor.input_attachments.iter() {
+                let attachment = self.attachments[reference.attachment as usize].clone();
+
+                let input_descriptor = AttachmentDescriptor::new(instance, device, data, attachment.image.as_ref().unwrap().clone(), &format!("{} Input Attachment", &attachment.name));
+                if let Ok(_) = data.other_descriptors.get(0){
+                    data.other_descriptors[0] = Box::new(input_descriptor);
+                }
+                else {
+                    data.other_descriptors.push(
+                        Box::new(input_descriptor)
+                    );
+                }
+            }
+        }
+
         let attachment_descriptions = self.attachments.iter().map(|attachment| attachment.description.unwrap()).collect::<Vec<vk::AttachmentDescription>>();
 
         self.width = self.attachments.iter().map(|a| a.width ).max().unwrap();
@@ -812,7 +876,7 @@ impl RenderPass {
         set_object_name(instance, device, &format!("{} Render Pass", self.name), render_pass).unwrap();
 
         // the last attachment must be the swapchain image
-        let attachment_images = if self.swapchain_output{
+        let attachment_images = if self.swapchain_output {
             self.attachments.iter().map(|a| a.view.unwrap()).take(self.attachments.len() -1).collect::<Vec<_>>()
         } else {
             self.attachments.iter().map(|a| a.view.unwrap()).collect::<Vec<_>>()
@@ -848,6 +912,49 @@ impl RenderPass {
         self.subpasses.iter_mut().for_each(|s| s.recreate_swapchain(instance, device, data, self.render_pass));
 
         Ok(())
+    }
+
+    pub fn queue_transitions(&self, device: &Device, command_buffer: vk::CommandBuffer) {
+        let transitioned = self.attachments.iter().filter_map(|a| match &a.resource {
+            ResourceType::Transitioned(t) => Some(t),
+            _ => None,
+        }).collect::<Vec<_>>();
+
+        transitioned.iter().for_each(|t| {
+            let attachment = self.attachments.iter().find(|a| a.name == t.attachment).unwrap();
+
+            let old_layout = match attachment.resource {
+                ResourceType::Attachment(Attachment { layout, .. }) => layout,
+                ResourceType::Transitioned(Transitioned { layout, .. }) => layout,
+                ResourceType::Texture(Texture { layout, .. }) => layout,
+            };
+
+            let image_barrier = vk::ImageMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                .old_layout(old_layout)
+                .new_layout(t.layout)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(attachment.image.as_ref().unwrap().image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: t.aspects,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+
+            unsafe { device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_barrier]
+            )};
+        });
     }
 
     pub fn destroy_swapchain(&self, device: &Device, data: &mut RendererData) {
