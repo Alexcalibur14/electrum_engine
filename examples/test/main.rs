@@ -172,6 +172,7 @@ fn setup_renderpass(instance: &Instance, device: &Device, data: &mut RendererDat
     .add_pass(
         Pass::new("Output", BindPoint::Graphics)
             .add_resource("Scene Color", ResourceUsage::Read)
+            .add_resource("Scene Depth", ResourceUsage::Read)
             .create_resource(
                 Resource::new(
                     "Swapchain Output",
@@ -361,7 +362,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         lit_state,
         subpass_state,
         mesh_state,
-        vec![1, 2],
+        vec![2, 3],
         data.render_passes[0].render_pass,
         0,
         "Draw",
@@ -444,7 +445,7 @@ fn pre_load_objects(instance: &Instance, device: &Device, data: &mut RendererDat
         post_process_shader_state,
         post_process_state,
         full_quad_state,
-        vec![0],
+        vec![0, 1],
         data.render_passes[0].render_pass,
         1,
         "Post process"

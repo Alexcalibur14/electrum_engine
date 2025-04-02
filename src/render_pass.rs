@@ -406,7 +406,7 @@ pub struct AttachmentDescriptor {
 }
 
 impl AttachmentDescriptor {
-    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, image: Image, name: &str) -> Self {
+    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, image: Image, sampler: Option<vk::Sampler>, name: &str) -> Self {
         let mut descriptor_sets = vec![];
         let mut descriptor_set_layout = vk::DescriptorSetLayout::default();
 
@@ -414,7 +414,10 @@ impl AttachmentDescriptor {
             let image_info = vk::DescriptorImageInfo::default()
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image_view(image.view)
-                .sampler(vk::Sampler::null());
+                .sampler(match sampler {
+                    Some(s) => s,
+                    None => vk::Sampler::null(),
+                });
         
             let (descriptor_set, layout) = DescriptorBuilder::new(name)
                 .bind_image(0, 1, &[image_info], vk::DescriptorType::INPUT_ATTACHMENT, vk::ShaderStageFlags::FRAGMENT)
@@ -579,7 +582,7 @@ impl Resource {
                 view_type: _,
             }) => {
                 let attachment = resources.get(attachment).unwrap();
-
+                
                 self.description = Some(vk::AttachmentDescription::default()
                     .format(*format)
                     .samples(attachment.description.unwrap().samples)
@@ -841,12 +844,13 @@ impl RenderPass {
         self.attachments.iter_mut().for_each(|attachment| attachment.generate_description(hashmap.clone()));
         self.attachments.iter_mut().for_each(|attachment| attachment.create_image(instance, device, &data));
 
-        for descriptor in self.subpass_data.iter() {
-            for (i, reference) in descriptor.input_attachments.iter().enumerate() {
+        for description in self.subpass_data.iter() {
+            for (i, reference) in description.input_attachments.iter().enumerate() {
                 let attachment = self.attachments[reference.attachment as usize].clone();
 
-                let input_descriptor = AttachmentDescriptor::new(instance, device, data, attachment.image.as_ref().unwrap().clone(), &format!("{} Input Attachment", &attachment.name));
+                let input_descriptor = AttachmentDescriptor::new(instance, device, data, attachment.image.as_ref().unwrap().clone(), None, &format!("{} Input Attachment", &attachment.name));
                 if let Some(index) = self.attachment_descriptors.get(i) {
+                    data.other_descriptors[*index].descriptor_sets().iter().for_each(|d| data.global_descriptor_pools.free_descriptor_sets(device, &[*d]));
                     data.other_descriptors[*index] = Box::new(input_descriptor);
                 }
                 else {

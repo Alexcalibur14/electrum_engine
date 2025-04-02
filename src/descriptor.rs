@@ -54,6 +54,8 @@ pub struct DescriptorAllocator {
     current_pool: Option<vk::DescriptorPool>,
     used_pools: Vec<vk::DescriptorPool>,
     free_pools: Vec<vk::DescriptorPool>,
+
+    descriptors: HashMap<u64, usize>,
 }
 
 impl DescriptorAllocator {
@@ -64,6 +66,7 @@ impl DescriptorAllocator {
             current_pool: None,
             used_pools: vec![],
             free_pools: vec![],
+            descriptors: HashMap::new(),
         }
     }
 
@@ -74,6 +77,7 @@ impl DescriptorAllocator {
             current_pool: None,
             used_pools: vec![],
             free_pools: vec![],
+            descriptors: HashMap::new(),
         }
     }
 
@@ -94,7 +98,7 @@ impl DescriptorAllocator {
         }).collect::<Vec<_>>();
         
         let create_info = vk::DescriptorPoolCreateInfo::default()
-            .flags(vk::DescriptorPoolCreateFlags::empty())
+            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
             .pool_sizes(&sizes)
             .max_sets(self.count);
 
@@ -121,7 +125,13 @@ impl DescriptorAllocator {
         let result = unsafe { device.allocate_descriptor_sets(&allocate_info) };
 
         match result {
-            Ok(sets) => return Ok(sets[0]),
+            Ok(sets) => {
+                let mut hasher = DefaultHasher::new();
+                sets.hash(&mut hasher);
+                self.descriptors.insert(hasher.finish(), self.used_pools.len() - 1);
+
+                return Ok(sets[0])
+            },
             Err(err) => match err {
                 vk::Result::ERROR_FRAGMENTED_POOL => {},
                 vk::Result::ERROR_OUT_OF_POOL_MEMORY => {},
@@ -137,9 +147,22 @@ impl DescriptorAllocator {
         let result = unsafe { device.allocate_descriptor_sets(&allocate_info) };
 
         match result {
-            Ok(sets) => return Ok(sets[0]),
+            Ok(sets) => {
+                let mut hasher = DefaultHasher::new();
+                sets.hash(&mut hasher);
+                self.descriptors.insert(hasher.finish(), self.used_pools.len() - 1);
+                
+                return Ok(sets[0])
+            },
             Err(err) => return Err(DescriptorAllocateError::AllocationFailed(err)),
         }
+    }
+
+    pub fn free_descriptor_sets(&mut self, device: &Device, sets: &[vk::DescriptorSet]) {
+        let mut hasher = DefaultHasher::new();
+        sets.hash(&mut hasher);
+
+        unsafe { device.free_descriptor_sets(self.used_pools[*self.descriptors.get(&hasher.finish()).unwrap()], sets) }.unwrap();
     }
 
     pub fn reset_pool(&mut self, device: &Device) {
