@@ -1,18 +1,9 @@
-#![allow(clippy::too_many_arguments)]
-
-use std::io::Read;
-
 use ash::vk;
 use ash::{Device, Instance};
 
-use anyhow::{anyhow, Result};
-use image::ImageReader;
+use anyhow::{Result, anyhow};
 
-use crate::{
-    buffer::{
-        begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index,
-    }, set_object_name, Loadable, RendererData
-};
+use crate::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
 #[allow(dead_code)]
 pub enum MipLevels {
@@ -28,7 +19,6 @@ pub struct Image {
     pub view: vk::ImageView,
     pub mip_level: u32,
     pub sampler: Option<vk::Sampler>,
-    loaded: bool,
 }
 
 impl Image {
@@ -97,70 +87,6 @@ impl Image {
             view,
             mip_level: mips,
             sampler,
-            loaded: true,
-        }
-    }
-
-    pub fn from_path(
-        instance: &Instance,
-        device: &Device,
-        data: &RendererData,
-        path: &str,
-        mip_levels: MipLevels,
-        format: vk::Format,
-        generate_sampler: bool,
-    ) -> Self {
-        let img = ImageReader::open(path).unwrap().decode().unwrap();
-        let bytes = img
-            .to_rgba8()
-            .bytes()
-            .filter(|b| b.is_ok())
-            .flatten()
-            .collect::<Vec<u8>>();
-
-        let width = img.width();
-        let height = img.height();
-        let size = (width * height * 8 * 4) as u64;
-
-        let mips = match mip_levels {
-            MipLevels::One => 1,
-            MipLevels::Value(v) => v,
-            MipLevels::Maximum => (width.max(height) as f32).log2().floor() as u32 + 1,
-        };
-
-        let (image, image_memory) = unsafe {
-            create_texture_image(
-                instance, device, data, size, &bytes, width, height, mips, format,
-            )
-        }
-        .unwrap();
-
-        let view =
-            unsafe { create_image_view(
-                device,
-                image,
-                format,
-                vk::ImageAspectFlags::COLOR,
-                vk::ImageViewType::TYPE_2D,
-                mips,
-                1,
-            ) }.unwrap();
-
-        let sampler = if generate_sampler {
-            Some(
-                unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap()
-            )
-        } else {
-            None
-        };
-
-        Image {
-            image,
-            image_memory,
-            view,
-            mip_level: mips,
-            sampler,
-            loaded: true,
         }
     }
 
@@ -173,12 +99,6 @@ impl Image {
             device.destroy_image(self.image, None);
             device.free_memory(self.image_memory, None);
         }
-    }
-}
-
-impl Loadable for Image {
-    fn is_loaded(&self) -> bool {
-        self.loaded
     }
 }
 

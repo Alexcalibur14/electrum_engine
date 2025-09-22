@@ -1,6 +1,6 @@
 pub use ash::vk;
 use ash::ext::debug_utils;
-use ash::vk::{Extent2D, Handle};
+use ash::vk::Handle;
 use ash::{Entry, Instance, Device};
 use ash_window;
 use ash::khr::{surface, swapchain};
@@ -17,32 +17,15 @@ use std::ffi::{self, CStr};
 use std::ptr;
 use std::time::{Duration, Instant};
 
-mod buffer;
-mod camera;
-mod command;
-mod light;
-mod model;
-mod present;
-mod render_pass;
-mod shader;
-mod texture;
-mod descriptor;
+pub mod command;
+pub mod buffer;
+pub mod image;
+pub mod present;
 
-pub use buffer::*;
-pub use camera::*;
-pub use light::*;
-pub use mesh::*;
-pub use model::*;
-pub use present::*;
-pub use render_pass::*;
-pub use shader::*;
-pub use texture::*;
-pub use record::*;
-pub use descriptor::*;
-
-use command::{create_command_buffers, create_command_pools};
-
-pub use electrum_engine_macros;
+use command::*;
+use buffer::*;
+use image::*;
+use present::*;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -65,7 +48,7 @@ pub struct Renderer {
 
 impl Renderer {
     /// Creates the Vulkan Renderer.
-    pub fn create(display_handle: DisplayHandle, window_handle: WindowHandle, width: u32, height: u32) -> Result<Self> {
+    pub fn new(display_handle: DisplayHandle, window_handle: WindowHandle, width: u32, height: u32) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
         let mut data = RendererData::default();
@@ -141,14 +124,6 @@ impl Renderer {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
-        let mut render_passes = self.data.render_passes.clone();
-        for render_pass in render_passes.iter_mut() {
-            for subpass in render_pass.subpasses.iter_mut() {
-                subpass.update(&self.device, &mut self.data, &self.stats, image_index);
-            }
-        }
-        self.data.render_passes = render_passes;
-
         self.update_command_buffer(image_index)?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -208,62 +183,6 @@ impl Renderer {
         self.device.begin_command_buffer(command_buffer, &info)?;
 
         
-        let mut render_passes = self.data.render_passes.clone();
-        for render_pass in render_passes.iter_mut() {
-
-            let render_area = vk::Rect2D::default()
-                .offset(vk::Offset2D::default())
-                .extent(Extent2D {
-                    width: render_pass.width,
-                    height: render_pass.height,
-                });
-
-            let info = vk::RenderPassBeginInfo::default()
-                .render_pass(render_pass.render_pass)
-                .framebuffer(render_pass.framebuffers[image_index])
-                .render_area(render_area)
-                .clear_values(&render_pass.clear_values);
-
-            begin_command_label(
-                &self.instance,
-                &self.device,
-                command_buffer,
-                &render_pass.name,
-                [0.0, 0.1, 0.5, 1.0],
-            );
-
-            self.device.cmd_begin_render_pass(
-                command_buffer,
-                &info,
-                vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
-            );
-
-            render_pass.subpasses.iter_mut().for_each(|s| {
-                s.record_command_buffers(&self.instance, &self.device, &self.data, render_pass.render_pass, render_pass.framebuffers[image_index], image_index)
-                    .unwrap()
-            });
-
-            for (i, render_data) in render_pass.subpasses.iter().enumerate() {
-                if i > 0 {
-                    self.device.cmd_next_subpass(
-                        command_buffer,
-                        vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
-                    );
-                }
-
-                let secondary_command_buffers = vec![render_data.command_buffers[image_index]];
-
-                begin_command_label(&self.instance, &self.device, command_buffer, "Draw Calls", [0.0, 1.0, 1.0, 1.0]);
-                self.device
-                    .cmd_execute_commands(command_buffer, &secondary_command_buffers);
-                end_command_label(&self.instance, &self.device, command_buffer);
-            }
-
-            self.device.cmd_end_render_pass(command_buffer);
-
-            end_command_label(&self.instance, &self.device, command_buffer);   
-        }
-        self.data.render_passes = render_passes;
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -286,20 +205,6 @@ impl Renderer {
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
-        let mut render_passes = self.data.render_passes.clone();
-        for render_pass in render_passes.iter_mut() {
-            render_pass.recreate_swapchain(&self.instance, &self.device, &mut self.data)?;
-        }
-        self.data.render_passes = render_passes;
-
-        let mut objects = self.data.objects.clone();
-
-        objects
-            .iter_mut()
-            .for_each(|o| o.recreate_swapchain(&self.device, &mut self.data));
-
-        self.data.objects = objects;
-
         create_command_buffers(&self.device, &mut self.data)?;
         self.data
             .images_in_flight
@@ -309,15 +214,6 @@ impl Renderer {
     }
 
     unsafe fn destroy_swapchain(&mut self) {
-        let render_passes = self.data.render_passes.clone();
-        render_passes.iter().for_each(|r| r.destroy_swapchain(&self.device, &mut self.data));
-        self.data.render_passes = render_passes;
-
-        self.data
-            .objects
-            .iter()
-            .for_each(|o| o.destroy_swapchain(&self.device));
-
         self.data
             .swapchain_image_views
             .iter()
@@ -341,32 +237,6 @@ impl Renderer {
 
         self.device
             .destroy_command_pool(self.data.command_pool, None);
-
-        let mut objects = self.data.objects.clone();
-        objects
-            .iter_mut()
-            .for_each(|o| o.destroy(&self.device));
-        self.data.objects = objects;
-
-        self.data
-            .shaders
-            .iter()
-            .for_each(|s| s.destroy(&self.device));
-
-        self.data
-            .textures
-            .iter()
-            .for_each(|t| t.destroy(&self.device));
-
-        self.data
-            .cameras
-            .iter()
-            .for_each(|c| c.destroy(&self.device));
-
-        self.data.other_descriptors.iter().for_each(|d| d.destroy(&self.device));
-
-        self.data.global_descriptor_pools.destroy(&self.device);
-        self.data.global_layout_cache.destroy(&self.device);
 
         self.data
             .in_flight_fences
@@ -424,27 +294,11 @@ pub struct RendererData {
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
 
-    // Pipeline
-    pub render_passes: Vec<RenderPass>,
-
     // Command Buffers
     pub command_pool: vk::CommandPool,
     pub command_pools: Vec<vk::CommandPool>,
     pub command_buffers: Vec<vk::CommandBuffer>,
     pub secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
-
-    // objects
-    pub shaders: Record<Box<dyn Shader>>,
-    pub textures: Record<Image>,
-    pub point_light_data: Record<PointLight>,
-
-    pub objects: Record<Mesh>,
-    pub materials: Record<Box<dyn Material>>,
-    pub cameras: Record<Box<dyn Camera>>,
-    pub other_descriptors: Record<Box<dyn DescriptorSet>>,
-
-    pub global_descriptor_pools: DescriptorAllocator,
-    pub global_layout_cache: DescriptorLayoutCache,
 
     // Semaphores
     pub image_available_semaphores: Vec<vk::Semaphore>,
@@ -882,6 +736,11 @@ impl SwapchainSupport {
     }
 }
 
+
+// --------------------- //
+// ----- Debugging ----- //
+// --------------------- //
+
 unsafe extern "system" fn debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     _message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -1006,226 +865,5 @@ where
         ptr::null()
     } else {
         t
-    }
-}
-
-mod record {
-    use std::{ops::{Index, IndexMut}, slice::{Iter, IterMut}, vec::IntoIter};
-
-    use thiserror::Error;
-
-    pub trait Loadable {
-        fn is_loaded(&self) -> bool;
-    }
-
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct Record<T>(Vec<T>);
-
-    impl<T> Record<T>
-        where T: Loadable
-    {
-        pub fn new() -> Self {
-            Record(vec![])
-        }
-
-        pub fn from_vec(vec: Vec<T>) -> Self {
-            Record(vec)
-        }
-
-        pub fn get_loaded(&self, index: usize) -> Result<&T, RecordGetError> {
-            match self.0.get(index) {
-                Some(value) => {
-                    match value.is_loaded() {
-                        true => Ok(value),
-                        false => Err(RecordGetError::NotLoaded(index)),
-                    }
-                },
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn get_mut_loaded(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
-            match self.0.get_mut(index) {
-                Some(value) => {
-                    match value.is_loaded() {
-                        true => Ok(value),
-                        false => Err(RecordGetError::NotLoaded(index)),
-                    }
-                },
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
-            match self.0.get(index) {
-                Some(value) => Ok(value),
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn get_mut(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
-            match self.0.get_mut(index) {
-                Some(value) => Ok(value),
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn push(&mut self, value: T) -> usize {
-            let index = self.0.len();
-            self.0.push(value);
-            index
-        }
-
-        pub fn len(&self) -> usize {
-            self.0.len()
-        }
-
-        pub fn iter(&self) -> Iter<T> {
-            self.0.iter()
-        }
-
-        pub fn iter_mut(&mut self) -> IterMut<T> {
-            self.0.iter_mut()
-        }
-    }
-
-    impl<T> Index<usize> for Record<T> 
-    where T: Loadable
-    {
-        type Output = T;
-    
-        fn index(&self, index: usize) -> &Self::Output {
-            self.get_loaded(index).unwrap()
-        }
-    }
-
-    impl<T> IndexMut<usize> for Record<T>
-    where T: Loadable
-    {
-        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-            self.get_mut_loaded(index).unwrap()
-        }
-    }
-
-    impl<T> Default for Record<T>
-    where T: Loadable
-    {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
-    impl<T> IntoIterator for Record<T> {
-        type Item = T;
-    
-        type IntoIter = IntoIter<T>;
-    
-        fn into_iter(self) -> Self::IntoIter {
-            self.0.into_iter()
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-    pub enum RecordGetError {
-        #[error("Element with index {0} is not in record")]
-        NotInRecord(usize),
-        #[error("Element with index {0} is not loaded")]
-        NotLoaded(usize),
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use crate::record::RecordGetError;
-
-        use super::{Loadable, Record};
-
-        #[derive(Debug, PartialEq)]
-        struct Value(bool);
-
-        impl Loadable for Value {
-            fn is_loaded(&self) -> bool {
-                self.0
-            }
-        }
-
-        #[test]
-        fn empty() {
-            let record: Record<Value> = Record::new();
-            assert_eq!(record, Record::<Value>(vec![]))
-        }
-
-        #[test]
-        fn push_multiple() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record, Record::<Value>(vec![
-                Value(true),
-                Value(false),
-                Value(true),
-                Value(false),
-                Value(true),
-            ]));
-        }
-
-        #[test]
-        fn get() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get_loaded(0), Result::Ok(&Value(true)));
-            assert_eq!(record.get_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
-        }
-
-        #[test]
-        fn get_mut() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get_mut_loaded(0), Result::Ok(&mut Value(true)));
-            assert_eq!(record.get_mut_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_mut_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
-        }
-
-        #[test]
-        fn get_no_check() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get(0), Result::Ok(&Value(true)));
-            assert_eq!(record.get(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get(1), Result::Ok(&Value(false)));
-        }
-
-        #[test]
-        fn get_mut_no_check() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get_mut(0), Result::Ok(&mut Value(true)));
-            assert_eq!(record.get_mut(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_mut(1), Result::Ok(&mut Value(false)));
-        }
     }
 }

@@ -1,9 +1,8 @@
-use ash::{vk, Entry};
-use ash::{Device, Instance};
+use ash::vk;
+use ash::{Entry, Device, Instance};
 
+use crate::{begin_command_label, end_command_label, QueueFamilyIndices, RendererData};
 use anyhow::Result;
-
-use crate::{QueueFamilyIndices, RendererData};
 
 pub(crate) unsafe fn create_command_pools(
     entry: &Entry,
@@ -55,4 +54,62 @@ pub(crate) unsafe fn create_command_buffers(
     data.secondary_command_buffers = vec![vec![]; data.swapchain_images.len()];
 
     Ok(())
+}
+
+
+///
+/// # Safety
+/// the function `end_single_time_commands` must be called after this
+/// function is called
+pub unsafe fn begin_single_time_commands(
+    instance: &Instance,
+    device: &Device,
+    data: &RendererData,
+    name: &str,
+) -> Result<vk::CommandBuffer> {
+    let info = vk::CommandBufferAllocateInfo::default()
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_pool(data.command_pool)
+        .command_buffer_count(1);
+
+    let command_buffer = device.allocate_command_buffers(&info)?[0];
+
+    let info =
+        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+    begin_command_label(instance, device, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
+    device.begin_command_buffer(command_buffer, &info)?;
+
+    Ok(command_buffer)
+}
+
+///
+/// # Safety
+/// this function **must** only be called after a call to `begin_single_time_commands`
+pub unsafe fn end_single_time_commands(
+    instance: &Instance,
+    device: &Device,
+    data: &RendererData,
+    command_buffer: vk::CommandBuffer,
+) -> Result<()> {
+    device.end_command_buffer(command_buffer)?;
+    end_command_label(instance, device, command_buffer);
+
+    let command_buffers = &[command_buffer];
+    let info = vk::SubmitInfo::default().command_buffers(command_buffers);
+
+    device.queue_submit(data.graphics_queue, &[info], vk::Fence::null())?;
+    device.queue_wait_idle(data.graphics_queue)?;
+
+    device.free_command_buffers(data.command_pool, &[command_buffer]);
+
+    Ok(())
+}
+
+pub fn execute_command<F>(instance: &Instance, device: &Device, data: &RendererData, name: &str, f: F)
+where F: FnOnce(vk::CommandBuffer)
+{
+    let command_buffer = unsafe { begin_single_time_commands(instance, device, data, name) }.unwrap();
+    f(command_buffer);
+    unsafe { end_single_time_commands(instance, device, data, command_buffer) }.unwrap();
 }
