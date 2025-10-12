@@ -14,7 +14,7 @@ pub(crate) unsafe fn create_swapchain(
     data: &mut RendererData,
     width: u32,
     height: u32,
-) -> Result<()> {
+) -> Result<u32> {
     // Image
 
     let indices = QueueFamilyIndices::get(entry, instance, data, data.physical_device)?;
@@ -69,7 +69,7 @@ pub(crate) unsafe fn create_swapchain(
 
     data.swapchain_images = swapchain_loader.get_swapchain_images(data.swapchain)?;
 
-    Ok(())
+    Ok(image_count)
 }
 
 fn get_swapchain_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {

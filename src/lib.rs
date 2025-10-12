@@ -65,13 +65,13 @@ impl Renderer {
         unsafe { pick_physical_device(&entry, &instance, &mut data)? };
         let device = unsafe { create_logical_device(&entry, &instance, &mut data)? };
 
-        unsafe { create_swapchain(&entry, &instance, &device, &mut data, width, height) }?;
+        let image_count = unsafe { create_swapchain(&entry, &instance, &device, &mut data, width, height) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
 
         unsafe { create_command_pools(&entry, &instance, &device, &mut data) }.unwrap();
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
-        unsafe { create_sync_objects(&instance, &device, &mut data) }?;
+        unsafe { create_sync_objects(&instance, &device, &mut data, image_count) }?;
 
         let stats = RenderStats {
             start: Instant::now(),
@@ -112,8 +112,14 @@ impl Renderer {
 
         let image_index = match result {
             Ok((image_index, _)) => image_index as usize,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => return self.recreate_swapchain(width, height),
-            Err(e) => return Err(anyhow!(e)),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                warn!("acquire: Out of date");
+                return self.recreate_swapchain(width, height)
+            },
+            Err(e) => {
+                warn!("acquire: error");
+                return Err(anyhow!(e))
+            },
         };
 
         let image_in_flight = self.data.images_in_flight[image_index];
@@ -620,11 +626,12 @@ unsafe fn create_sync_objects(
     instance: &Instance,
     device: &Device,
     data: &mut RendererData,
+    image_count: u32,
 ) -> Result<()> {
     let semaphore_info = vk::SemaphoreCreateInfo::default();
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
-    for i in 0..MAX_FRAMES_IN_FLIGHT {
+    for i in 0..image_count {
         let image_available_semaphor = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
             instance,
