@@ -1,3 +1,4 @@
+use ash::util::read_spv;
 pub use ash::vk;
 use ash::ext::debug_utils;
 use ash::vk::Handle;
@@ -5,6 +6,7 @@ use ash::{Entry, Instance, Device};
 use ash_window;
 use ash::khr::{surface, swapchain};
 
+use electrum_engine_macros::Vertex;
 use raw_window_handle::{self, DisplayHandle, WindowHandle};
 
 use anyhow::{anyhow, Result};
@@ -14,7 +16,7 @@ use tracing::*;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::{self, CStr};
-use std::ptr;
+use std::{fs, ptr};
 use std::time::{Duration, Instant};
 
 pub mod command;
@@ -72,6 +74,28 @@ impl Renderer {
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
         unsafe { create_sync_objects(&instance, &device, &mut data, image_count) }?;
+
+        let pipeline = create_pipeline(&device);
+        data.pipeline = pipeline;
+
+        let vertices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<TestVertex>() * 6) as u64, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
+            TestVertex{ position: [ 0.0 , -0.5 ], colour: [0.0 , 1.0 , 0.0] },
+            TestVertex{ position: [-0.25, -0.25], colour: [0.25, 0.75, 0.25] },
+            TestVertex{ position: [ 0.25, -0.25], colour: [0.25, 0.75, 0.25] },
+            TestVertex{ position: [-0.25,  0.25], colour: [0.75, 0.25, 0.75] },
+            TestVertex{ position: [ 0.25, -0.25], colour: [0.75, 0.25, 0.75] },
+            TestVertex{ position: [ 0.0 ,  0.5 ], colour: [1.0 , 0.0 , 1.0] },
+        ]).unwrap();
+        data.vertices = vertices;
+
+        let indices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<u32>() * 4) as u64, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
+            0, 1, 2,
+            1, 2, 4,
+            1, 4, 3,
+            3, 4, 5,
+        ]).unwrap();
+        data.indices = indices;
+
 
         let stats = RenderStats {
             start: Instant::now(),
@@ -186,9 +210,21 @@ impl Renderer {
         let info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
 
+        let colour_attachment = vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 0.0]}})
+            .image_layout(image_layout)
+
+        let rendering_info = vk::RenderingInfo::default()
+            .layer_count(1)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D { width: self.width, height: self.height },
+            })
+            .color_attachments(&[colour_attachment_info]);
+
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        
+        self.device.cmd_begin_rendering(command_buffer, &rendering_info);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -233,6 +269,8 @@ impl Renderer {
     /// and **MUST** be the last function called on the renderer
     unsafe fn destroy(&mut self) {
         self.destroy_swapchain();
+
+        self.device.destroy_pipeline(self.data.pipeline, None);
         
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
         swapchain_loader.destroy_swapchain(self.data.swapchain, None);
@@ -316,6 +354,11 @@ pub struct RendererData {
 
     // MSAA
     pub msaa_samples: vk::SampleCountFlags,
+
+    // Temp
+    vertices: BufferWrapper,
+    indices: BufferWrapper,
+    pipeline: vk::Pipeline,
 
     pub recreated: bool,
 }
@@ -873,4 +916,66 @@ where
     } else {
         t
     }
+}
+
+
+fn create_pipeline(device: &Device) -> vk::Pipeline {
+    let bytecode = read_spv(&mut fs::File::open("test.vert.spv").unwrap()).unwrap();
+    let create_info = vk::ShaderModuleCreateInfo::default()
+        .code(&bytecode);
+
+    let vertex = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
+
+    let vertex_stage_info = vk::PipelineShaderStageCreateInfo::default()
+        .module(vertex)
+        .name(c"main")
+        .stage(vk::ShaderStageFlags::VERTEX);
+
+
+    let bytecode = read_spv(&mut fs::File::open("test.frag.spv").unwrap()).unwrap();
+    let create_info = vk::ShaderModuleCreateInfo::default()
+        .code(&bytecode);
+
+    let fragment = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
+
+    let fragment_stage_info = vk::PipelineShaderStageCreateInfo::default()
+        .module(fragment)
+        .name(c"main")
+        .stage(vk::ShaderStageFlags::FRAGMENT);
+
+    let attributs = TestVertex::attribute_descriptions();
+    let bindings = TestVertex::binding_descriptions();
+    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_attribute_descriptions(&attributs)
+        .vertex_binding_descriptions(&bindings);
+
+    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+
+
+    let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
+        .color_attachment_formats(&[vk::Format::R8G8B8A8_SNORM]);
+
+    let binding = [vertex_stage_info, fragment_stage_info];
+    let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
+        .vertex_input_state(&vertex_input_state)
+        .input_assembly_state(&input_assembly_state)
+        .push_next(&mut pipeline_info2)
+        .stages(&binding);
+
+    unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None) }.unwrap()[0]
+}
+
+pub trait Vertex {
+    fn binding_descriptions() -> Vec<vk::VertexInputBindingDescription>;
+    fn attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription>;
+}
+
+#[repr(C)]
+#[derive(Debug, Vertex)]
+struct TestVertex {
+    #[vertex(format = "R32G32_SFLOAT")]
+    position: [f32; 2],
+    #[vertex(format = "R32G32B32_SFLOAT")]
+    colour: [f32; 3]
 }
