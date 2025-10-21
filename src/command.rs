@@ -77,8 +77,8 @@ pub unsafe fn begin_single_time_commands(
     let info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-    begin_command_label(instance, device, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
     device.begin_command_buffer(command_buffer, &info)?;
+    begin_command_label(instance, device, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
 
     Ok(command_buffer)
 }
@@ -92,8 +92,8 @@ pub unsafe fn end_single_time_commands(
     data: &RendererData,
     command_buffer: vk::CommandBuffer,
 ) -> Result<()> {
-    device.end_command_buffer(command_buffer)?;
     end_command_label(instance, device, command_buffer);
+    device.end_command_buffer(command_buffer)?;
 
     let command_buffers = &[command_buffer];
     let info = vk::SubmitInfo::default().command_buffers(command_buffers);

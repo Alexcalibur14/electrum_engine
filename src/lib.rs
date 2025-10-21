@@ -33,7 +33,7 @@ use present::*;
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 
 /// The required device extensions.
-const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME];
+const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME, ash::khr::dynamic_rendering::NAME];
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
@@ -44,6 +44,8 @@ pub struct Renderer {
     pub device: Device,
     pub data: RendererData,
     pub stats: RenderStats,
+    pub width: u32,
+    pub height: u32,
     frame: usize,
     pub resized: bool,
 }
@@ -75,7 +77,7 @@ impl Renderer {
 
         unsafe { create_sync_objects(&instance, &device, &mut data, image_count) }?;
 
-        let pipeline = create_pipeline(&device);
+        let pipeline = create_pipeline(&device, width, height);
         data.pipeline = pipeline;
 
         let vertices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<TestVertex>() * 6) as u64, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
@@ -88,13 +90,32 @@ impl Renderer {
         ]).unwrap();
         data.vertices = vertices;
 
-        let indices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<u32>() * 4) as u64, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
+        let indices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<u32>() * 12) as u64, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
             0, 1, 2,
             1, 2, 4,
             1, 4, 3,
             3, 4, 5,
         ]).unwrap();
         data.indices = indices;
+
+        let colour_attachement = Image::new(
+            &instance,
+            &device,
+            &data,
+            width,
+            height,
+            MipLevels::One,
+            vk::SampleCountFlags::TYPE_1,
+            vk::Format::R8G8B8A8_SNORM,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            vk::ImageViewType::TYPE_2D,
+            1,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            vk::ImageAspectFlags::COLOR,
+            false
+        );
+        data.colour_attachment = colour_attachement;
 
 
         let stats = RenderStats {
@@ -104,12 +125,16 @@ impl Renderer {
             frame: 0,
         };
 
+        info!("finished initialising");
+
         Ok(Renderer {
             _entry: entry,
             instance,
             data,
             device,
             frame: 0,
+            width,
+            height,
             resized: false,
             stats,
         })
@@ -168,8 +193,7 @@ impl Renderer {
 
         self.device.reset_fences(&[in_flight_fence])?;
 
-        self.device
-            .queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
+        self.device.queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
 
         let swapchains = &[self.data.swapchain];
         let image_indices = &[image_index as u32];
@@ -179,7 +203,8 @@ impl Renderer {
             .image_indices(image_indices);
 
         let result = swapchain_loader.queue_present(self.data.present_queue, &present_info);
-        let changed = result == Ok(true)
+        let changed = 
+            result == Ok(true)
             || result == Err(vk::Result::ERROR_OUT_OF_DATE_KHR);
 
         if self.resized || changed {
@@ -193,6 +218,8 @@ impl Renderer {
 
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
         self.stats.frame += 1;
+
+        self.device.queue_wait_idle(self.data.present_queue).unwrap();
 
         self.stats.delta = self.stats.delda_start.elapsed();
         self.stats.delda_start = Instant::now();
@@ -210,9 +237,14 @@ impl Renderer {
         let info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
 
-        let colour_attachment = vk::RenderingAttachmentInfo::default()
+        let attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 0.0]}})
-            .image_layout(image_layout)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .image_view(self.data.colour_attachment.view)
+        ];
 
         let rendering_info = vk::RenderingInfo::default()
             .layer_count(1)
@@ -220,11 +252,50 @@ impl Renderer {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: vk::Extent2D { width: self.width, height: self.height },
             })
-            .color_attachments(&[colour_attachment_info]);
+            .color_attachments(&attachment_infos);
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
+        let image_barrier = vk::ImageMemoryBarrier::default()
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .image(self.data.colour_attachment.image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1)
+            );
+
+        self.device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::DependencyFlags::empty(), &[], &[], &[image_barrier]);
+
         self.device.cmd_begin_rendering(command_buffer, &rendering_info);
+
+        self.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.data.pipeline);
+        self.device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.data.vertices.buffer], &[0]);
+        self.device.cmd_bind_index_buffer(command_buffer, self.data.indices.buffer, 0, vk::IndexType::UINT32);
+        self.device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0);
+
+        self.device.cmd_end_rendering(command_buffer);
+
+        let image_barrier = vk::ImageMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+            .image(self.data.colour_attachment.image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1)
+            );
+
+        self.device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags::BOTTOM_OF_PIPE, vk::DependencyFlags::empty(), &[], &[], &[image_barrier]);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -359,6 +430,8 @@ pub struct RendererData {
     vertices: BufferWrapper,
     indices: BufferWrapper,
     pipeline: vk::Pipeline,
+
+    colour_attachment: Image,
 
     pub recreated: bool,
 }
@@ -593,9 +666,13 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
         .fill_mode_non_solid(true)
         .wide_lines(true);
 
+    let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default()
+        .dynamic_rendering(true);
+
     // Create
 
     let info = vk::DeviceCreateInfo::default()
+        .push_next(&mut dynamic_rendering)
         .queue_create_infos(&queue_infos)
         .enabled_extension_names(&extensions)
         .enabled_features(&features);
@@ -919,8 +996,8 @@ where
 }
 
 
-fn create_pipeline(device: &Device) -> vk::Pipeline {
-    let bytecode = read_spv(&mut fs::File::open("test.vert.spv").unwrap()).unwrap();
+fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline {
+    let bytecode = read_spv(&mut fs::File::open("res/shaders/test.vert.spv").unwrap()).unwrap();
     let create_info = vk::ShaderModuleCreateInfo::default()
         .code(&bytecode);
 
@@ -932,7 +1009,7 @@ fn create_pipeline(device: &Device) -> vk::Pipeline {
         .stage(vk::ShaderStageFlags::VERTEX);
 
 
-    let bytecode = read_spv(&mut fs::File::open("test.frag.spv").unwrap()).unwrap();
+    let bytecode = read_spv(&mut fs::File::open("res/shaders/test.frag.spv").unwrap()).unwrap();
     let create_info = vk::ShaderModuleCreateInfo::default()
         .code(&bytecode);
 
@@ -952,6 +1029,63 @@ fn create_pipeline(device: &Device) -> vk::Pipeline {
     let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
+    let attachments = [
+        vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(true)
+            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD)
+    ];
+
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+        .attachments(&attachments)
+        .logic_op_enable(false)
+        .logic_op(vk::LogicOp::COPY)
+        .blend_constants([0.0, 0.0, 0.0, 0.0]);
+
+    let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
+        .flags(vk::PipelineMultisampleStateCreateFlags::empty())
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+        .sample_shading_enable(false);
+
+    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
+        .depth_clamp_enable(false)
+        .rasterizer_discard_enable(false)
+        .polygon_mode(vk::PolygonMode::FILL)
+        .line_width(1.0)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .depth_bias_enable(false);
+
+    let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: vk::Extent2D { width, height },
+        }];
+    
+    let viewports = [vk::Viewport::default()
+        .width(width as f32)
+        .height(height as f32)
+        .min_depth(0.01)
+        .max_depth(1.0)
+        .x(0.0)
+        .y(0.0)];
+
+    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+        .scissors(&scissors)
+        .viewports(&viewports);
+
+
+    let layout_create_info = vk::PipelineLayoutCreateInfo::default()
+        .flags(vk::PipelineLayoutCreateFlags::empty())
+        .set_layouts(&[])
+        .push_constant_ranges(&[]);
+
+    let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
+
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
         .color_attachment_formats(&[vk::Format::R8G8B8A8_SNORM]);
@@ -960,6 +1094,11 @@ fn create_pipeline(device: &Device) -> vk::Pipeline {
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
         .vertex_input_state(&vertex_input_state)
         .input_assembly_state(&input_assembly_state)
+        .color_blend_state(&color_blend_state)
+        .multisample_state(&multisample_state)
+        .rasterization_state(&rasterization_state)
+        .viewport_state(&viewport_state)
+        .layout(layout)
         .push_next(&mut pipeline_info2)
         .stages(&binding);
 
