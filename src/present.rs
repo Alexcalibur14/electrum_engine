@@ -4,6 +4,7 @@ use ash::{Entry, Instance, Device};
 
 use anyhow::Result;
 
+use crate::image::Image;
 use crate::{create_image_view, QueueFamilyIndices, RendererData, SwapchainSupport};
 
 
@@ -131,4 +132,71 @@ pub(crate) unsafe fn create_swapchain_image_views(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(())
+}
+
+pub fn transition_image(device: &Device, command_buffer: vk::CommandBuffer, image: &Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) {
+    let (src_stage_mask, dst_stage_mask) = if new_layout == vk::ImageLayout::PRESENT_SRC_KHR {
+        (vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
+    } else {
+        (vk::PipelineStageFlags2::ALL_COMMANDS, vk::PipelineStageFlags2::ALL_COMMANDS)
+    };
+
+    let image_barrier = [vk::ImageMemoryBarrier2::default()
+        .src_stage_mask(src_stage_mask)
+        .dst_stage_mask(dst_stage_mask)
+        .src_access_mask(vk::AccessFlags2::MEMORY_WRITE)
+        .dst_access_mask(
+            if new_layout == vk::ImageLayout::PRESENT_SRC_KHR {
+                vk::AccessFlags2::MEMORY_READ
+            } else {
+                vk::AccessFlags2::MEMORY_WRITE
+            }
+        )
+
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+
+        .subresource_range(
+            image_subresource_range(if new_layout == vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL {vk::ImageAspectFlags::DEPTH} else {vk::ImageAspectFlags::COLOR})
+        )
+        .image(image.image)];
+
+    let dependency_info = vk::DependencyInfo::default()
+        .image_memory_barriers(&image_barrier);
+
+    unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
+}
+
+pub fn image_subresource_range(image_aspect: vk::ImageAspectFlags) -> vk::ImageSubresourceRange {
+    vk::ImageSubresourceRange::default()
+        .aspect_mask(image_aspect)
+        .base_mip_level(0)
+        .level_count(vk::REMAINING_MIP_LEVELS)
+        .base_array_layer(0)
+        .layer_count(vk::REMAINING_ARRAY_LAYERS)
+}
+
+pub fn semaphore_submit_info<'a>(stage_mask: vk::PipelineStageFlags2, semaphore: &'a vk::Semaphore) -> vk::SemaphoreSubmitInfo<'a> {
+    vk::SemaphoreSubmitInfo::default()
+        .semaphore(*semaphore)
+        .stage_mask(stage_mask)
+        .device_index(0)
+        .value(1)
+}
+
+pub fn command_buffer_submit_info<'a>(command_buffer: &'a vk::CommandBuffer) -> vk::CommandBufferSubmitInfo<'a> {
+    vk::CommandBufferSubmitInfo::default()
+        .command_buffer(*command_buffer)
+        .device_mask(0)
+}
+
+pub fn submit_info<'a>(
+    command_info: &'a[vk::CommandBufferSubmitInfo],
+    signal_semaphore_info: &'a[vk::SemaphoreSubmitInfo],
+    wait_semaphore_info: &'a[vk::SemaphoreSubmitInfo]
+) -> vk::SubmitInfo2<'a> {
+    vk::SubmitInfo2::default()
+        .wait_semaphore_infos(wait_semaphore_info)
+        .signal_semaphore_infos(signal_semaphore_info)
+        .command_buffer_infos(command_info)
 }

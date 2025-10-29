@@ -121,7 +121,7 @@ impl Renderer {
         let stats = RenderStats {
             start: Instant::now(),
             delta: Duration::ZERO,
-            delda_start: Instant::now(),
+            delta_start: Instant::now(),
             frame: 0,
         };
 
@@ -145,17 +145,16 @@ impl Renderer {
     /// # Safety
     /// Do not call this function if the window is minimised or if `destroy` has been called
     pub unsafe fn render(&mut self, width: u32, height: u32) -> Result<()> {
-        let in_flight_fence = self.data.in_flight_fences[self.frame];
+        let render_fence = self.data.render_fences[self.frame];
 
-        self.device
-            .wait_for_fences(&[in_flight_fence], true, u64::MAX)?;
+        self.device.wait_for_fences(&[render_fence], true, 1000000000)?;
+        self.device.reset_fences(&[render_fence])?;
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&self.instance, &self.device);
-
         let result = swapchain_loader.acquire_next_image(
             self.data.swapchain,
-            u64::MAX,
-            self.data.image_available_semaphores[self.frame],
+            1000000000,
+            self.data.swapchain_semaphores[self.frame],
             vk::Fence::null(),
         );
 
@@ -171,34 +170,28 @@ impl Renderer {
             },
         };
 
-        let image_in_flight = self.data.images_in_flight[image_index];
-        if !image_in_flight.is_null() {
-            self.device
-                .wait_for_fences(&[image_in_flight], true, u64::MAX)?;
-        }
-
-        self.data.images_in_flight[image_index] = in_flight_fence;
-
         self.update_command_buffer(image_index)?;
 
-        let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
-        let wait_stages = &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let command_buffers = &[self.data.command_buffers[image_index]];
-        let signal_semaphores = &[self.data.render_finished_semaphores[self.frame]];
-        let submit_info = vk::SubmitInfo::default()
-            .wait_semaphores(wait_semaphores)
-            .wait_dst_stage_mask(wait_stages)
-            .command_buffers(command_buffers)
-            .signal_semaphores(signal_semaphores);
+        
+        let command_info = [command_buffer_submit_info(&self.data.command_buffers[image_index])];
+        let wait_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::BOTTOM_OF_PIPE, &self.data.swapchain_semaphores[self.frame])];
+        let signal_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::ALL_GRAPHICS, &self.data.render_semaphores[image_index])];
+        
+        let submit_info = submit_info(&command_info, &signal_semaphore_info, &wait_semaphore_info);
+        
+        self.device.queue_submit2(self.data.graphics_queue, &[submit_info], render_fence)?;
 
-        self.device.reset_fences(&[in_flight_fence])?;
+        self.device.queue_wait_idle(self.data.graphics_queue).unwrap();
 
-        self.device.queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
+        execute_command(&self.instance, &self.device, &self.data, "transition", |command_buffer| {
+            transition_image(&self.device, command_buffer, &self.data.colour_attachment, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
+        });
 
+        let wait_semaphores = &[self.data.render_semaphores[image_index]];
         let swapchains = &[self.data.swapchain];
         let image_indices = &[image_index as u32];
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(signal_semaphores)
+            .wait_semaphores(wait_semaphores)
             .swapchains(swapchains)
             .image_indices(image_indices);
 
@@ -219,10 +212,9 @@ impl Renderer {
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
         self.stats.frame += 1;
 
-        self.device.queue_wait_idle(self.data.present_queue).unwrap();
 
-        self.stats.delta = self.stats.delda_start.elapsed();
-        self.stats.delda_start = Instant::now();
+        self.stats.delta = self.stats.delta_start.elapsed();
+        self.stats.delta_start = Instant::now();
 
         Ok(())
     }
@@ -235,11 +227,11 @@ impl Renderer {
         let command_buffer = self.data.command_buffers[image_index];
 
         let info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 0.0]}})
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 0.0]}})
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -256,21 +248,7 @@ impl Renderer {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        let image_barrier = vk::ImageMemoryBarrier::default()
-            .old_layout(vk::ImageLayout::UNDEFINED)
-            .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .image(self.data.colour_attachment.image)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1)
-            );
-
-        self.device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::DependencyFlags::empty(), &[], &[], &[image_barrier]);
+        transition_image(&self.device, command_buffer, &self.data.colour_attachment, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
 
         self.device.cmd_begin_rendering(command_buffer, &rendering_info);
 
@@ -281,21 +259,7 @@ impl Renderer {
 
         self.device.cmd_end_rendering(command_buffer);
 
-        let image_barrier = vk::ImageMemoryBarrier::default()
-            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-            .image(self.data.colour_attachment.image)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1)
-            );
-
-        self.device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags::BOTTOM_OF_PIPE, vk::DependencyFlags::empty(), &[], &[], &[image_barrier]);
+        // transition_image(&self.device, command_buffer, &self.data.colour_attachment, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -319,9 +283,6 @@ impl Renderer {
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
         create_command_buffers(&self.device, &mut self.data)?;
-        self.data
-            .images_in_flight
-            .resize(self.data.swapchain_images.len(), vk::Fence::null());
 
         Ok(())
     }
@@ -354,17 +315,17 @@ impl Renderer {
             .destroy_command_pool(self.data.command_pool, None);
 
         self.data
-            .in_flight_fences
+            .render_fences
             .iter()
             .for_each(|f| self.device.destroy_fence(*f, None));
 
         self.data
-            .render_finished_semaphores
+            .render_semaphores
             .iter()
             .for_each(|s| self.device.destroy_semaphore(*s, None));
 
         self.data
-            .image_available_semaphores
+            .swapchain_semaphores
             .iter()
             .for_each(|s| self.device.destroy_semaphore(*s, None));
 
@@ -416,12 +377,11 @@ pub struct RendererData {
     pub secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
     // Semaphores
-    pub image_available_semaphores: Vec<vk::Semaphore>,
-    pub render_finished_semaphores: Vec<vk::Semaphore>,
+    pub swapchain_semaphores: Vec<vk::Semaphore>,
+    pub render_semaphores: Vec<vk::Semaphore>,
 
     // Fences
-    pub in_flight_fences: Vec<vk::Fence>,
-    pub images_in_flight: Vec<vk::Fence>,
+    pub render_fences: Vec<vk::Fence>,
 
     // MSAA
     pub msaa_samples: vk::SampleCountFlags,
@@ -442,7 +402,7 @@ pub struct RenderStats {
     start: Instant,
 
     delta: Duration,
-    delda_start: Instant,
+    delta_start: Instant,
 
     frame: u64,
 }
@@ -666,17 +626,23 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
         .fill_mode_non_solid(true)
         .wide_lines(true);
 
-    let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default()
-        .dynamic_rendering(true);
+    let mut features1_2 = vk::PhysicalDeviceVulkan12Features::default()
+        .buffer_device_address(true)
+        .descriptor_indexing(true);
+
+    let mut features1_3 = vk::PhysicalDeviceVulkan13Features::default()
+        .dynamic_rendering(true)
+        .synchronization2(true);
 
     // Create
 
     let info = vk::DeviceCreateInfo::default()
-        .push_next(&mut dynamic_rendering)
+        .push_next(&mut features1_2)
+        .push_next(&mut features1_3)
         .queue_create_infos(&queue_infos)
         .enabled_extension_names(&extensions)
         .enabled_features(&features);
-
+    
     let device = instance.create_device(data.physical_device, &info, None)?;
 
     // Queues
@@ -752,41 +718,35 @@ unsafe fn create_sync_objects(
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
     for i in 0..image_count {
-        let image_available_semaphor = device.create_semaphore(&semaphore_info, None)?;
+        let swapchain_semaphore = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
             instance,
             device,
             &format!("Image Available Semaphore {}", i),
-            image_available_semaphor,
+            swapchain_semaphore,
         )?;
-        data.image_available_semaphores
-            .push(image_available_semaphor);
+        data.swapchain_semaphores
+            .push(swapchain_semaphore);
 
-        let render_finished_semaphor = device.create_semaphore(&semaphore_info, None)?;
+        let render_semaphore = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
             instance,
             device,
             &format!("Render Finished Semaphore {}", i),
-            render_finished_semaphor,
+            render_semaphore,
         )?;
-        data.render_finished_semaphores
-            .push(render_finished_semaphor);
+        data.render_semaphores
+            .push(render_semaphore);
 
-        let in_flight_fence = device.create_fence(&fence_info, None)?;
+        let render_fence = device.create_fence(&fence_info, None)?;
         set_object_name(
             instance,
             device,
             &format!("In Flight Fence {}", i),
-            in_flight_fence,
+            render_fence,
         )?;
-        data.in_flight_fences.push(in_flight_fence);
+        data.render_fences.push(render_fence);
     }
-
-    data.images_in_flight = data
-        .swapchain_images
-        .iter()
-        .map(|_| vk::Fence::null())
-        .collect();
 
     Ok(())
 }
