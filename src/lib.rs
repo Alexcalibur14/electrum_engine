@@ -106,9 +106,9 @@ impl Renderer {
             height,
             MipLevels::One,
             vk::SampleCountFlags::TYPE_1,
-            vk::Format::R8G8B8A8_SNORM,
+            vk::Format::R16G16B16A16_SFLOAT,
             vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
             vk::ImageViewType::TYPE_2D,
             1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -181,12 +181,6 @@ impl Renderer {
         
         self.device.queue_submit2(self.data.graphics_queue, &[submit_info], render_fence)?;
 
-        self.device.queue_wait_idle(self.data.graphics_queue).unwrap();
-
-        execute_command(&self.instance, &self.device, &self.data, "transition", |command_buffer| {
-            transition_image(&self.device, command_buffer, &self.data.colour_attachment, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
-        });
-
         let wait_semaphores = &[self.data.render_semaphores[image_index]];
         let swapchains = &[self.data.swapchain];
         let image_indices = &[image_index as u32];
@@ -231,7 +225,7 @@ impl Renderer {
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 0.0]}})
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -248,7 +242,7 @@ impl Renderer {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        transition_image(&self.device, command_buffer, &self.data.colour_attachment, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+        transition_image(&self.device, command_buffer, self.data.colour_attachment.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
 
         self.device.cmd_begin_rendering(command_buffer, &rendering_info);
 
@@ -259,7 +253,12 @@ impl Renderer {
 
         self.device.cmd_end_rendering(command_buffer);
 
-        // transition_image(&self.device, command_buffer, &self.data.colour_attachment, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
+        transition_image(&self.device, command_buffer, self.data.colour_attachment.image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+        transition_image(&self.device, command_buffer, self.data.swapchain_images[image_index], vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+
+        copy_image_to_image(&self.device, command_buffer, self.data.colour_attachment.image, self.data.swapchain_images[image_index], vk::Extent2D { width: self.width, height: self.height }, vk::Extent2D { width: self.width, height: self.height });
+
+        transition_image(&self.device, command_buffer, self.data.swapchain_images[image_index], vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -300,6 +299,8 @@ impl Renderer {
     /// This function **MUST** be called befoore the end of the program
     /// and **MUST** be the last function called on the renderer
     unsafe fn destroy(&mut self) {
+        self.device.device_wait_idle().unwrap();
+
         self.destroy_swapchain();
 
         self.device.destroy_pipeline(self.data.pipeline, None);
@@ -1048,7 +1049,7 @@ fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline {
 
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
-        .color_attachment_formats(&[vk::Format::R8G8B8A8_SNORM]);
+        .color_attachment_formats(&[vk::Format::R16G16B16A16_SFLOAT]);
 
     let binding = [vertex_stage_info, fragment_stage_info];
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()

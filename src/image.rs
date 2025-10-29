@@ -346,6 +346,51 @@ unsafe fn copy_buffer_to_image(
     Ok(())
 }
 
+pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, src: vk::Image, dst: vk::Image, src_size: vk::Extent2D, dst_size: vk::Extent2D) {
+    let regions = [
+        vk::ImageBlit2::default()
+            .src_offsets([
+                vk::Offset3D::default(),
+                vk::Offset3D::default()
+                    .x(src_size.width as i32)
+                    .y(src_size.height as i32)
+                    .z(1)
+            ])
+            .dst_offsets([
+                vk::Offset3D::default(),
+                vk::Offset3D::default()
+                    .x(dst_size.width as i32)
+                    .y(dst_size.height as i32)
+                    .z(1)
+            ])
+            .src_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_array_layer(0)
+                    .layer_count(1)
+                    .mip_level(0)
+            )
+            .dst_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_array_layer(0)
+                    .layer_count(1)
+                    .mip_level(0)
+            )
+    ];
+    
+    let blit_image_info = vk::BlitImageInfo2::default()
+        .src_image(src)
+        .dst_image(dst)
+        
+        .src_image_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .dst_image_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+        
+        .regions(&regions)
+        .filter(vk::Filter::LINEAR);
+    unsafe { device.cmd_blit_image2(command_buffer, &blit_image_info) };
+}
+
 pub unsafe fn create_image_view(
     device: &Device,
     image: vk::Image,

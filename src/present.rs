@@ -4,7 +4,6 @@ use ash::{Entry, Instance, Device};
 
 use anyhow::Result;
 
-use crate::image::Image;
 use crate::{create_image_view, QueueFamilyIndices, RendererData, SwapchainSupport};
 
 
@@ -53,7 +52,7 @@ pub(crate) unsafe fn create_swapchain(
         .image_color_space(surface_format.color_space)
         .image_extent(extent)
         .image_array_layers(1)
-        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST)
         .image_sharing_mode(image_sharing_mode)
         .queue_family_indices(&queue_family_indices)
         .pre_transform(support.capabilities.current_transform)
@@ -134,7 +133,7 @@ pub(crate) unsafe fn create_swapchain_image_views(
     Ok(())
 }
 
-pub fn transition_image(device: &Device, command_buffer: vk::CommandBuffer, image: &Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) {
+pub fn transition_image(device: &Device, command_buffer: vk::CommandBuffer, image: vk::Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) {
     let (src_stage_mask, dst_stage_mask) = if new_layout == vk::ImageLayout::PRESENT_SRC_KHR {
         (vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
     } else {
@@ -159,7 +158,7 @@ pub fn transition_image(device: &Device, command_buffer: vk::CommandBuffer, imag
         .subresource_range(
             image_subresource_range(if new_layout == vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL {vk::ImageAspectFlags::DEPTH} else {vk::ImageAspectFlags::COLOR})
         )
-        .image(image.image)];
+        .image(image)];
 
     let dependency_info = vk::DependencyInfo::default()
         .image_memory_barriers(&image_barrier);
