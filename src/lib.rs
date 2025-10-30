@@ -37,7 +37,7 @@ const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME, ash::khr::dynam
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-#[derive(Clone)]
+
 pub struct Renderer {
     _entry: Entry,
     pub instance: Instance,
@@ -85,16 +85,16 @@ impl Renderer {
             TestVertex{ position: [-0.25, -0.25], colour: [0.25, 0.75, 0.25] },
             TestVertex{ position: [ 0.25, -0.25], colour: [0.25, 0.75, 0.25] },
             TestVertex{ position: [-0.25,  0.25], colour: [0.75, 0.25, 0.75] },
-            TestVertex{ position: [ 0.25, -0.25], colour: [0.75, 0.25, 0.75] },
+            TestVertex{ position: [ 0.25,  0.25], colour: [0.75, 0.25, 0.75] },
             TestVertex{ position: [ 0.0 ,  0.5 ], colour: [1.0 , 0.0 , 1.0] },
         ]).unwrap();
         data.vertices = vertices;
 
         let indices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<u32>() * 12) as u64, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
             0, 1, 2,
-            1, 2, 4,
-            1, 4, 3,
-            3, 4, 5,
+            1, 3, 2,
+            2, 3, 4,
+            3, 5, 4,
         ]).unwrap();
         data.indices = indices;
 
@@ -236,7 +236,7 @@ impl Renderer {
             .layer_count(1)
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: vk::Extent2D { width: self.width, height: self.height },
+                extent: self.data.swapchain_extent
             })
             .color_attachments(&attachment_infos);
 
@@ -256,7 +256,7 @@ impl Renderer {
         transition_image(&self.device, command_buffer, self.data.colour_attachment.image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
         transition_image(&self.device, command_buffer, self.data.swapchain_images[image_index], vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
 
-        copy_image_to_image(&self.device, command_buffer, self.data.colour_attachment.image, self.data.swapchain_images[image_index], vk::Extent2D { width: self.width, height: self.height }, vk::Extent2D { width: self.width, height: self.height });
+        copy_image_to_image(&self.device, command_buffer, self.data.colour_attachment.image, self.data.swapchain_images[image_index], self.data.swapchain_extent, self.data.swapchain_extent);
 
         transition_image(&self.device, command_buffer, self.data.swapchain_images[image_index], vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
 
@@ -351,7 +351,7 @@ impl Drop for Renderer {
 }
 
 /// The Vulkan handles and associated properties used by the Vulkan app.
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct RendererData {
     // Debug
     pub messenger: vk::DebugUtilsMessengerEXT,
