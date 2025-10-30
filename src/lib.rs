@@ -7,11 +7,12 @@ use ash_window;
 use ash::khr::{surface, swapchain};
 
 use electrum_engine_macros::Vertex;
-use raw_window_handle::{self, DisplayHandle, WindowHandle};
+use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 
 use anyhow::{anyhow, Result};
 use thiserror::Error;
 use tracing::*;
+use winit::window::Window;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -52,10 +53,18 @@ pub struct Renderer {
 
 impl Renderer {
     /// Creates the Vulkan Renderer.
-    pub fn new(display_handle: DisplayHandle, window_handle: WindowHandle, width: u32, height: u32) -> Result<Self> {
+    pub fn new(window: &Window) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
         let mut data = RendererData::default();
+
+        let display_handle = window.display_handle().unwrap();
+        let window_handle = window.window_handle().unwrap();
+
+        let (width, height) = {
+            let inner_size = window.inner_size();
+            (inner_size.width, inner_size.height)
+        };
 
         let instance = unsafe { create_instance(display_handle.into(), &entry, &mut data)? };
         data.surface = unsafe { ash_window::create_surface(
@@ -144,11 +153,16 @@ impl Renderer {
     ///
     /// # Safety
     /// Do not call this function if the window is minimised or if `destroy` has been called
-    pub unsafe fn render(&mut self, width: u32, height: u32) -> Result<()> {
+    pub unsafe fn render(&mut self, window: &Window) -> Result<()> {
         let render_fence = self.data.render_fences[self.frame];
 
         self.device.wait_for_fences(&[render_fence], true, 1000000000)?;
         self.device.reset_fences(&[render_fence])?;
+
+        (self.width, self.height) = {
+            let inner_size = window.inner_size();
+            (inner_size.width, inner_size.height)
+        };
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&self.instance, &self.device);
         let result = swapchain_loader.acquire_next_image(
@@ -162,7 +176,7 @@ impl Renderer {
             Ok((image_index, _)) => image_index as usize,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 warn!("acquire: Out of date");
-                return self.recreate_swapchain(width, height)
+                return self.recreate_swapchain()
             },
             Err(e) => {
                 warn!("acquire: error");
@@ -196,7 +210,7 @@ impl Renderer {
 
         if self.resized || changed {
             self.resized = false;
-            self.recreate_swapchain(width, height)?;
+            self.recreate_swapchain()?;
         } else if let Err(e) = result {
             return Err(anyhow!(e));
         } else {
@@ -265,7 +279,7 @@ impl Renderer {
         Ok(())
     }
 
-    unsafe fn recreate_swapchain(&mut self, width: u32, height: u32) -> Result<()> {
+    unsafe fn recreate_swapchain(&mut self) -> Result<()> {
         self.data.recreated = true;
 
         info!("Recreating swapchain");
@@ -274,7 +288,7 @@ impl Renderer {
         self.destroy_swapchain();
 
         let old_swapchain = self.data.swapchain;
-        create_swapchain(&self._entry, &self.instance, &self.device, &mut self.data, width, height)?;
+        create_swapchain(&self._entry, &self.instance, &self.device, &mut self.data, self.width, self.height)?;
 
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
         swapchain_loader.destroy_swapchain(old_swapchain, None);

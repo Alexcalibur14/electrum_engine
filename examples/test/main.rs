@@ -1,6 +1,5 @@
 use anyhow::Result;
 use electrum_engine::Renderer;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ControlFlow, EventLoopBuilder}, window::Window};
@@ -32,9 +31,7 @@ impl ApplicationHandler for App {
         let window = event_loop.create_window(Window::default_attributes()
             .with_title("Electrum Renderer Example")).unwrap();
 
-        let size = window.inner_size();
-
-        let renderer = Renderer::new(window.display_handle().unwrap(), window.window_handle().unwrap(), size.width, size.height).unwrap();
+        let renderer = Renderer::new(&window).unwrap();
 
         self.window = Some(window);
         self.renderer = Some(renderer)
@@ -58,9 +55,7 @@ impl ApplicationHandler for App {
                 let renderer = self.renderer.as_mut().unwrap();
                 let window = self.window.as_ref().unwrap();
 
-                let size = window.inner_size();
-
-                unsafe { renderer.render(size.width, size.height) }.unwrap();
+                unsafe { renderer.render(window) }.unwrap();
 
                 self.window.as_ref().unwrap().request_redraw();
             }
