@@ -122,7 +122,7 @@ impl Renderer {
             1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::ImageAspectFlags::COLOR,
-            false
+            false,
         );
         data.colour_attachment = colour_attachement;
 
@@ -135,6 +135,42 @@ impl Renderer {
         };
 
         info!("finished initialising");
+
+        let egui_context = egui::Context::default();
+        egui_extras::install_image_loaders(&egui_context);
+
+        let egui_winit = egui_winit::State::new(
+            egui_context.clone(),
+            egui::ViewportId::ROOT,
+            window,
+            None,
+            None,
+            None,
+        );
+        
+        let dynamic_rendering = egui_ash_renderer::DynamicRendering {
+            color_attachment_format: vk::Format::R16G16B16A16_SFLOAT,
+            depth_attachment_format: None,
+        };
+        let options = egui_ash_renderer::Options {
+            in_flight_frames: data.swapchain_images.len(),
+            enable_depth_test: false,
+            enable_depth_write: false,
+            srgb_framebuffer: true,
+        };
+        let egui_renderer = egui_ash_renderer::Renderer::with_default_allocator(
+            &instance,
+            data.physical_device.clone(),
+            device.clone(),
+            dynamic_rendering,
+            options,
+        ).unwrap(); 
+
+        data.egui_context = egui_context;
+        data.egui_renderer = Some(egui_renderer);
+        data.egui_winit = Some(egui_winit);
+
+        info!("Initialised Egui");
 
         Ok(Renderer {
             _entry: entry,
@@ -153,7 +189,7 @@ impl Renderer {
     ///
     /// # Safety
     /// Do not call this function if the window is minimised or if `destroy` has been called
-    pub unsafe fn render(&mut self, window: &Window) -> Result<()> {
+    pub unsafe fn render<F: FnMut(&egui::Context)>(&mut self, window: &Window, ui: &mut F) -> Result<()> {
         let render_fence = self.data.render_fences[self.frame];
 
         self.device.wait_for_fences(&[render_fence], true, 1000000000)?;
@@ -184,8 +220,33 @@ impl Renderer {
             },
         };
 
-        self.update_command_buffer(image_index)?;
+        let raw_input = self.data.egui_winit.as_mut().unwrap().take_egui_input(window);
 
+        let egui::FullOutput {
+            platform_output,
+            textures_delta,
+            shapes,
+            pixels_per_point,
+            ..
+        } = self.data.egui_context.run(raw_input, |ctx| {
+            ui(ctx)
+        });
+
+        self.data.egui_winit.as_mut().unwrap().handle_platform_output(window, platform_output);
+
+        // if !textures_delta.free.is_empty() {
+            
+        // }
+
+        if !textures_delta.set.is_empty() {
+            self.data.egui_renderer.as_mut().unwrap()
+                .set_textures(self.data.graphics_queue, self.data.command_pool, &textures_delta.set)
+                .expect("Failed to update textures");
+        }
+
+        let clipped_primitives = self.data.egui_context.tessellate(shapes, pixels_per_point);
+
+        self.update_command_buffer(image_index, &clipped_primitives, pixels_per_point)?;
         
         let command_info = [command_buffer_submit_info(&self.data.command_buffers[image_index])];
         let wait_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::BOTTOM_OF_PIPE, &self.data.swapchain_semaphores[self.frame])];
@@ -227,7 +288,7 @@ impl Renderer {
         Ok(())
     }
 
-    unsafe fn update_command_buffer(&mut self, image_index: usize) -> Result<()> {
+    unsafe fn update_command_buffer(&mut self, image_index: usize, clipped_primitives: &[egui::ClippedPrimitive], pixels_per_point: f32) -> Result<()> {
         let command_pool = self.data.command_pools[image_index];
         self.device
             .reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
@@ -264,6 +325,8 @@ impl Renderer {
         self.device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.data.vertices.buffer], &[0]);
         self.device.cmd_bind_index_buffer(command_buffer, self.data.indices.buffer, 0, vk::IndexType::UINT32);
         self.device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0);
+
+        self.data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, self.data.swapchain_extent, pixels_per_point, clipped_primitives).unwrap();
 
         self.device.cmd_end_rendering(command_buffer);
 
@@ -408,18 +471,23 @@ pub struct RendererData {
 
     colour_attachment: Image,
 
+    // egui
+    pub egui_renderer: Option<egui_ash_renderer::Renderer>,
+    pub egui_context: egui::Context,
+    pub egui_winit: Option<egui_winit::State>,
+
     pub recreated: bool,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct RenderStats {
-    start: Instant,
+    pub start: Instant,
 
-    delta: Duration,
+    pub delta: Duration,
     delta_start: Instant,
 
-    frame: u64,
+    pub frame: u64,
 }
 
 pub fn align_string(string: &str) -> [i8; 256] {
@@ -1044,7 +1112,7 @@ fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline {
     let viewports = [vk::Viewport::default()
         .width(width as f32)
         .height(height as f32)
-        .min_depth(0.01)
+        .min_depth(0.0)
         .max_depth(1.0)
         .x(0.0)
         .y(0.0)];

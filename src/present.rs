@@ -22,7 +22,10 @@ pub(crate) unsafe fn create_swapchain(
 
     let surface_format = get_swapchain_surface_format(&support.formats);
     let present_mode = get_swapchain_present_mode(&support.present_modes);
-    let extent = get_swapchain_extent(width, height, support.capabilities);
+    let extent = vk::Extent2D {
+        width,
+        height,
+    };
 
     data.swapchain_format = surface_format.format;
     data.swapchain_extent = extent;
@@ -89,25 +92,6 @@ fn get_swapchain_present_mode(present_modes: &[vk::PresentModeKHR]) -> vk::Prese
         .cloned()
         .find(|m| *m == vk::PresentModeKHR::MAILBOX)
         .unwrap_or(vk::PresentModeKHR::FIFO)
-}
-
-fn get_swapchain_extent(width: u32, height: u32, capabilities: vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
-    if capabilities.current_extent.width != u32::MAX {
-        capabilities.current_extent
-    } else {
-        let clamp = |min: u32, max: u32, v: u32| min.max(max.min(v));
-        vk::Extent2D::default()
-            .width(clamp(
-                capabilities.min_image_extent.width,
-                capabilities.max_image_extent.width,
-                width,
-            ))
-            .height(clamp(
-                capabilities.min_image_extent.height,
-                capabilities.max_image_extent.height,
-                height,
-            ))
-    }
 }
 
 pub(crate) unsafe fn create_swapchain_image_views(
