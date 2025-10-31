@@ -70,10 +70,15 @@ impl ApplicationHandler for App {
                 unsafe { renderer.render(window, &mut |ctx| {
                     let _ = egui::Window::new("Render Info")
                         .anchor(egui::Align2::LEFT_TOP, (0.0, 0.0))
+                        .title_bar(false)
+                        .resizable([false, false])
                         .show(ctx, |ui| {
                             ui.label("Stats");
                             ui.label(format!("Framerate: {:.2} fps", self.egui_data.get_framerate()));
                             ui.label(format!("Frame Time: {:.2} ms", self.egui_data.get_frame_time()));
+                            ui.label(format!("Frame number: {}", stats.frame));
+                            ui.label(format!("Draw Calls: {}", stats.draw_calls));
+                            ui.label(format!("Command Buffer time: {:.2} us", self.egui_data.get_cmd_buf_record_time()))
                     });
                 }) }.unwrap();
 
@@ -87,6 +92,7 @@ impl ApplicationHandler for App {
 #[derive(Debug, Default)]
 struct EguiData {
     frame_times: VecDeque<u128>,
+    cmd_buf_times: VecDeque<u128>,
 }
 
 impl EguiData {
@@ -96,6 +102,13 @@ impl EguiData {
         } else {
             self.frame_times.pop_front();
             self.frame_times.push_back(stats.delta.as_millis());
+        }
+
+        if self.cmd_buf_times.len() < 20 {
+            self.cmd_buf_times.push_back(stats.cmd_buf_record_time.as_micros());
+        } else {
+            self.cmd_buf_times.pop_front();
+            self.cmd_buf_times.push_back(stats.cmd_buf_record_time.as_micros());
         }
     }
 
@@ -107,5 +120,10 @@ impl EguiData {
     fn get_frame_time(&self) -> f32 {
         let sum: u128 = self.frame_times.iter().sum();
         sum as f32 / self.frame_times.len() as f32
+    }
+
+    fn get_cmd_buf_record_time(&self) -> f32 {
+        let sum: u128 = self.cmd_buf_times.iter().sum();
+        sum as f32 / self.cmd_buf_times.len() as f32
     }
 }

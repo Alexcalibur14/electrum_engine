@@ -131,6 +131,9 @@ impl Renderer {
             start: Instant::now(),
             delta: Duration::ZERO,
             delta_start: Instant::now(),
+            draw_calls: 0,
+            cmd_buf_record_time: Duration::ZERO,
+            cmd_buf_record_start: Instant::now(),
             frame: 0,
         };
 
@@ -246,8 +249,10 @@ impl Renderer {
 
         let clipped_primitives = self.data.egui_context.tessellate(shapes, pixels_per_point);
 
+        self.stats.cmd_buf_record_start = Instant::now();
         self.update_command_buffer(image_index, &clipped_primitives, pixels_per_point)?;
-        
+        self.stats.cmd_buf_record_time = self.stats.cmd_buf_record_start.elapsed();
+
         let command_info = [command_buffer_submit_info(&self.data.command_buffers[image_index])];
         let wait_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::BOTTOM_OF_PIPE, &self.data.swapchain_semaphores[self.frame])];
         let signal_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::ALL_GRAPHICS, &self.data.render_semaphores[image_index])];
@@ -326,7 +331,11 @@ impl Renderer {
         self.device.cmd_bind_index_buffer(command_buffer, self.data.indices.buffer, 0, vk::IndexType::UINT32);
         self.device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0);
 
+        self.stats.draw_calls += 1;
+
         self.data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, self.data.swapchain_extent, pixels_per_point, clipped_primitives).unwrap();
+
+        self.stats.draw_calls += 1;
 
         self.device.cmd_end_rendering(command_buffer);
 
@@ -479,13 +488,17 @@ pub struct RendererData {
     pub recreated: bool,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct RenderStats {
     pub start: Instant,
 
     pub delta: Duration,
     delta_start: Instant,
+
+    pub cmd_buf_record_time: Duration,
+    cmd_buf_record_start: Instant,
+
+    pub draw_calls: u64,
 
     pub frame: u64,
 }
