@@ -5,11 +5,20 @@ use anyhow::{Result, anyhow};
 
 use crate::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
-#[allow(dead_code)]
 pub enum MipLevels {
     One,
     Value(u32),
     Maximum,
+}
+
+impl MipLevels {
+    pub fn mips(&self, width: u32, height: u32) -> u32 {
+        match self {
+            MipLevels::One => 1,
+            MipLevels::Value(v) => *v,
+            MipLevels::Maximum => (width.max(height) as f32).log2().floor() as u32 + 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -39,11 +48,7 @@ impl Image {
         aspects: vk::ImageAspectFlags,
         generate_sampler: bool,
     ) -> Self {
-        let mips = match mip_levels {
-            MipLevels::One => 1,
-            MipLevels::Value(v) => v,
-            MipLevels::Maximum => (width.max(height) as f32).log2().floor() as u32 + 1,
-        };
+        let mips = mip_levels.mips(width, height);
 
         let (image, image_memory) = unsafe {
             create_image(
