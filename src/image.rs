@@ -5,7 +5,9 @@ use anyhow::{Result, anyhow};
 
 use crate::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum MipLevels {
+    #[default]
     One,
     Value(u32),
     Maximum,
@@ -47,6 +49,7 @@ impl Image {
         properties: vk::MemoryPropertyFlags,
         aspects: vk::ImageAspectFlags,
         generate_sampler: bool,
+        name: &str,
     ) -> Self {
         let mips = mip_levels.mips(width, height);
 
@@ -68,6 +71,9 @@ impl Image {
         }
         .unwrap();
 
+        set_object_name(instance, device, name, image).unwrap();
+        set_object_name(instance, device, &format!("{name}_memory"), image_memory).unwrap();
+
         let view = unsafe { create_image_view(
             device,
             image,
@@ -78,10 +84,12 @@ impl Image {
             layer_count,
         ) }.unwrap();
 
+        set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
+
         let sampler = if generate_sampler {
-            Some(
-                unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap()
-            )
+            let sampler = unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap();
+            set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+            Some(sampler)
         } else {
             None
         };

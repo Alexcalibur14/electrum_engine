@@ -124,6 +124,7 @@ impl Renderer {
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::ImageAspectFlags::COLOR,
             false,
+            "color_attachment",
         );
         data.colour_attachment = colour_attachement;
 
@@ -295,6 +296,8 @@ impl Renderer {
     }
 
     unsafe fn update_command_buffer(&mut self, image_index: usize, clipped_primitives: &[egui::ClippedPrimitive], pixels_per_point: f32) -> Result<()> {
+        self.stats.draw_calls = 0;
+
         let command_pool = self.data.command_pools[image_index];
         self.device
             .reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
