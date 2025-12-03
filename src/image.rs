@@ -87,7 +87,14 @@ impl Image {
         set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
 
         let sampler = if generate_sampler {
-            let sampler = unsafe { create_texture_sampler(instance, device, &mips, "") }.unwrap();
+            let sampler = unsafe { create_texture_sampler(
+                instance,
+                device,
+                &mips,
+                &Filter::LINEAR,
+                &AddressMode::REPEAT,
+                ""
+            ) }.unwrap();
             set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
             Some(sampler)
         } else {
@@ -433,14 +440,16 @@ pub unsafe fn create_texture_sampler(
     instance: &Instance,
     device: &Device,
     mip_level: &u32,
+    filter: &Filter,
+    address_mode: &AddressMode,
     name: &str,
 ) -> Result<vk::Sampler> {
     let info = vk::SamplerCreateInfo::default()
-        .mag_filter(vk::Filter::LINEAR)
-        .min_filter(vk::Filter::LINEAR)
-        .address_mode_u(vk::SamplerAddressMode::REPEAT)
-        .address_mode_v(vk::SamplerAddressMode::REPEAT)
-        .address_mode_w(vk::SamplerAddressMode::REPEAT)
+        .mag_filter(filter.mag)
+        .min_filter(filter.min)
+        .address_mode_u(address_mode.u)
+        .address_mode_v(address_mode.v)
+        .address_mode_w(address_mode.w)
         .anisotropy_enable(true)
         .max_anisotropy(16.0)
         .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
@@ -462,6 +471,91 @@ pub unsafe fn create_texture_sampler(
     .unwrap();
 
     Ok(texture_sampler)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Filter {
+    min: vk::Filter,
+    mag: vk::Filter,
+}
+
+impl Filter {
+    pub const LINEAR: Self = {
+        Filter {
+            min: vk::Filter::LINEAR,
+            mag: vk::Filter::LINEAR,
+        }
+    };
+
+    pub const NEAREST: Self = {
+        Filter {
+            min: vk::Filter::NEAREST,
+            mag: vk::Filter::NEAREST,
+        }
+    };
+
+    pub const MIN_LINEAR: Self = {
+        Filter {
+            min: vk::Filter::LINEAR,
+            mag: vk::Filter::NEAREST,
+        }
+    };
+
+    pub const MAG_LINEAR: Self = {
+        Filter {
+            min: vk::Filter::NEAREST,
+            mag: vk::Filter::LINEAR,
+        }
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AddressMode {
+    u: vk::SamplerAddressMode,
+    v: vk::SamplerAddressMode,
+    w: vk::SamplerAddressMode,
+}
+
+impl AddressMode {
+    pub const REPEAT: Self = {
+        AddressMode {
+            u: vk::SamplerAddressMode::REPEAT,
+            v: vk::SamplerAddressMode::REPEAT,
+            w: vk::SamplerAddressMode::REPEAT,
+        }
+    };
+
+    pub const MIRRORED_REPEAT: Self = {
+        AddressMode {
+            u: vk::SamplerAddressMode::MIRRORED_REPEAT,
+            v: vk::SamplerAddressMode::MIRRORED_REPEAT,
+            w: vk::SamplerAddressMode::MIRRORED_REPEAT,
+        }
+    };
+
+    pub const MIRROR_CLAMP_TO_EDGE: Self = {
+        AddressMode {
+            u: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
+            v: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
+            w: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
+        }
+    };
+    
+    pub const CLAMP_TO_BORDER: Self = {
+        AddressMode {
+            u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+        }
+    };
+    
+    pub const CLAMP_TO_EDGE: Self = {
+        AddressMode {
+            u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+        }
+    };
 }
 
 unsafe fn generate_mipmaps(
