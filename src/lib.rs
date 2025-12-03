@@ -24,7 +24,6 @@ pub mod command;
 pub mod buffer;
 pub mod image;
 pub mod present;
-pub mod render_graph;
 pub mod resources;
 
 use command::*;
