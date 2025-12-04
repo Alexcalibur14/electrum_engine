@@ -343,12 +343,7 @@ impl Renderer {
 
         self.device.cmd_end_rendering(command_buffer);
 
-        transition_image(&self.device, command_buffer, self.data.colour_attachment.image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-        transition_image(&self.device, command_buffer, self.data.swapchain_images[image_index], vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-
-        copy_image_to_image(&self.device, command_buffer, self.data.colour_attachment.image, self.data.swapchain_images[image_index], self.data.swapchain_extent, self.data.swapchain_extent);
-
-        transition_image(&self.device, command_buffer, self.data.swapchain_images[image_index], vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
+        setup_and_copy_to_swapchain(&self.device, &self.data, command_buffer, self.data.swapchain_images[image_index], self.data.colour_attachment.image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -987,7 +982,7 @@ fn set_object_name(
     Ok(())
 }
 
-fn begin_command_label(
+pub fn begin_command_label(
     instance: &Instance,
     device: &Device,
     command_buffer: vk::CommandBuffer,
@@ -996,7 +991,7 @@ fn begin_command_label(
 ) {
     if VALIDATION_ENABLED {
         let name_string = name.to_owned() + "\0";
-        let name_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(name_string.as_bytes()) };
+        let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
             .color(colour);
@@ -1006,7 +1001,7 @@ fn begin_command_label(
     }
 }
 
-fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer) {
+pub fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer) {
     if VALIDATION_ENABLED {
         let debug_device = debug_utils::Device::new(instance, device);
         unsafe { debug_device.cmd_end_debug_utils_label(command_buffer) }
@@ -1015,7 +1010,7 @@ fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::C
 
 /// This will place a label for debbuging applications to display at that point
 /// If all the values in the `colour` array are 0.0 the colour wil be ignored
-fn insert_command_label(
+pub fn insert_command_label(
     instance: &Instance,
     device: &Device,
     command_buffer: vk::CommandBuffer,
@@ -1024,7 +1019,7 @@ fn insert_command_label(
 ) {
     if VALIDATION_ENABLED {
         let name_string = name.to_owned() + "\0";
-        let name_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(name_string.as_bytes()) };
+        let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
             .color(colour);
