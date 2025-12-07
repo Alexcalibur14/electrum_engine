@@ -258,6 +258,8 @@ pub unsafe fn create_texture_image(
     Ok((texture_image, texture_image_memory))
 }
 
+/// Transitions image layout  \
+/// Creates its own one time use command buffers so do not use when drawing
 unsafe fn transition_image_layout(
     instance: &Instance,
     device: &Device,
@@ -366,6 +368,9 @@ unsafe fn copy_buffer_to_image(
     Ok(())
 }
 
+/// Copies one image to another
+/// - `src` image must be in [TRANSFER_SRC_OPTIMAL](vk::ImageLayout::TRANSFER_SRC_OPTIMAL) image layout
+/// - `dst` image must be in [TRANSFER_DST_OPTIMAL](vk::ImageLayout::TRANSFER_DST_OPTIMAL) image layout
 pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, src: vk::Image, dst: vk::Image, src_size: vk::Extent2D, dst_size: vk::Extent2D) {
     let regions = [
         vk::ImageBlit2::default()

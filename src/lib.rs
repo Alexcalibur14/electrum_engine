@@ -25,11 +25,14 @@ pub mod buffer;
 pub mod image;
 pub mod present;
 pub mod resources;
+pub mod draw;
 
 use command::*;
 use buffer::*;
 use image::*;
 use present::*;
+
+use crate::resources::Collection;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -40,11 +43,11 @@ const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME, ash::khr::dynam
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 
-pub struct Renderer {
+pub struct Renderer<'a> {
     _entry: Entry,
     pub instance: Instance,
     pub device: Device,
-    pub data: RendererData,
+    pub data: RendererData<'a>,
     pub stats: RenderStats,
     pub width: u32,
     pub height: u32,
@@ -52,7 +55,7 @@ pub struct Renderer {
     pub resized: bool,
 }
 
-impl Renderer {
+impl<'a> Renderer<'a> {
     /// Creates the Vulkan Renderer.
     pub fn new(window: &Window) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
@@ -86,48 +89,6 @@ impl Renderer {
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
         unsafe { create_sync_objects(&instance, &device, &mut data, image_count) }?;
-
-        let pipeline = create_pipeline(&device, width, height);
-        data.pipeline = pipeline;
-
-        let vertices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<TestVertex>() * 6) as u64, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
-            TestVertex{ position: [ 0.0 , -0.5 ], colour: [0.0 , 1.0 , 0.0] },
-            TestVertex{ position: [-0.25, -0.25], colour: [0.25, 0.75, 0.25] },
-            TestVertex{ position: [ 0.25, -0.25], colour: [0.25, 0.75, 0.25] },
-            TestVertex{ position: [-0.25,  0.25], colour: [0.75, 0.25, 0.75] },
-            TestVertex{ position: [ 0.25,  0.25], colour: [0.75, 0.25, 0.75] },
-            TestVertex{ position: [ 0.0 ,  0.5 ], colour: [1.0 , 0.0 , 1.0] },
-        ]).unwrap();
-        data.vertices = vertices;
-
-        let indices = create_and_stage_buffer(&instance, &device, &data, (std::mem::size_of::<u32>() * 12) as u64, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
-            0, 1, 2,
-            1, 3, 2,
-            2, 3, 4,
-            3, 5, 4,
-        ]).unwrap();
-        data.indices = indices;
-
-        let colour_attachement = Image::new(
-            &instance,
-            &device,
-            &data,
-            width,
-            height,
-            MipLevels::One,
-            vk::SampleCountFlags::TYPE_1,
-            vk::Format::R16G16B16A16_SFLOAT,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
-            vk::ImageViewType::TYPE_2D,
-            1,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            vk::ImageAspectFlags::COLOR,
-            false,
-            "color_attachment",
-        );
-        data.colour_attachment = colour_attachement;
-
 
         let stats = RenderStats {
             start: Instant::now(),
@@ -307,43 +268,9 @@ impl Renderer {
         let info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-        let attachment_infos = [
-            vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .image_view(self.data.colour_attachment.view)
-        ];
-
-        let rendering_info = vk::RenderingInfo::default()
-            .layer_count(1)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: self.data.swapchain_extent
-            })
-            .color_attachments(&attachment_infos);
-
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        transition_image(&self.device, command_buffer, self.data.colour_attachment.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
-
-        self.device.cmd_begin_rendering(command_buffer, &rendering_info);
-
-        self.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.data.pipeline);
-        self.device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.data.vertices.buffer], &[0]);
-        self.device.cmd_bind_index_buffer(command_buffer, self.data.indices.buffer, 0, vk::IndexType::UINT32);
-        self.device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0);
-
-        self.stats.draw_calls += 1;
-
-        self.data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, self.data.swapchain_extent, pixels_per_point, clipped_primitives).unwrap();
-
-        self.stats.draw_calls += 1;
-
-        self.device.cmd_end_rendering(command_buffer);
-
-        setup_and_copy_to_swapchain(&self.device, &self.data, command_buffer, self.data.swapchain_images[image_index], self.data.colour_attachment.image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+        (self.data.draw_func)(&self.device, command_buffer, image_index, &mut self.data, &mut self.stats, clipped_primitives, pixels_per_point);
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -429,15 +356,15 @@ impl Renderer {
     }
 }
 
-impl Drop for Renderer {
+impl<'a> Drop for Renderer<'a> {
     fn drop(&mut self) {
         unsafe { self.destroy() };
     }
 }
 
 /// The Vulkan handles and associated properties used by the Vulkan app.
-#[derive(Default)]
-pub struct RendererData {
+// #[derive(Default)]
+pub struct RendererData<'a> {
     // Debug
     pub messenger: vk::DebugUtilsMessengerEXT,
 
@@ -452,6 +379,7 @@ pub struct RendererData {
     // Swapchain
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
+    pub swapchain_rect: vk::Rect2D,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
@@ -473,11 +401,13 @@ pub struct RendererData {
     pub msaa_samples: vk::SampleCountFlags,
 
     // Temp
-    vertices: BufferWrapper,
-    indices: BufferWrapper,
-    pipeline: vk::Pipeline,
+    pub vertices: BufferWrapper,
+    pub indices: BufferWrapper,
+    pub pipeline: vk::Pipeline,
 
-    colour_attachment: Image,
+    pub attachments: Collection<'a, Image>,
+
+    pub draw_func: fn(&Device, vk::CommandBuffer, usize, data: &mut RendererData, &mut RenderStats, &[egui::ClippedPrimitive], f32),
 
     // egui
     pub egui_renderer: Option<egui_ash_renderer::Renderer>,
@@ -485,6 +415,41 @@ pub struct RendererData {
     pub egui_winit: Option<egui_winit::State>,
 
     pub recreated: bool,
+}
+
+impl<'a> Default for RendererData<'a> {
+    fn default() -> Self {
+        Self {
+            messenger: Default::default(),
+            surface: Default::default(),
+            physical_device: Default::default(),
+            graphics_queue: Default::default(),
+            present_queue: Default::default(),
+            swapchain_format: Default::default(),
+            swapchain_extent: Default::default(),
+            swapchain_rect: Default::default(),
+            swapchain: Default::default(),
+            swapchain_images: Default::default(),
+            swapchain_image_views: Default::default(),
+            command_pool: Default::default(),
+            command_pools: Default::default(),
+            command_buffers: Default::default(),
+            secondary_command_buffers: Default::default(),
+            swapchain_semaphores: Default::default(),
+            render_semaphores: Default::default(),
+            render_fences: Default::default(),
+            msaa_samples: Default::default(),
+            vertices: Default::default(),
+            indices: Default::default(),
+            pipeline: Default::default(),
+            attachments: Collection::new(),
+            draw_func: |_, _, _, _, _, _, _| {},
+            egui_renderer: Default::default(),
+            egui_context: Default::default(),
+            egui_winit: Default::default(),
+            recreated: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1051,7 +1016,7 @@ where
 }
 
 
-fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline {
+pub fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline {
     let bytecode = read_spv(&mut fs::File::open("res/shaders/test.vert.spv").unwrap()).unwrap();
     let create_info = vk::ShaderModuleCreateInfo::default()
         .code(&bytecode);
@@ -1167,9 +1132,9 @@ pub trait Vertex {
 
 #[repr(C)]
 #[derive(Debug, Vertex)]
-struct TestVertex {
+pub struct TestVertex {
     #[vertex(format = "R32G32_SFLOAT")]
-    position: [f32; 2],
+    pub position: [f32; 2],
     #[vertex(format = "R32G32B32_SFLOAT")]
-    colour: [f32; 3]
+    pub colour: [f32; 3]
 }

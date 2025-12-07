@@ -30,6 +30,10 @@ pub(crate) unsafe fn create_swapchain(
 
     data.swapchain_format = surface_format.format;
     data.swapchain_extent = extent;
+    data.swapchain_rect = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent,
+    };
 
     let mut image_count = support.capabilities.min_image_count + 1;
     if support.capabilities.max_image_count != 0
