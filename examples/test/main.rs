@@ -135,7 +135,7 @@ impl<'a> ApplicationHandler for App<'a> {
                         .show(ctx, |ui| {
                             ui.label("Stats");
                             ui.label(format!("Framerate: {:.2} fps", self.egui_data.get_framerate()));
-                            ui.label(format!("Frame Time: {:.2} ms", self.egui_data.get_frame_time()));
+                            ui.label(format!("Frame Time: {:.2} us", self.egui_data.get_frame_time()));
                             ui.label(format!("Frame number: {}", stats.frame));
                             ui.label(format!("Draw Calls: {}", stats.draw_calls));
                             ui.label(format!("Command Buffer time: {:.2} us", self.egui_data.get_cmd_buf_record_time()))
@@ -157,11 +157,11 @@ struct EguiData {
 
 impl EguiData {
     fn update(&mut self, stats: &RenderStats) {
-        if self.frame_times.len() < 10 {
-            self.frame_times.push_back(stats.delta.as_millis());
+        if self.frame_times.len() < 20 {
+            self.frame_times.push_back(stats.delta.as_micros());
         } else {
             self.frame_times.pop_front();
-            self.frame_times.push_back(stats.delta.as_millis());
+            self.frame_times.push_back(stats.delta.as_micros());
         }
 
         if self.cmd_buf_times.len() < 20 {
@@ -174,7 +174,7 @@ impl EguiData {
 
     fn get_framerate(&self) -> f32 {
         let sum: u128 = self.frame_times.iter().sum();
-        1.0 / ((sum as f32 / 1000.0) / self.frame_times.len() as f32)
+        1.0 / ((sum as f32 / 1_000_000.0) / self.frame_times.len() as f32)
     }
 
     fn get_frame_time(&self) -> f32 {
