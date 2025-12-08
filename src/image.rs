@@ -48,7 +48,7 @@ impl Image {
         layer_count: u32,
         properties: vk::MemoryPropertyFlags,
         aspects: vk::ImageAspectFlags,
-        generate_sampler: bool,
+        sampler: Option<(Filter, AddressMode)>,
         name: &str,
     ) -> Self {
         let mips = mip_levels.mips(width, height);
@@ -86,19 +86,20 @@ impl Image {
 
         set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
 
-        let sampler = if generate_sampler {
-            let sampler = unsafe { create_texture_sampler(
-                instance,
-                device,
-                &mips,
-                &Filter::LINEAR,
-                &AddressMode::REPEAT,
-                ""
-            ) }.unwrap();
-            set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
-            Some(sampler)
-        } else {
-            None
+        let sampler = match sampler {
+            Some((filter, address_mode)) => {
+                let sampler = unsafe { create_texture_sampler(
+                    instance,
+                    device,
+                    &mips,
+                    &filter,
+                    &address_mode,
+                    ""
+                ) }.unwrap();
+                set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+                Some(sampler)
+            },
+            None => None,
         };
 
         Image {

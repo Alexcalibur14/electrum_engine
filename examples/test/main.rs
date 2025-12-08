@@ -92,7 +92,7 @@ impl<'a> ApplicationHandler for App<'a> {
             1,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::ImageAspectFlags::COLOR,
-            false,
+            None,
             "color_attachment",
         );
         renderer.data.attachments.push(colour_attachement, &[]);

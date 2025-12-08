@@ -26,6 +26,7 @@ pub mod image;
 pub mod present;
 pub mod resources;
 pub mod draw;
+pub mod task_graph;
 
 use command::*;
 use buffer::*;
