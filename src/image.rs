@@ -23,7 +23,7 @@ impl MipLevels {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Image {
     pub image: vk::Image,
     pub image_memory: vk::DeviceMemory,

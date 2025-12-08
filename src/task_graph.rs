@@ -1,8 +1,9 @@
 use ash::{Device, Instance, vk};
+use tracing::info;
 
-use crate::{RendererData, buffer::BufferWrapper, image::{AddressMode, Filter, Image, MipLevels}};
+use crate::{RenderStats, RendererData, buffer::BufferWrapper, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
 
-
+#[derive(Clone)]
 pub struct TaskGraph<'a> {
     nodes: Vec<Node<'a>>,
     images: Vec<(ImageData<'a>, AccessType)>,
@@ -32,6 +33,11 @@ impl<'a> TaskGraph<'a> {
         self.buffers.push((name, buffer, AccessType::UNDEFINED));
     }
 
+    pub fn create_images(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
+        self.images.iter_mut().for_each(|(image_data, _)| image_data.create(instance, device, data));
+        self.swapchain_extent = data.swapchain_extent;
+    }
+
     pub fn destroy(&mut self, device: &Device) {
         self.images.iter_mut().for_each(|(image_data, access_type)| {
             image_data.destroy(device);
@@ -42,6 +48,8 @@ impl<'a> TaskGraph<'a> {
             *access_type = AccessType::UNDEFINED;
         });
         self.nodes.iter_mut().for_each(|node| node.destroy(device));
+        
+        self.swapchain_extent = vk::Extent2D::default();
     }
 
     pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
@@ -56,9 +64,161 @@ impl<'a> TaskGraph<'a> {
                 *access_type = AccessType::UNDEFINED
             }
         });
+
+        self.swapchain_extent = data.swapchain_extent;
+    }
+
+    pub fn execute(&mut self, device: &Device, command_buffer: vk::CommandBuffer, data: &mut RendererData, stats: &mut RenderStats) {
+        for node in self.nodes.clone().iter_mut() {
+            let color_attachments = node.color_attachments.iter_mut().map(|(name, access)| {
+                let dst_access = *access;
+                let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find color attachment with name: {:?}", name));
+                *access = *src_access;
+                (image_data, src_access, dst_access)
+            }).collect::<Vec<_>>();
+
+            let depth_attachment = {
+                match node.depth_attachment {
+                    Some((name, dst_access)) => {
+                        let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find depth attachment with name: {:?}", name));
+                        Some((image_data, src_access, dst_access))
+                    },
+                    None => None,
+                }
+            };
+
+            let stencil_attachment = {
+                match node.stencil_attachment {
+                    Some((name, dst_access)) => {
+                        let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find stencil attachment with name: {:?}", name));
+                        Some((image_data, src_access, dst_access))
+                    },
+                    None => None,
+                }
+            };
+
+            let internal_images = node.internal_images.iter().map(|(name, dst_access)| {
+                let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find internal image with name: {:?}", name));
+                (image_data, src_access, dst_access)
+            }).collect::<Vec<_>>();
+
+            let internal_buffers = node.internal_buffers.iter().map(|(name, dst_access)| {
+                let (_, buffer, src_access) = self.buffers.iter().find(|(buffer_name, _, _)| buffer_name == name).expect(&format!("could not find internal buffer with name: {:?}", name));
+                (buffer, src_access, dst_access)
+            }).collect::<Vec<_>>();
+
+            let mut image_barriers = vec![];
+
+            color_attachments.iter().for_each(|(image_data, src_access, dst_access)| {
+                let barrier = vk::ImageMemoryBarrier2::default()
+                    .image(image_data.image.image)
+                    .old_layout(src_access.image_layout)
+                    .new_layout(dst_access.image_layout)
+                    .src_access_mask(src_access.access_mask)
+                    .dst_access_mask(dst_access.access_mask)
+                    .src_stage_mask(src_access.pipeline_stage)
+                    .dst_stage_mask(dst_access.pipeline_stage)
+                    .subresource_range(image_subresource_range(vk::ImageAspectFlags::COLOR)); 
+                
+                info!("added image barrier: \n layout: {:?} -> {:?} \n stage: {:?} -> {:?} \n access {:?} -> {:?}",
+                    barrier.old_layout,
+                    barrier.new_layout,
+                    barrier.src_stage_mask,
+                    barrier.dst_stage_mask,
+                    barrier.src_access_mask,
+                    barrier.dst_access_mask,
+                );
+                
+                image_barriers.push(
+                    barrier
+                );
+            });
+
+            if let Some((image_data, src_access, dst_access)) = depth_attachment {
+                image_barriers.push(
+                    vk::ImageMemoryBarrier2::default()
+                        .image(image_data.image.image)
+                        .old_layout(src_access.image_layout)
+                        .new_layout(dst_access.image_layout)
+                        .src_access_mask(src_access.access_mask)
+                        .dst_access_mask(dst_access.access_mask)
+                        .src_stage_mask(src_access.pipeline_stage)
+                        .dst_stage_mask(dst_access.pipeline_stage)
+                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::DEPTH))
+                );
+            }
+
+            if let Some((image_data, src_access, dst_access)) = stencil_attachment {
+                image_barriers.push(
+                    vk::ImageMemoryBarrier2::default()
+                        .image(image_data.image.image)
+                        .old_layout(src_access.image_layout)
+                        .new_layout(dst_access.image_layout)
+                        .src_access_mask(src_access.access_mask)
+                        .dst_access_mask(dst_access.access_mask)
+                        .src_stage_mask(src_access.pipeline_stage)
+                        .dst_stage_mask(dst_access.pipeline_stage)
+                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::STENCIL))
+                );
+            }
+
+            internal_images.iter().for_each(|(image_data, src_access, dst_access)| {
+                image_barriers.push(
+                    vk::ImageMemoryBarrier2::default()
+                        .image(image_data.image.image)
+                        .old_layout(src_access.image_layout)
+                        .new_layout(dst_access.image_layout)
+                        .src_access_mask(src_access.access_mask)
+                        .dst_access_mask(dst_access.access_mask)
+                        .src_stage_mask(src_access.pipeline_stage)
+                        .dst_stage_mask(dst_access.pipeline_stage)
+                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::COLOR))
+                );
+            });
+
+            let mut buffer_barriers = Vec::with_capacity(internal_buffers.len());
+
+            internal_buffers.iter().for_each(|(buffer, src_access, dst_access)| {
+                buffer_barriers.push(
+                    vk::BufferMemoryBarrier2::default()
+                        .buffer(buffer.buffer)
+                        .src_access_mask(src_access.access_mask)
+                        .dst_access_mask(dst_access.access_mask)
+                        .src_stage_mask(src_access.pipeline_stage)
+                        .dst_stage_mask(dst_access.pipeline_stage)
+                );
+            });
+
+            let dependency_info = vk::DependencyInfo::default()
+                .buffer_memory_barriers(&buffer_barriers)
+                .image_memory_barriers(&image_barriers);
+
+            unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
+
+            let draw_data = DrawData {
+                color_attachments: color_attachments.iter().map(|(image_data, _, _)| &image_data.image).collect(),
+                depth_attachment: if let Some((image_data, _, _)) = depth_attachment { Some(&image_data.image) } else { None },
+                stencil_attachment: if let Some((image_data, _, _)) = stencil_attachment { Some(&image_data.image) } else { None },
+                internal_images: internal_images.iter().map(|(image_data, _, _)| &image_data.image).collect(),
+                internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| *buffer).collect(),
+                external_images: vec![],
+                external_buffers: vec![],
+            };
+
+            node.execute(device, command_buffer, draw_data, data, stats);
+        }
+    }
+
+    pub fn images(&self) -> &[(ImageData<'a>, AccessType)] {
+        &self.images
+    }
+
+    pub fn buffers(&self) -> &[(&'a str, BufferWrapper, AccessType)] {
+        &self.buffers
     }
 }
 
+#[derive(Clone)]
 pub struct Node<'a> {
     color_attachments: Vec<(&'a str, AccessType)>,
     depth_attachment: Option<(&'a str, AccessType)>,
@@ -118,8 +278,8 @@ impl<'a> Node<'a> {
         self.task = task
     }
 
-    pub fn execute(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &RendererData) {
-        self.task.execute(device, command_buffer, draw_data, data);
+    pub fn execute(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        self.task.execute(device, command_buffer, draw_data, data, stats);
     }
 
     pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
@@ -131,10 +291,29 @@ impl<'a> Node<'a> {
     }
 }
 
-pub trait Task {
-    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &RendererData);
+pub trait Task: TaskClone {
+    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats);
     fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData);
     fn destroy(&mut self, device: &Device);
+}
+
+pub trait TaskClone {
+    fn clone_box(&self) -> Box<dyn Task>;
+}
+
+impl<T> TaskClone for T
+where 
+    T: 'static + Task + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Task> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn Task> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 pub struct DrawData<'a> {
@@ -147,14 +326,16 @@ pub struct DrawData<'a> {
     pub external_buffers: Vec<&'a BufferWrapper>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct DummyTask;
 
 impl Task for DummyTask {
-    fn execute<'a>(&mut self, _: &Device, _: vk::CommandBuffer, _: DrawData<'a>, _: &RendererData) {}
+    fn execute<'a>(&mut self, _: &Device, _: vk::CommandBuffer, _: DrawData<'a>, _: &mut RendererData, _: &mut RenderStats) {}
     fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
     fn destroy(&mut self, _: &Device) {}
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct AccessType {
     pub pipeline_stage: vk::PipelineStageFlags2,
     pub access_mask: vk::AccessFlags2,
@@ -329,6 +510,7 @@ impl AccessType {
     };
 }
 
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ImageData<'a> {
     image: Image,
     size: ImageSize,

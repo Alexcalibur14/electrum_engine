@@ -8,11 +8,16 @@ use electrum_engine::TestVertex;
 use electrum_engine::buffer::create_and_stage_buffer;
 use electrum_engine::create_pipeline;
 use electrum_engine::draw::bind_index_vertex;
-use electrum_engine::image::Image;
 use electrum_engine::image::MipLevels;
 use electrum_engine::present::setup_and_copy_to_swapchain;
-use electrum_engine::resources::Handle;
-use electrum_engine::{RenderStats, Renderer, RendererData, present::transition_image};
+use electrum_engine::task_graph::AccessType;
+use electrum_engine::task_graph::DrawData;
+use electrum_engine::task_graph::ImageData;
+use electrum_engine::task_graph::ImageSize;
+use electrum_engine::task_graph::Node;
+use electrum_engine::task_graph::Task;
+use electrum_engine::task_graph::TaskGraph;
+use electrum_engine::{RenderStats, Renderer, RendererData};
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ControlFlow, EventLoopBuilder}, platform::x11::EventLoopBuilderExtX11, window::Window};
@@ -45,14 +50,14 @@ struct App<'a> {
 impl<'a> ApplicationHandler for App<'a> {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window = event_loop.create_window(Window::default_attributes()
-            .with_title("Electrum Renderer Example")).unwrap();
+            .with_title("Electrum Renderer Example")
+            .with_resizable(true)
+        ).unwrap();
 
         let mut renderer = Renderer::new(&window).unwrap();
 
-        renderer.data.draw_func = draw;
-
         let (width, height) = {
-            let inner_size = window.inner_size();
+            let inner_size = window.inner_size().to_logical(window.scale_factor());
             (inner_size.width, inner_size.height)
         };
 
@@ -77,25 +82,41 @@ impl<'a> ApplicationHandler for App<'a> {
         ]).unwrap();
         renderer.data.indices = indices;
 
-        let colour_attachement = Image::new(
-            &renderer.instance,
-            &renderer.device,
-            &renderer.data,
-            width,
-            height,
-            MipLevels::One,
-            vk::SampleCountFlags::TYPE_1,
+        let mut task_graph = TaskGraph::new();
+
+        let image = ImageData::new(
+            ImageSize::Swapchain,
             vk::Format::R16G16B16A16_SFLOAT,
-            vk::ImageTiling::OPTIMAL,
+            MipLevels::One,
             vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
+            vk::SampleCountFlags::TYPE_1,
             vk::ImageViewType::TYPE_2D,
             1,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::ImageAspectFlags::COLOR,
             None,
-            "color_attachment",
+            "color_attachment"
         );
-        renderer.data.attachments.push(colour_attachement, &[]);
+
+        task_graph.add_image(image);
+
+        let mut main_node = Node::new();
+        main_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        main_node.set_task(Box::new(MainDraw));
+        task_graph.add_node(main_node);
+
+        let mut egui_node = Node::new();
+        egui_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        egui_node.set_task(Box::new(EguiDraw));
+        task_graph.add_node(egui_node);
+
+        let mut present_node = Node::new();
+        present_node.add_attachment("color_attachment", AccessType::color_attachment_read());
+        present_node.set_task(Box::new(Present));
+        task_graph.add_node(present_node);
+
+        task_graph.create_images(&renderer.instance, &renderer.device, &renderer.data);
+        task_graph.recreate_swapchain(&renderer.instance, &renderer.device, &renderer.data);
+        renderer.data.task_graph = task_graph;
 
 
         self.window = Some(window);
@@ -142,6 +163,7 @@ impl<'a> ApplicationHandler for App<'a> {
                     });
                 }) }.unwrap();
 
+                panic!("frame one exit");
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
@@ -188,38 +210,84 @@ impl EguiData {
     }
 }
 
-fn draw(device: &Device, command_buffer: vk::CommandBuffer, image_index: usize, data: &mut RendererData, stats: &mut RenderStats, clipped_primitives: &[egui::ClippedPrimitive], pixels_per_point: f32) {
-    let attachment_handle = Handle::new(0);
+
+#[derive(Debug, Clone, Copy)]
+struct MainDraw;
+
+impl Task for MainDraw {
+    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        let attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .image_view(draw_data.color_attachments[0].view)
+        ];
+
+        let rendering_info = vk::RenderingInfo::default()
+            .layer_count(1)
+            .render_area(data.swapchain_rect)
+            .color_attachments(&attachment_infos);
+        
+        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+
+        bind_index_vertex(device, command_buffer, data.indices.buffer, vk::IndexType::UINT32, data.vertices.buffer);
+        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipeline) };
+        unsafe { device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0) };
+
+        stats.draw_calls += 1;
+        
+        unsafe { device.cmd_end_rendering(command_buffer) };
+    }
+
+    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
+
+    fn destroy(&mut self, _: &Device) {}
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EguiDraw;
+
+impl Task for EguiDraw {
+    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        let attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
+            .load_op(vk::AttachmentLoadOp::LOAD)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .image_view(draw_data.color_attachments[0].view)
+        ];
+
+        let rendering_info = vk::RenderingInfo::default()
+            .layer_count(1)
+            .render_area(data.swapchain_rect)
+            .color_attachments(&attachment_infos);
+        
+        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+
+        data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, data.swapchain_extent, data.pixels_per_point, &data.clipped_primitives).unwrap();
+
+        stats.draw_calls += 1;
+
+        unsafe { device.cmd_end_rendering(command_buffer) };
+    }
+
+    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
+
+    fn destroy(&mut self, _: &Device) {}
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Present;
+
+impl Task for Present {
+    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+        setup_and_copy_to_swapchain(device, data, command_buffer, data.swapchain_images[data.image_index], draw_data.color_attachments[0].image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+    }
     
-    let attachment_infos = [
-        vk::RenderingAttachmentInfo::default()
-        .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
-        .load_op(vk::AttachmentLoadOp::CLEAR)
-        .store_op(vk::AttachmentStoreOp::STORE)
-        .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        .image_view(data.attachments.get(&attachment_handle).unwrap().view)
-    ];
+    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
 
-    let rendering_info = vk::RenderingInfo::default()
-        .layer_count(1)
-        .render_area(data.swapchain_rect)
-        .color_attachments(&attachment_infos);
-
-    transition_image(device, command_buffer, data.attachments.get(&attachment_handle).unwrap().image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
-
-    unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
-
-    bind_index_vertex(device, command_buffer, data.indices.buffer, vk::IndexType::UINT32, data.vertices.buffer);
-    unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipeline) };
-    unsafe { device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0) };
-
-    stats.draw_calls += 1;
-
-    data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, data.swapchain_extent, pixels_per_point, clipped_primitives).unwrap();
-
-    stats.draw_calls += 1;
-
-    unsafe { device.cmd_end_rendering(command_buffer) };
-
-    setup_and_copy_to_swapchain(device, data, command_buffer, data.swapchain_images[image_index], data.attachments.get(&attachment_handle).unwrap().image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+    fn destroy(&mut self, _: &Device) {}
 }

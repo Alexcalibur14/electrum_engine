@@ -32,6 +32,7 @@ use command::*;
 use buffer::*;
 use image::*;
 use present::*;
+use task_graph::*;
 
 use crate::resources::Collection;
 
@@ -211,10 +212,11 @@ impl<'a> Renderer<'a> {
                 .expect("Failed to update textures");
         }
 
-        let clipped_primitives = self.data.egui_context.tessellate(shapes, pixels_per_point);
+        self.data.clipped_primitives = self.data.egui_context.tessellate(shapes, pixels_per_point);
+        self.data.pixels_per_point = pixels_per_point;
 
         self.stats.cmd_buf_record_start = Instant::now();
-        self.update_command_buffer(image_index, &clipped_primitives, pixels_per_point)?;
+        self.update_command_buffer(image_index)?;
         self.stats.cmd_buf_record_time = self.stats.cmd_buf_record_start.elapsed();
 
         let command_info = [command_buffer_submit_info(&self.data.command_buffers[image_index])];
@@ -257,8 +259,9 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    unsafe fn update_command_buffer(&mut self, image_index: usize, clipped_primitives: &[egui::ClippedPrimitive], pixels_per_point: f32) -> Result<()> {
+    unsafe fn update_command_buffer(&mut self, image_index: usize) -> Result<()> {
         self.stats.draw_calls = 0;
+        self.data.image_index = image_index;
 
         let command_pool = self.data.command_pools[image_index];
         self.device
@@ -271,7 +274,10 @@ impl<'a> Renderer<'a> {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        (self.data.draw_func)(&self.device, command_buffer, image_index, &mut self.data, &mut self.stats, clipped_primitives, pixels_per_point);
+        // (self.data.draw_func)(&self.device, command_buffer, image_index, &mut self.data, &mut self.stats);
+        let mut task_graph = self.data.task_graph.clone();
+        task_graph.execute(&self.device, command_buffer, &mut self.data, &mut self.stats);
+        self.data.task_graph = task_graph;
 
         self.device.end_command_buffer(command_buffer)?;
 
@@ -296,6 +302,10 @@ impl<'a> Renderer<'a> {
 
         create_command_buffers(&self.device, &mut self.data)?;
 
+        let mut task_graph = self.data.task_graph.clone();
+        task_graph.recreate_swapchain(&self.instance, &self.device, &self.data);
+        self.data.task_graph = task_graph;
+
         Ok(())
     }
 
@@ -315,6 +325,10 @@ impl<'a> Renderer<'a> {
         self.device.device_wait_idle().unwrap();
 
         self.destroy_swapchain();
+
+        let mut task_graph = self.data.task_graph.clone();
+        task_graph.destroy(&self.device);
+        self.data.task_graph = task_graph;
 
         self.device.destroy_pipeline(self.data.pipeline, None);
         
@@ -408,12 +422,16 @@ pub struct RendererData<'a> {
 
     pub attachments: Collection<'a, Image>,
 
-    pub draw_func: fn(&Device, vk::CommandBuffer, usize, data: &mut RendererData, &mut RenderStats, &[egui::ClippedPrimitive], f32),
+    pub image_index: usize,
+    pub draw_func: fn(&Device, vk::CommandBuffer, usize, data: &mut RendererData, &mut RenderStats),
+    pub task_graph: TaskGraph<'a>,
 
     // egui
     pub egui_renderer: Option<egui_ash_renderer::Renderer>,
     pub egui_context: egui::Context,
     pub egui_winit: Option<egui_winit::State>,
+    pub clipped_primitives: Vec<egui::ClippedPrimitive>,
+    pub pixels_per_point: f32,
 
     pub recreated: bool,
 }
@@ -444,10 +462,16 @@ impl<'a> Default for RendererData<'a> {
             indices: Default::default(),
             pipeline: Default::default(),
             attachments: Collection::new(),
-            draw_func: |_, _, _, _, _, _, _| {},
+            image_index: Default::default(),
+            draw_func: |_, _, _, _, _| {},
+            task_graph: TaskGraph::new(),
+
             egui_renderer: Default::default(),
             egui_context: Default::default(),
             egui_winit: Default::default(),
+            clipped_primitives: Default::default(),
+            pixels_per_point: Default::default(),
+
             recreated: Default::default(),
         }
     }
