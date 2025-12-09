@@ -9,7 +9,7 @@ use electrum_engine::buffer::create_and_stage_buffer;
 use electrum_engine::create_pipeline;
 use electrum_engine::draw::bind_index_vertex;
 use electrum_engine::image::MipLevels;
-use electrum_engine::present::setup_and_copy_to_swapchain;
+use electrum_engine::image::copy_image_to_image;
 use electrum_engine::task_graph::AccessType;
 use electrum_engine::task_graph::DrawData;
 use electrum_engine::task_graph::ImageData;
@@ -17,6 +17,7 @@ use electrum_engine::task_graph::ImageSize;
 use electrum_engine::task_graph::Node;
 use electrum_engine::task_graph::Task;
 use electrum_engine::task_graph::TaskGraph;
+use electrum_engine::task_graph::transition_image_access;
 use electrum_engine::{RenderStats, Renderer, RendererData};
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -110,7 +111,7 @@ impl<'a> ApplicationHandler for App<'a> {
         task_graph.add_node(egui_node);
 
         let mut present_node = Node::new();
-        present_node.add_attachment("color_attachment", AccessType::color_attachment_read());
+        present_node.add_attachment("color_attachment", AccessType::transfer_src());
         present_node.set_task(Box::new(Present));
         task_graph.add_node(present_node);
 
@@ -163,7 +164,6 @@ impl<'a> ApplicationHandler for App<'a> {
                     });
                 }) }.unwrap();
 
-                panic!("frame one exit");
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
@@ -284,7 +284,11 @@ struct Present;
 
 impl Task for Present {
     fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
-        setup_and_copy_to_swapchain(device, data, command_buffer, data.swapchain_images[data.image_index], draw_data.color_attachments[0].image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+        transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
+
+        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image, data.swapchain_images[data.image_index], data.swapchain_extent, data.swapchain_extent);
+
+        transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::transfer_dst(), AccessType::present_src(), vk::ImageAspectFlags::COLOR);
     }
     
     fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}

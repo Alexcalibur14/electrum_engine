@@ -1,5 +1,4 @@
 use ash::{Device, Instance, vk};
-use tracing::info;
 
 use crate::{RenderStats, RendererData, buffer::BufferWrapper, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
 
@@ -108,27 +107,16 @@ impl<'a> TaskGraph<'a> {
             let mut image_barriers = vec![];
 
             color_attachments.iter().for_each(|(image_data, src_access, dst_access)| {
-                let barrier = vk::ImageMemoryBarrier2::default()
-                    .image(image_data.image.image)
-                    .old_layout(src_access.image_layout)
-                    .new_layout(dst_access.image_layout)
-                    .src_access_mask(src_access.access_mask)
-                    .dst_access_mask(dst_access.access_mask)
-                    .src_stage_mask(src_access.pipeline_stage)
-                    .dst_stage_mask(dst_access.pipeline_stage)
-                    .subresource_range(image_subresource_range(vk::ImageAspectFlags::COLOR)); 
-                
-                info!("added image barrier: \n layout: {:?} -> {:?} \n stage: {:?} -> {:?} \n access {:?} -> {:?}",
-                    barrier.old_layout,
-                    barrier.new_layout,
-                    barrier.src_stage_mask,
-                    barrier.dst_stage_mask,
-                    barrier.src_access_mask,
-                    barrier.dst_access_mask,
-                );
-                
                 image_barriers.push(
-                    barrier
+                    vk::ImageMemoryBarrier2::default()
+                        .image(image_data.image.image)
+                        .old_layout(src_access.image_layout)
+                        .new_layout(dst_access.image_layout)
+                        .src_access_mask(src_access.access_mask)
+                        .dst_access_mask(dst_access.access_mask)
+                        .src_stage_mask(src_access.pipeline_stage)
+                        .dst_stage_mask(dst_access.pipeline_stage)
+                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::COLOR))
                 );
             });
 
@@ -204,6 +192,39 @@ impl<'a> TaskGraph<'a> {
             };
 
             node.execute(device, command_buffer, draw_data, data, stats);
+
+            let mut images_clone = self.images.clone();
+            
+            node.color_attachments.iter().for_each(|(name, dst_access)| {
+                let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == *name).expect("msg");
+                *latest_access = *dst_access;
+            });
+
+            if let Some((name, dst_access)) = node.depth_attachment {
+                let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == name).expect("msg");
+                *latest_access = dst_access;
+            }
+
+            if let Some((name, dst_access)) = node.stencil_attachment {
+                let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == name).expect("msg");
+                *latest_access = dst_access;
+            }
+
+            node.internal_images.iter().for_each(|(name, dst_access)| {
+                let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == *name).expect("msg");
+                *latest_access = *dst_access;
+            });
+            
+            self.images = images_clone;
+
+            let mut buffers_clone = self.buffers.clone();
+            
+            node.internal_buffers.iter().for_each(|(name, dst_access)| {
+                let (_, _, latest_access) = buffers_clone.iter_mut().find(|(buffer_name, _, _)| buffer_name == name).expect("msg");
+                *latest_access = *dst_access;
+            });
+            
+            self.buffers = buffers_clone;
         }
     }
 
@@ -489,6 +510,32 @@ impl AccessType {
             image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         }
     }
+
+    // ----- Transfer ----- //
+    pub fn transfer_src() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::TRANSFER,
+            access_mask: vk::AccessFlags2::TRANSFER_READ,
+            image_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        }
+    }
+
+    pub fn transfer_dst() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::TRANSFER,
+            access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+            image_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        }
+    }
+
+    /// Swapchain final layout
+    pub fn present_src() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            access_mask: vk::AccessFlags2::MEMORY_READ,
+            image_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+        }
+    }
     
     /// Not recomended for prduction \
     /// please only use during prototyping
@@ -633,4 +680,21 @@ impl ImageSize {
             ImageSize::Fixed { width, height } => (*width, *height),
         }
     }
+}
+
+pub fn transition_image_access(device: &Device, command_buffer: vk::CommandBuffer, image: vk::Image, src_access: AccessType, dst_access: AccessType, aspect: vk::ImageAspectFlags) {
+    let image_barrier = [vk::ImageMemoryBarrier2::default()
+        .src_access_mask(src_access.access_mask)
+        .src_stage_mask(src_access.pipeline_stage)
+        .dst_access_mask(dst_access.access_mask)
+        .dst_stage_mask(dst_access.pipeline_stage)
+        .old_layout(src_access.image_layout)
+        .new_layout(dst_access.image_layout)
+        .subresource_range(image_subresource_range(aspect))
+        .image(image)];
+
+    let dependency_info = vk::DependencyInfo::default()
+        .image_memory_barriers(&image_barrier);
+    
+    unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
 }

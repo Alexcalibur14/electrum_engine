@@ -34,8 +34,6 @@ use image::*;
 use present::*;
 use task_graph::*;
 
-use crate::resources::Collection;
-
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 
@@ -420,10 +418,7 @@ pub struct RendererData<'a> {
     pub indices: BufferWrapper,
     pub pipeline: vk::Pipeline,
 
-    pub attachments: Collection<'a, Image>,
-
     pub image_index: usize,
-    pub draw_func: fn(&Device, vk::CommandBuffer, usize, data: &mut RendererData, &mut RenderStats),
     pub task_graph: TaskGraph<'a>,
 
     // egui
@@ -461,9 +456,7 @@ impl<'a> Default for RendererData<'a> {
             vertices: Default::default(),
             indices: Default::default(),
             pipeline: Default::default(),
-            attachments: Collection::new(),
             image_index: Default::default(),
-            draw_func: |_, _, _, _, _| {},
             task_graph: TaskGraph::new(),
 
             egui_renderer: Default::default(),
