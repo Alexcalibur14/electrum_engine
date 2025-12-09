@@ -62,8 +62,9 @@ impl<'a> ApplicationHandler for App<'a> {
             (inner_size.width, inner_size.height)
         };
 
-        let pipeline = create_pipeline(&renderer.device, width, height);
+        let (pipeline, layout) = create_pipeline(&renderer.device, width, height);
         renderer.data.pipeline = pipeline;
+        renderer.data.pipeline_layout = layout;
 
         let vertices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, (std::mem::size_of::<TestVertex>() * 6) as u64, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
             TestVertex{ position: [ 0.0 , -0.5 ], colour: [0.0 , 1.0 , 0.0] },
@@ -141,7 +142,6 @@ impl<'a> ApplicationHandler for App<'a> {
 
         match event {
             WindowEvent::CloseRequested => {
-                println!("The close button was pressed; stopping");
                 event_loop.exit();
             },
             WindowEvent::RedrawRequested => {

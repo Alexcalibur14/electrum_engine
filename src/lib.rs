@@ -17,6 +17,7 @@ use winit::window::Window;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::{self, CStr};
+use std::mem::ManuallyDrop;
 use std::{fs, ptr};
 use std::time::{Duration, Instant};
 
@@ -47,7 +48,7 @@ pub struct Renderer<'a> {
     _entry: Entry,
     pub instance: Instance,
     pub device: Device,
-    pub data: RendererData<'a>,
+    pub data: ManuallyDrop<RendererData<'a>>,
     pub stats: RenderStats,
     pub width: u32,
     pub height: u32,
@@ -141,7 +142,7 @@ impl<'a> Renderer<'a> {
         Ok(Renderer {
             _entry: entry,
             instance,
-            data,
+            data: ManuallyDrop::new(data),
             device,
             frame: 0,
             width,
@@ -200,13 +201,16 @@ impl<'a> Renderer<'a> {
 
         self.data.egui_winit.as_mut().unwrap().handle_platform_output(window, platform_output);
 
-        // if !textures_delta.free.is_empty() {
-            
-        // }
+        if !textures_delta.free.is_empty() {
+            self.data.egui_renderer.as_mut().unwrap().free_textures(&textures_delta.free).unwrap();
+        }
+
+        let graphics_queue = self.data.graphics_queue.clone();
+        let command_pool = self.data.command_pool.clone();
 
         if !textures_delta.set.is_empty() {
             self.data.egui_renderer.as_mut().unwrap()
-                .set_textures(self.data.graphics_queue, self.data.command_pool, &textures_delta.set)
+                .set_textures(graphics_queue, command_pool, &textures_delta.set)
                 .expect("Failed to update textures");
         }
 
@@ -272,7 +276,6 @@ impl<'a> Renderer<'a> {
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        // (self.data.draw_func)(&self.device, command_buffer, image_index, &mut self.data, &mut self.stats);
         let mut task_graph = self.data.task_graph.clone();
         task_graph.execute(&self.device, command_buffer, &mut self.data, &mut self.stats);
         self.data.task_graph = task_graph;
@@ -313,65 +316,62 @@ impl<'a> Renderer<'a> {
             .iter()
             .for_each(|v| self.device.destroy_image_view(*v, None));
     }
+}
 
-    /// This function will destroy all vulkan objects in the renderer
-    ///
-    /// # Safety
-    /// This function **MUST** be called befoore the end of the program
-    /// and **MUST** be the last function called on the renderer
-    unsafe fn destroy(&mut self) {
-        self.device.device_wait_idle().unwrap();
+impl<'a> Drop for Renderer<'a> {
+    fn drop(&mut self) {
+        unsafe { self.device.device_wait_idle().unwrap() };
 
-        self.destroy_swapchain();
+        unsafe { self.destroy_swapchain() };
 
         let mut task_graph = self.data.task_graph.clone();
         task_graph.destroy(&self.device);
         self.data.task_graph = task_graph;
 
-        self.device.destroy_pipeline(self.data.pipeline, None);
+        self.data.vertices.destroy(&self.device);
+        self.data.indices.destroy(&self.device);
+
+        unsafe { self.device.destroy_pipeline(self.data.pipeline, None) };
+        unsafe { self.device.destroy_pipeline_layout(self.data.pipeline_layout, None);}
         
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
-        swapchain_loader.destroy_swapchain(self.data.swapchain, None);
+        unsafe { swapchain_loader.destroy_swapchain(self.data.swapchain, None) };
         self.data
             .command_pools
             .iter()
-            .for_each(|p| self.device.destroy_command_pool(*p, None));
+            .for_each(|p| unsafe { self.device.destroy_command_pool(*p, None) });
 
-        self.device
-            .destroy_command_pool(self.data.command_pool, None);
+        unsafe { self.device
+                    .destroy_command_pool(self.data.command_pool, None) };
 
         self.data
             .render_fences
             .iter()
-            .for_each(|f| self.device.destroy_fence(*f, None));
+            .for_each(|f| unsafe { self.device.destroy_fence(*f, None) });
 
         self.data
             .render_semaphores
             .iter()
-            .for_each(|s| self.device.destroy_semaphore(*s, None));
+            .for_each(|s| unsafe { self.device.destroy_semaphore(*s, None) });
 
         self.data
             .swapchain_semaphores
             .iter()
-            .for_each(|s| self.device.destroy_semaphore(*s, None));
-
-        self.device.destroy_device(None);
+            .for_each(|s| unsafe { self.device.destroy_semaphore(*s, None) });
 
         let surface_loader = surface::Instance::new(&self._entry, &self.instance);
-        surface_loader.destroy_surface(self.data.surface, None);
-
+        unsafe { surface_loader.destroy_surface(self.data.surface, None) };
+        
         if VALIDATION_ENABLED {
             let debug_utils_loader = debug_utils::Instance::new(&self._entry, &self.instance);
-            debug_utils_loader.destroy_debug_utils_messenger(self.data.messenger, None);
+            unsafe { debug_utils_loader.destroy_debug_utils_messenger(self.data.messenger, None) };
         }
 
-        self.instance.destroy_instance(None);
-    }
-}
+        unsafe { ManuallyDrop::drop(&mut self.data) };
 
-impl<'a> Drop for Renderer<'a> {
-    fn drop(&mut self) {
-        unsafe { self.destroy() };
+        unsafe { self.device.destroy_device(None) };
+        
+        unsafe { self.instance.destroy_instance(None) };
     }
 }
 
@@ -417,6 +417,7 @@ pub struct RendererData<'a> {
     pub vertices: BufferWrapper,
     pub indices: BufferWrapper,
     pub pipeline: vk::Pipeline,
+    pub pipeline_layout: vk::PipelineLayout,
 
     pub image_index: usize,
     pub task_graph: TaskGraph<'a>,
@@ -456,6 +457,7 @@ impl<'a> Default for RendererData<'a> {
             vertices: Default::default(),
             indices: Default::default(),
             pipeline: Default::default(),
+            pipeline_layout: Default::default(),
             image_index: Default::default(),
             task_graph: TaskGraph::new(),
 
@@ -1034,7 +1036,7 @@ where
 }
 
 
-pub fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline {
+pub fn create_pipeline(device: &Device, width: u32, height: u32) -> (vk::Pipeline, vk::PipelineLayout) {
     let bytecode = read_spv(&mut fs::File::open("res/shaders/test.vert.spv").unwrap()).unwrap();
     let create_info = vk::ShaderModuleCreateInfo::default()
         .code(&bytecode);
@@ -1140,7 +1142,12 @@ pub fn create_pipeline(device: &Device, width: u32, height: u32) -> vk::Pipeline
         .push_next(&mut pipeline_info2)
         .stages(&binding);
 
-    unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None) }.unwrap()[0]
+    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None) }.unwrap()[0];
+
+    unsafe { device.destroy_shader_module(vertex, None) };
+    unsafe { device.destroy_shader_module(fragment, None) };
+
+    (pipeline, layout)
 }
 
 pub trait Vertex {
