@@ -277,7 +277,7 @@ impl<'a> Renderer<'a> {
         self.device.begin_command_buffer(command_buffer, &info)?;
 
         let mut task_graph = self.data.task_graph.clone();
-        task_graph.execute(&self.device, command_buffer, &mut self.data, &mut self.stats);
+        task_graph.execute(&self.instance, &self.device, command_buffer, &mut self.data, &mut self.stats);
         self.data.task_graph = task_graph;
 
         self.device.end_command_buffer(command_buffer)?;

@@ -1,23 +1,19 @@
 use std::collections::VecDeque;
 
 use ash::Device;
+use ash::Instance;
 use ash::vk;
 
 use anyhow::Result;
 use electrum_engine::TestVertex;
+use electrum_engine::begin_command_label;
 use electrum_engine::buffer::create_and_stage_buffer;
 use electrum_engine::create_pipeline;
 use electrum_engine::draw::bind_index_vertex;
+use electrum_engine::end_command_label;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
-use electrum_engine::task_graph::AccessType;
-use electrum_engine::task_graph::DrawData;
-use electrum_engine::task_graph::ImageData;
-use electrum_engine::task_graph::ImageSize;
-use electrum_engine::task_graph::Node;
-use electrum_engine::task_graph::Task;
-use electrum_engine::task_graph::TaskGraph;
-use electrum_engine::task_graph::transition_image_access;
+use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -215,7 +211,9 @@ impl EguiData {
 struct MainDraw;
 
 impl Task for MainDraw {
-    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(instance, device, command_buffer, "Main Draw", [0.0, 0.6, 0.2, 1.0]);
+
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
@@ -239,6 +237,8 @@ impl Task for MainDraw {
         stats.draw_calls += 1;
         
         unsafe { device.cmd_end_rendering(command_buffer) };
+
+        end_command_label(instance, device, command_buffer);
     }
 
     fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
@@ -250,7 +250,9 @@ impl Task for MainDraw {
 struct EguiDraw;
 
 impl Task for EguiDraw {
-    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(instance, device, command_buffer, "Egui Draw", [0.4, 0.5, 0.7, 1.0]);
+        
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
@@ -272,6 +274,8 @@ impl Task for EguiDraw {
         stats.draw_calls += 1;
 
         unsafe { device.cmd_end_rendering(command_buffer) };
+
+        end_command_label(instance, device, command_buffer);
     }
 
     fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
@@ -283,12 +287,15 @@ impl Task for EguiDraw {
 struct Present;
 
 impl Task for Present {
-    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+        begin_command_label(instance, device, command_buffer, "Present", [0.7, 0.0, 0.7, 1.0]);
+        
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
 
         copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image, data.swapchain_images[data.image_index], data.swapchain_extent, data.swapchain_extent);
 
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::transfer_dst(), AccessType::present_src(), vk::ImageAspectFlags::COLOR);
+        end_command_label(instance, device, command_buffer);
     }
     
     fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
