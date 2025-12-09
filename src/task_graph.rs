@@ -69,11 +69,9 @@ impl<'a> TaskGraph<'a> {
     }
 
     pub fn execute(&mut self, device: &Device, command_buffer: vk::CommandBuffer, data: &mut RendererData, stats: &mut RenderStats) {
-        for node in self.nodes.clone().iter_mut() {
-            let color_attachments = node.color_attachments.iter_mut().map(|(name, access)| {
-                let dst_access = *access;
+        for node in self.nodes.iter() {
+            let color_attachments = node.color_attachments.iter().map(|(name, dst_access)| {
                 let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find color attachment with name: {:?}", name));
-                *access = *src_access;
                 (image_data, src_access, dst_access)
             }).collect::<Vec<_>>();
 
@@ -278,7 +276,7 @@ impl<'a> Node<'a> {
         self.task = task
     }
 
-    pub fn execute(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    pub fn execute(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
         self.task.execute(device, command_buffer, draw_data, data, stats);
     }
 
@@ -292,7 +290,7 @@ impl<'a> Node<'a> {
 }
 
 pub trait Task: TaskClone {
-    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats);
+    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats);
     fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData);
     fn destroy(&mut self, device: &Device);
 }
@@ -330,7 +328,7 @@ pub struct DrawData<'a> {
 pub struct DummyTask;
 
 impl Task for DummyTask {
-    fn execute<'a>(&mut self, _: &Device, _: vk::CommandBuffer, _: DrawData<'a>, _: &mut RendererData, _: &mut RenderStats) {}
+    fn execute<'a>(&self, _: &Device, _: vk::CommandBuffer, _: DrawData<'a>, _: &mut RendererData, _: &mut RenderStats) {}
     fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
     fn destroy(&mut self, _: &Device) {}
 }

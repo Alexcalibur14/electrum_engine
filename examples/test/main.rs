@@ -215,7 +215,7 @@ impl EguiData {
 struct MainDraw;
 
 impl Task for MainDraw {
-    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
@@ -250,7 +250,7 @@ impl Task for MainDraw {
 struct EguiDraw;
 
 impl Task for EguiDraw {
-    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
@@ -283,7 +283,7 @@ impl Task for EguiDraw {
 struct Present;
 
 impl Task for Present {
-    fn execute<'a>(&mut self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+    fn execute<'a>(&self, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
         setup_and_copy_to_swapchain(device, data, command_buffer, data.swapchain_images[data.image_index], draw_data.color_attachments[0].image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
     }
     
