@@ -25,7 +25,7 @@ fn main() -> Result<()> {
 
     info!("Starting..");
     let event_loop = EventLoopBuilder::default()
-        .with_x11() // egui selection is offset from cursor on wayland
+        .with_x11() // egui selection is offset from cursor on wayland and renderdoc does not work
         .build().unwrap();
 
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -53,12 +53,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let mut renderer = Renderer::new(&window).unwrap();
 
-        let (width, height) = {
-            let inner_size = window.inner_size().to_logical(window.scale_factor());
-            (inner_size.width, inner_size.height)
-        };
-
-        let (pipeline, layout) = create_pipeline(&renderer.device, width, height);
+        let (pipeline, layout) = create_pipeline(&renderer.device);
         renderer.data.pipeline = pipeline;
         renderer.data.pipeline_layout = layout;
 
@@ -83,7 +78,7 @@ impl<'a> ApplicationHandler for App<'a> {
         let mut task_graph = TaskGraph::new();
 
         let image = ImageData::new(
-            ImageSize::Swapchain,
+            ImageSize::SwapchainRelative { multiplier: 1.0 },
             vk::Format::R16G16B16A16_SFLOAT,
             MipLevels::One,
             vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
@@ -113,7 +108,6 @@ impl<'a> ApplicationHandler for App<'a> {
         task_graph.add_node(present_node);
 
         task_graph.create_images(&renderer.instance, &renderer.device, &renderer.data);
-        task_graph.recreate_swapchain(&renderer.instance, &renderer.device, &renderer.data);
         renderer.data.task_graph = task_graph;
 
 
@@ -225,11 +219,31 @@ impl Task for MainDraw {
 
         let rendering_info = vk::RenderingInfo::default()
             .layer_count(1)
-            .render_area(data.swapchain_rect)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: draw_data.color_attachments[0].extent,
+            })
             .color_attachments(&attachment_infos);
+
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: draw_data.color_attachments[0].extent,
+        }];
+    
+        let viewports = [
+            vk::Viewport::default()
+                .width(draw_data.color_attachments[0].extent.width as f32)
+                .height(draw_data.color_attachments[0].extent.height as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .x(0.0)
+                .y(0.0)
+        ];
         
         unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
 
+        unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
+        unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
         bind_index_vertex(device, command_buffer, data.indices.buffer, vk::IndexType::UINT32, data.vertices.buffer);
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipeline) };
         unsafe { device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0) };
@@ -264,12 +278,15 @@ impl Task for EguiDraw {
 
         let rendering_info = vk::RenderingInfo::default()
             .layer_count(1)
-            .render_area(data.swapchain_rect)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: draw_data.color_attachments[0].extent,
+            })
             .color_attachments(&attachment_infos);
         
         unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
 
-        data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, data.swapchain_extent, data.pixels_per_point, &data.clipped_primitives).unwrap();
+        data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, draw_data.color_attachments[0].extent, data.pixels_per_point, &data.clipped_primitives).unwrap();
 
         stats.draw_calls += 1;
 
@@ -292,7 +309,7 @@ impl Task for Present {
         
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
 
-        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image, data.swapchain_images[data.image_index], draw_data.color_attachments[0].extent, data.swapchain_extent);
+        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image, data.swapchain_images[data.image_index], draw_data.color_attachments[0].extent, data.swapchain_extent, vk::Filter::NEAREST);
 
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::transfer_dst(), AccessType::present_src(), vk::ImageAspectFlags::COLOR);
         end_command_label(instance, device, command_buffer);

@@ -4,7 +4,6 @@ use ash::{Entry, Instance, Device};
 
 use anyhow::Result;
 
-use crate::image::copy_image_to_image;
 use crate::{create_image_view, QueueFamilyIndices, RendererData, SwapchainSupport};
 
 
@@ -187,14 +186,4 @@ pub fn submit_info<'a>(
         .wait_semaphore_infos(wait_semaphore_info)
         .signal_semaphore_infos(signal_semaphore_info)
         .command_buffer_infos(command_info)
-}
-
-/// Handles transitioning swapchain and source image 
-pub fn setup_and_copy_to_swapchain(device: &Device, data: &RendererData, command_buffer: vk::CommandBuffer, swapchain: vk::Image, src_image: vk::Image, src_layout: vk::ImageLayout) {
-    transition_image(device, command_buffer, src_image, src_layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-    transition_image(device, command_buffer, swapchain, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-
-    copy_image_to_image(device, command_buffer, src_image, swapchain, data.swapchain_extent, data.swapchain_extent);
-
-    transition_image(device, command_buffer, swapchain, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR);
 }

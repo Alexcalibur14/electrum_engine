@@ -374,7 +374,7 @@ unsafe fn copy_buffer_to_image(
 /// Copies one image to another
 /// - `src` image must be in [TRANSFER_SRC_OPTIMAL](vk::ImageLayout::TRANSFER_SRC_OPTIMAL) image layout
 /// - `dst` image must be in [TRANSFER_DST_OPTIMAL](vk::ImageLayout::TRANSFER_DST_OPTIMAL) image layout
-pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, src: vk::Image, dst: vk::Image, src_size: vk::Extent2D, dst_size: vk::Extent2D) {
+pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, src: vk::Image, dst: vk::Image, src_size: vk::Extent2D, dst_size: vk::Extent2D, filter: vk::Filter) {
     let regions = [
         vk::ImageBlit2::default()
             .src_offsets([
@@ -415,7 +415,7 @@ pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, s
         .dst_image_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
         
         .regions(&regions)
-        .filter(vk::Filter::LINEAR);
+        .filter(filter);
     unsafe { device.cmd_blit_image2(command_buffer, &blit_image_info) };
 }
 

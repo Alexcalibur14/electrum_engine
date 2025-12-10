@@ -288,7 +288,7 @@ impl<'a> Renderer<'a> {
     unsafe fn recreate_swapchain(&mut self) -> Result<()> {
         self.data.recreated = true;
 
-        info!("Recreating swapchain");
+        info!("Recreating swapchain, frame: {}", self.stats.frame);
 
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
@@ -1036,7 +1036,7 @@ where
 }
 
 
-pub fn create_pipeline(device: &Device, width: u32, height: u32) -> (vk::Pipeline, vk::PipelineLayout) {
+pub fn create_pipeline(device: &Device) -> (vk::Pipeline, vk::PipelineLayout) {
     let bytecode = read_spv(&mut fs::File::open("res/shaders/test.vert.spv").unwrap()).unwrap();
     let create_info = vk::ShaderModuleCreateInfo::default()
         .code(&bytecode);
@@ -1101,23 +1101,11 @@ pub fn create_pipeline(device: &Device, width: u32, height: u32) -> (vk::Pipelin
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
         .depth_bias_enable(false);
 
-    let scissors = [vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: vk::Extent2D { width, height },
-        }];
-    
-    let viewports = [vk::Viewport::default()
-        .width(width as f32)
-        .height(height as f32)
-        .min_depth(0.0)
-        .max_depth(1.0)
-        .x(0.0)
-        .y(0.0)];
-
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-        .scissors(&scissors)
-        .viewports(&viewports);
-
+    let mut viewport_state = vk::PipelineViewportStateCreateInfo::default();
+    viewport_state.p_scissors = ptr::null();
+    viewport_state.scissor_count = 1;
+    viewport_state.p_viewports = ptr::null();
+    viewport_state.viewport_count = 1;
 
     let layout_create_info = vk::PipelineLayoutCreateInfo::default()
         .flags(vk::PipelineLayoutCreateFlags::empty())
@@ -1126,6 +1114,8 @@ pub fn create_pipeline(device: &Device, width: u32, height: u32) -> (vk::Pipelin
 
     let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
 
+    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
+        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
         .color_attachment_formats(&[vk::Format::R16G16B16A16_SFLOAT]);
@@ -1139,6 +1129,7 @@ pub fn create_pipeline(device: &Device, width: u32, height: u32) -> (vk::Pipelin
         .rasterization_state(&rasterization_state)
         .viewport_state(&viewport_state)
         .layout(layout)
+        .dynamic_state(&dynamic_state)
         .push_next(&mut pipeline_info2)
         .stages(&binding);
 
