@@ -590,6 +590,7 @@ impl<'a> ImageData<'a> {
                 view: vk::ImageView::null(),
                 mip_level: 0,
                 sampler: None,
+                extent: Default::default(),
             },
             size,
             format,

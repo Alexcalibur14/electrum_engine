@@ -30,6 +30,7 @@ pub struct Image {
     pub view: vk::ImageView,
     pub mip_level: u32,
     pub sampler: Option<vk::Sampler>,
+    pub extent: vk::Extent2D,
 }
 
 impl Image {
@@ -108,6 +109,7 @@ impl Image {
             view,
             mip_level: mips,
             sampler,
+            extent: vk::Extent2D { width, height }
         }
     }
 

@@ -292,7 +292,7 @@ impl Task for Present {
         
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
 
-        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image, data.swapchain_images[data.image_index], data.swapchain_extent, data.swapchain_extent);
+        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image, data.swapchain_images[data.image_index], draw_data.color_attachments[0].extent, data.swapchain_extent);
 
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::transfer_dst(), AccessType::present_src(), vk::ImageAspectFlags::COLOR);
         end_command_label(instance, device, command_buffer);
