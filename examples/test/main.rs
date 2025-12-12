@@ -244,7 +244,7 @@ impl Task for MainDraw {
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
-        bind_index_vertex(device, command_buffer, data.indices.buffer, vk::IndexType::UINT32, data.vertices.buffer);
+        bind_index_vertex(device, command_buffer, data.indices.buffer(), vk::IndexType::UINT32, data.vertices.buffer());
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipeline) };
         unsafe { device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0) };
 

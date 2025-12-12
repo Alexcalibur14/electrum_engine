@@ -235,7 +235,7 @@ pub unsafe fn create_texture_image(
         instance,
         device,
         data,
-        staging_buffer.buffer,
+        staging_buffer.buffer(),
         texture_image,
         width,
         height,

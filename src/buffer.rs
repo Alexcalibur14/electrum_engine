@@ -40,6 +40,7 @@ pub fn create_buffer(
     let wrapper = BufferWrapper {
         buffer,
         memory: buffer_memory,
+        size
     };
 
     set_object_name(
@@ -151,11 +152,24 @@ pub fn create_and_stage_buffer<T>(
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BufferWrapper {
-    pub buffer: vk::Buffer,
-    pub memory: vk::DeviceMemory,
+    buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    size: vk::DeviceSize,
 }
 
 impl BufferWrapper {
+    pub fn buffer(&self) -> vk::Buffer {
+        self.buffer
+    }
+
+    pub fn memory(&self) -> vk::DeviceMemory {
+        self.memory
+    }
+
+    pub fn size(&self) -> &vk::DeviceSize {
+        &self.size
+    }
+
     pub fn destroy(&self, device: &Device) {
         unsafe {
             device.destroy_buffer(self.buffer, None);

@@ -167,7 +167,7 @@ impl<'a> TaskGraph<'a> {
             internal_buffers.iter().for_each(|(buffer, src_access, dst_access)| {
                 buffer_barriers.push(
                     vk::BufferMemoryBarrier2::default()
-                        .buffer(buffer.buffer)
+                        .buffer(buffer.buffer())
                         .src_access_mask(src_access.access_mask)
                         .dst_access_mask(dst_access.access_mask)
                         .src_stage_mask(src_access.pipeline_stage)
