@@ -528,6 +528,54 @@ impl AccessType {
         }
     }
 
+    pub fn copy_src() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::COPY,
+            access_mask: vk::AccessFlags2::TRANSFER_READ,
+            image_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        }
+    }
+
+    pub fn copy_dst() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::COPY,
+            access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+            image_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        }
+    }
+
+    pub fn blit_src() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::BLIT,
+            access_mask: vk::AccessFlags2::TRANSFER_READ,
+            image_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        }
+    }
+
+    pub fn blit_dst() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::BLIT,
+            access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+            image_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        }
+    }
+
+    pub fn resolve_src() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::RESOLVE,
+            access_mask: vk::AccessFlags2::TRANSFER_READ,
+            image_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        }
+    }
+
+    pub fn resolve_dst() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::RESOLVE,
+            access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+            image_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        }
+    }
+
     /// Swapchain final layout
     pub fn present_src() -> Self {
         AccessType {

@@ -103,7 +103,7 @@ impl<'a> ApplicationHandler for App<'a> {
         task_graph.add_node(egui_node);
 
         let mut present_node = Node::new();
-        present_node.add_attachment("color_attachment", AccessType::transfer_src());
+        present_node.add_attachment("color_attachment", AccessType::blit_src());
         present_node.set_task(Box::new(Present));
         task_graph.add_node(present_node);
 
