@@ -1,12 +1,12 @@
 use ash::{Device, Instance, vk};
 
-use crate::{RenderStats, RendererData, buffer::BufferWrapper, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
+use crate::{RenderStats, RendererData, buffer::Buffer, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
 
 #[derive(Clone)]
 pub struct TaskGraph<'a> {
     nodes: Vec<Node<'a>>,
     images: Vec<(ImageData<'a>, AccessType)>,
-    buffers: Vec<(&'a str, BufferWrapper, AccessType)>,
+    buffers: Vec<(&'a str, Buffer, AccessType)>,
     swapchain_extent: vk::Extent2D,
 }
 
@@ -28,7 +28,7 @@ impl<'a> TaskGraph<'a> {
         self.images.push((image, AccessType::UNDEFINED));
     }
 
-    pub fn add_buffer(&mut self, name: &'a str, buffer: BufferWrapper) {
+    pub fn add_buffer(&mut self, name: &'a str, buffer: Buffer) {
         self.buffers.push((name, buffer, AccessType::UNDEFINED));
     }
 
@@ -232,7 +232,7 @@ impl<'a> TaskGraph<'a> {
         &self.images
     }
 
-    pub fn buffers(&self) -> &[(&'a str, BufferWrapper, AccessType)] {
+    pub fn buffers(&self) -> &[(&'a str, Buffer, AccessType)] {
         &self.buffers
     }
 }
@@ -340,9 +340,9 @@ pub struct DrawData<'a> {
     pub depth_attachment: Option<&'a Image>,
     pub stencil_attachment: Option<&'a Image>,
     pub internal_images: Vec<&'a Image>,
-    pub internal_buffers: Vec<&'a BufferWrapper>,
+    pub internal_buffers: Vec<&'a Buffer>,
     pub external_images: Vec<&'a Image>,
-    pub external_buffers: Vec<&'a BufferWrapper>,
+    pub external_buffers: Vec<&'a Buffer>,
 }
 
 #[derive(Debug, Clone, Copy)]

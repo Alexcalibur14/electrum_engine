@@ -14,7 +14,7 @@ pub fn create_buffer(
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
     name: &str,
-) -> Result<BufferWrapper> {
+) -> Result<Buffer> {
     let buffer_info = vk::BufferCreateInfo::default()
         .size(size)
         .usage(usage)
@@ -37,7 +37,7 @@ pub fn create_buffer(
 
     unsafe { device.bind_buffer_memory(buffer, buffer_memory, 0)? };
 
-    let wrapper = BufferWrapper {
+    let wrapper = Buffer {
         buffer,
         memory: buffer_memory,
         size
@@ -113,7 +113,7 @@ pub fn create_and_stage_buffer<T>(
     usage: vk::BufferUsageFlags,
     name: &str,
     bytes: &[T],
-) -> Result<BufferWrapper> {
+) -> Result<Buffer> {
     let staging_buffer = create_buffer(
         instance,
         device,
@@ -151,13 +151,13 @@ pub fn create_and_stage_buffer<T>(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct BufferWrapper {
+pub struct Buffer {
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
 }
 
-impl BufferWrapper {
+impl Buffer {
     pub fn buffer(&self) -> vk::Buffer {
         self.buffer
     }
