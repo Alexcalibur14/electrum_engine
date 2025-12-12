@@ -1,4 +1,4 @@
-use ash::vk;
+use ash::vk::{self, Handle};
 use ash::{Device, Instance};
 use anyhow::{Result, anyhow};
 
@@ -114,7 +114,7 @@ pub fn create_and_stage_buffer<T>(
     name: &str,
     bytes: &[T],
 ) -> Result<Buffer> {
-    let staging_buffer = create_buffer(
+    let mut staging_buffer = create_buffer(
         instance,
         device,
         data,
@@ -170,11 +170,16 @@ impl Buffer {
         &self.size
     }
 
-    pub fn destroy(&self, device: &Device) {
-        unsafe {
-            device.destroy_buffer(self.buffer, None);
-            device.free_memory(self.memory, None);
+    pub fn destroy(&mut self, device: &Device) {
+        if !self.buffer.is_null() {
+            unsafe {device.destroy_buffer(self.buffer, None);}
         }
+        if !self.memory.is_null() {
+            unsafe { device.free_memory(self.memory, None); }
+        }
+        self.buffer = vk::Buffer::null();
+        self.memory = vk::DeviceMemory::null();
+        self.size = 0;
     }
 
     /// Copies data into the buffer, if you are trying to copy a vec use `copy_vec_into_buffer`

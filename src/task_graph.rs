@@ -641,7 +641,7 @@ impl<'a> ImageData<'a> {
     }
 
     /// Destroys image
-    pub fn destroy(&self, device: &Device) {
+    pub fn destroy(&mut self, device: &Device) {
         self.image.destroy(device);
     }
 }

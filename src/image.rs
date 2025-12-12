@@ -1,4 +1,4 @@
-use ash::vk;
+use ash::vk::{self, Handle};
 use ash::{Device, Instance};
 
 use anyhow::{Result, anyhow};
@@ -151,15 +151,27 @@ impl Image {
         self.extent
     }
 
-    pub fn destroy(&self, device: &Device) {
-        unsafe {
-            if let Some(sampler) = self.sampler {
-                device.destroy_sampler(sampler, None);
+    pub fn destroy(&mut self, device: &Device) {
+        if let Some(sampler) = self.sampler {
+            if !sampler.is_null() {
+                unsafe { device.destroy_sampler(sampler, None) };
             }
-            device.destroy_image_view(self.view, None);
-            device.destroy_image(self.image, None);
-            device.free_memory(self.memory, None);
         }
+        if !self.view.is_null() {
+            unsafe { device.destroy_image_view(self.view, None) };
+        }
+        if !self.image.is_null() {
+            unsafe { device.destroy_image(self.image, None) };
+        }
+        if !self.memory.is_null() {
+            unsafe { device.free_memory(self.memory, None) };
+        }
+        self.image = vk::Image::null();
+        self.memory = vk::DeviceMemory::null();
+        self.view = vk::ImageView::null();
+        self.mip_level = 0;
+        self.sampler = None;
+        self.extent = vk::Extent2D::default();
     }
 }
 
@@ -224,7 +236,7 @@ pub unsafe fn create_texture_image(
     mip_levels: u32,
     format: vk::Format,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
-    let staging_buffer = create_buffer(
+    let mut staging_buffer = create_buffer(
         instance,
         device,
         data,
