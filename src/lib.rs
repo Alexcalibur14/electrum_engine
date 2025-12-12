@@ -414,8 +414,8 @@ pub struct RendererData<'a> {
     pub msaa_samples: vk::SampleCountFlags,
 
     // Temp
-    pub vertices: BufferWrapper,
-    pub indices: BufferWrapper,
+    pub vertices: Buffer,
+    pub indices: Buffer,
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
