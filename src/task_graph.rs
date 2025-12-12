@@ -109,7 +109,7 @@ impl<'a> TaskGraph<'a> {
             color_attachments.iter().for_each(|(image_data, src_access, dst_access)| {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
-                        .image(image_data.image.image)
+                        .image(image_data.image.image())
                         .old_layout(src_access.image_layout)
                         .new_layout(dst_access.image_layout)
                         .src_access_mask(src_access.access_mask)
@@ -123,7 +123,7 @@ impl<'a> TaskGraph<'a> {
             if let Some((image_data, src_access, dst_access)) = depth_attachment {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
-                        .image(image_data.image.image)
+                        .image(image_data.image.image())
                         .old_layout(src_access.image_layout)
                         .new_layout(dst_access.image_layout)
                         .src_access_mask(src_access.access_mask)
@@ -137,7 +137,7 @@ impl<'a> TaskGraph<'a> {
             if let Some((image_data, src_access, dst_access)) = stencil_attachment {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
-                        .image(image_data.image.image)
+                        .image(image_data.image.image())
                         .old_layout(src_access.image_layout)
                         .new_layout(dst_access.image_layout)
                         .src_access_mask(src_access.access_mask)
@@ -151,7 +151,7 @@ impl<'a> TaskGraph<'a> {
             internal_images.iter().for_each(|(image_data, src_access, dst_access)| {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
-                        .image(image_data.image.image)
+                        .image(image_data.image.image())
                         .old_layout(src_access.image_layout)
                         .new_layout(dst_access.image_layout)
                         .src_access_mask(src_access.access_mask)
@@ -584,14 +584,7 @@ impl<'a> ImageData<'a> {
         name: &'a str,
     ) -> Self {
         ImageData {
-            image: Image {
-                image: vk::Image::null(),
-                image_memory: vk::DeviceMemory::null(),
-                view: vk::ImageView::null(),
-                mip_level: 0,
-                sampler: None,
-                extent: Default::default(),
-            },
+            image: Image::null(),
             size,
             format,
             mip_levels: mips,

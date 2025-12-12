@@ -25,12 +25,12 @@ impl MipLevels {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Image {
-    pub image: vk::Image,
-    pub image_memory: vk::DeviceMemory,
-    pub view: vk::ImageView,
-    pub mip_level: u32,
-    pub sampler: Option<vk::Sampler>,
-    pub extent: vk::Extent2D,
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    view: vk::ImageView,
+    mip_level: u32,
+    sampler: Option<vk::Sampler>,
+    extent: vk::Extent2D,
 }
 
 impl Image {
@@ -54,7 +54,7 @@ impl Image {
     ) -> Self {
         let mips = mip_levels.mips(width, height);
 
-        let (image, image_memory) = unsafe {
+        let (image, memory) = unsafe {
             create_image(
                 instance,
                 device,
@@ -73,7 +73,7 @@ impl Image {
         .unwrap();
 
         set_object_name(instance, device, name, image).unwrap();
-        set_object_name(instance, device, &format!("{name}_memory"), image_memory).unwrap();
+        set_object_name(instance, device, &format!("{name}_memory"), memory).unwrap();
 
         let view = unsafe { create_image_view(
             device,
@@ -105,12 +105,50 @@ impl Image {
 
         Image {
             image,
-            image_memory,
+            memory,
             view,
             mip_level: mips,
             sampler,
             extent: vk::Extent2D { width, height }
         }
+    }
+
+    /// # Warning !!!
+    /// This function produces an invalid image where all pointers are null. \
+    /// this should only be used as a default and then replaced with a properly created image.
+    pub fn null() -> Self {
+        Image {
+            image: vk::Image::null(),
+            memory: vk::DeviceMemory::null(),
+            view: vk::ImageView::null(),
+            mip_level: 0,
+            sampler: None,
+            extent: vk::Extent2D::default(),
+        }
+    }
+
+    pub fn image(&self) -> vk::Image {
+        self.image
+    }
+
+    pub fn memory(&self) -> vk::DeviceMemory {
+        self.memory
+    }
+
+    pub fn view(&self) -> vk::ImageView {
+        self.view
+    }
+
+    pub fn mip_level(&self) -> u32 {
+        self.mip_level
+    }
+
+    pub fn sampler(&self) -> Option<vk::Sampler> {
+        self.sampler
+    }
+
+    pub fn extent(&self) -> vk::Extent2D {
+        self.extent
     }
 
     pub fn destroy(&self, device: &Device) {
@@ -120,7 +158,7 @@ impl Image {
             }
             device.destroy_image_view(self.view, None);
             device.destroy_image(self.image, None);
-            device.free_memory(self.image_memory, None);
+            device.free_memory(self.memory, None);
         }
     }
 }
