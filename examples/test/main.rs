@@ -57,7 +57,7 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipeline = pipeline;
         renderer.data.pipeline_layout = layout;
 
-        let vertices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, (std::mem::size_of::<TestVertex>() * 6) as u64, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
+        let vertices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
             TestVertex{ position: [ 0.0 , -0.5 ], colour: [0.0 , 1.0 , 0.0] },
             TestVertex{ position: [-0.25, -0.25], colour: [0.25, 0.75, 0.25] },
             TestVertex{ position: [ 0.25, -0.25], colour: [0.25, 0.75, 0.25] },
@@ -67,7 +67,7 @@ impl<'a> ApplicationHandler for App<'a> {
         ]).unwrap();
         renderer.data.vertices = vertices;
 
-        let indices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, (std::mem::size_of::<u32>() * 12) as u64, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
+        let indices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
             0, 1, 2,
             1, 3, 2,
             2, 3, 4,

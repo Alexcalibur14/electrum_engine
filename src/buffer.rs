@@ -80,13 +80,13 @@ pub unsafe fn get_memory_type_index(
         .ok_or_else(|| anyhow!("Failed to find suitable memory type."))
 }
 
-/// Copies the contents of one buffer into another buffer
-pub fn copy_buffer(
+/// Copies the contents of one buffer into another buffer \
+/// Creates its own command buffers so is not suitable while rendering
+pub fn copy_buffer_immediate(
     instance: &Instance,
     device: &Device,
-    source: vk::Buffer,
-    destination: vk::Buffer,
-    size: vk::DeviceSize,
+    src: &Buffer,
+    dst: &Buffer,
     data: &RendererData,
 ) -> Result<()> {
     unsafe {
@@ -96,8 +96,8 @@ pub fn copy_buffer(
         let regions = vk::BufferCopy::default()
             .src_offset(0)
             .dst_offset(0)
-            .size(size);
-        device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
+            .size(src.size());
+        device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[regions]);
 
         end_single_time_commands(instance, device, data, command_buffer)?;
     }
@@ -105,15 +105,26 @@ pub fn copy_buffer(
     Ok(())
 }
 
+pub fn copy_buffer(device: &Device, command_buffer: vk::CommandBuffer, src: Buffer, dst: Buffer) {
+    let region = vk::BufferCopy::default()
+        .src_offset(0)
+        .dst_offset(0)
+        .size(src.size());
+
+    unsafe { device.cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &[region]) };
+}
+
+/// Creates a [device local](vk::MemoryPropertyFlags::DEVICE_LOCAL) buffer and fills it with `contents`
 pub fn create_and_stage_buffer<T>(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
-    size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     name: &str,
-    bytes: &[T],
+    contents: &[T],
 ) -> Result<Buffer> {
+    let size = size_of_val(contents) as u64;
+
     let mut staging_buffer = create_buffer(
         instance,
         device,
@@ -124,7 +135,7 @@ pub fn create_and_stage_buffer<T>(
         "",
     )?;
 
-    staging_buffer.copy_vec_into_buffer(device, bytes);
+    staging_buffer.copy_vec_into_buffer(device, contents);
 
     let buffer = create_buffer(
         instance,
@@ -136,12 +147,11 @@ pub fn create_and_stage_buffer<T>(
         name,
     )?;
 
-    copy_buffer(
+    copy_buffer_immediate(
         instance,
         device,
-        staging_buffer.buffer,
-        buffer.buffer,
-        size,
+        &staging_buffer,
+        &buffer,
         data,
     )?;
 
@@ -166,8 +176,8 @@ impl Buffer {
         self.memory
     }
 
-    pub fn size(&self) -> &vk::DeviceSize {
-        &self.size
+    pub fn size(&self) -> vk::DeviceSize {
+        self.size
     }
 
     pub fn destroy(&mut self, device: &Device) {
@@ -182,7 +192,7 @@ impl Buffer {
         self.size = 0;
     }
 
-    /// Copies data into the buffer, if you are trying to copy a vec use `copy_vec_into_buffer`
+    /// Copies data into the buffer, if you are trying to copy a vec use [copy_vec_into_buffer](Buffer::copy_vec_into_buffer)
     pub fn copy_data_into_buffer<T>(&self, device: &Device, data: &T) {
         let buffer_mem =
             unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
@@ -193,7 +203,7 @@ impl Buffer {
         unsafe { device.unmap_memory(self.memory) };
     }
 
-    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use `copy_vec_into_buffer_with_offset`
+    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use [copy_vec_into_buffer_with_offset](Buffer::copy_vec_into_buffer_with_offset)
     pub fn copy_data_into_buffer_with_offset<T>(
         &self,
         device: &Device,
