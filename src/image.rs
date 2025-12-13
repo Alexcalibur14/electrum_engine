@@ -30,11 +30,11 @@ pub struct Image {
     view: vk::ImageView,
     mip_level: u32,
     sampler: Option<vk::Sampler>,
-    extent: vk::Extent2D,
+    extent: vk::Extent3D,
 }
 
 impl Image {
-    pub fn new(
+    pub fn new_2d(
         instance: &Instance,
         device: &Device,
         data: &RendererData,
@@ -109,7 +109,7 @@ impl Image {
             view,
             mip_level: mips,
             sampler,
-            extent: vk::Extent2D { width, height }
+            extent: vk::Extent3D { width, height, depth: 1 }
         }
     }
 
@@ -123,7 +123,7 @@ impl Image {
             view: vk::ImageView::null(),
             mip_level: 0,
             sampler: None,
-            extent: vk::Extent2D::default(),
+            extent: vk::Extent3D::default(),
         }
     }
 
@@ -147,7 +147,23 @@ impl Image {
         self.sampler
     }
 
-    pub fn extent(&self) -> vk::Extent2D {
+    pub fn width(&self) -> u32 {
+        self.extent.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.extent.height
+    }
+
+    pub fn depth(&self) -> u32 {
+        self.extent.depth
+    }
+
+    pub fn extent_2d(&self) -> vk::Extent2D {
+        vk::Extent2D { width: self.extent.width, height: self.extent.height }
+    }
+
+    pub fn extent_3d(&self) -> vk::Extent3D {
         self.extent
     }
 
@@ -171,7 +187,7 @@ impl Image {
         self.view = vk::ImageView::null();
         self.mip_level = 0;
         self.sampler = None;
-        self.extent = vk::Extent2D::default();
+        self.extent = vk::Extent3D::default();
     }
 }
 

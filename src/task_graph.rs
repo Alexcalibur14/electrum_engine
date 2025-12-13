@@ -650,7 +650,7 @@ impl<'a> ImageData<'a> {
     pub fn create(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let (width, height) = self.size.size(data);
         
-        self.image = Image::new(
+        self.image = Image::new_2d(
             instance,
             device,
             data,

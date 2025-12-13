@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow};
 
 use std::ptr::copy_nonoverlapping as memcpy;
 
+use crate::image::Image;
 use crate::{begin_single_time_commands, end_single_time_commands, set_object_name, RendererData};
 
 pub fn create_buffer(
@@ -80,14 +81,13 @@ pub unsafe fn get_memory_type_index(
         .ok_or_else(|| anyhow!("Failed to find suitable memory type."))
 }
 
-/// Copies the contents of one buffer into another buffer \
-/// Creates its own command buffers so is not suitable while rendering
+/// Copies the contents of one buffer into another buffer
 pub fn copy_buffer_immediate(
     instance: &Instance,
     device: &Device,
+    data: &RendererData,
     src: &Buffer,
     dst: &Buffer,
-    data: &RendererData,
 ) -> Result<()> {
     unsafe {
         let command_buffer =
@@ -111,7 +111,7 @@ pub fn copy_buffer(device: &Device, command_buffer: vk::CommandBuffer, src: Buff
         .dst_offset(0)
         .size(src.size());
 
-    unsafe { device.cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &[region]) };
+    unsafe { device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[region]) };
 }
 
 /// Creates a [device local](vk::MemoryPropertyFlags::DEVICE_LOCAL) buffer and fills it with `contents`
@@ -150,9 +150,9 @@ pub fn create_and_stage_buffer<T>(
     copy_buffer_immediate(
         instance,
         device,
+        data,
         &staging_buffer,
         &buffer,
-        data,
     )?;
 
     staging_buffer.destroy(device);
@@ -244,5 +244,53 @@ impl Buffer {
         unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
 
         unsafe { device.unmap_memory(self.memory) };
+    }
+
+    pub fn copy_to_buffer(&self, device: &Device, command_buffer: vk::CommandBuffer, dst: &Buffer) {
+        let region = vk::BufferCopy::default()
+            .src_offset(0)
+            .dst_offset(0)
+            .size(self.size);
+
+        unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
+    }
+
+    pub fn copy_to_buffer_immediate(&self, instance: &Instance, device: &Device, data: &RendererData, dst: &Buffer) -> Result<()> {
+        let command_buffer = unsafe { begin_single_time_commands(instance, device, data, "Copy Buffer") }?;
+        
+        let region = vk::BufferCopy::default()
+            .src_offset(0)
+            .dst_offset(0)
+            .size(self.size);
+
+        unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
+
+        unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
+
+        Ok(())
+    }
+
+    pub fn copy_to_image(&self, device: &Device, command_buffer: vk::CommandBuffer, image: Image, dst_image_layout: vk::ImageLayout) {
+        let region = vk::BufferImageCopy::default()
+            .image_extent(image.extent_3d())
+            .buffer_offset(0)
+            .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 });
+
+        unsafe { device.cmd_copy_buffer_to_image(command_buffer, self.buffer, image.image(), dst_image_layout, &[region]) };
+    }
+
+    pub fn copy_to_image_immediate(&self, instance: &Instance, device: &Device, data: &RendererData, image: Image, dst_image_layout: vk::ImageLayout) -> Result<()> {
+        let command_buffer = unsafe { begin_single_time_commands(instance, device, data, "Copy buffer to image") }?;
+
+        let region = vk::BufferImageCopy::default()
+            .image_extent(image.extent_3d())
+            .buffer_offset(0)
+            .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 });
+
+        unsafe { device.cmd_copy_buffer_to_image(command_buffer, self.buffer, image.image(), dst_image_layout, &[region]) };
+
+        unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
+        
+        Ok(())
     }
 }

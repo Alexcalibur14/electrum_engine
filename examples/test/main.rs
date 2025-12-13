@@ -221,19 +221,19 @@ impl Task for MainDraw {
             .layer_count(1)
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.color_attachments[0].extent(),
+                extent: draw_data.color_attachments[0].extent_2d(),
             })
             .color_attachments(&attachment_infos);
 
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
-            extent: draw_data.color_attachments[0].extent(),
+            extent: draw_data.color_attachments[0].extent_2d(),
         }];
     
         let viewports = [
             vk::Viewport::default()
-                .width(draw_data.color_attachments[0].extent().width as f32)
-                .height(draw_data.color_attachments[0].extent().height as f32)
+                .width(draw_data.color_attachments[0].width() as f32)
+                .height(draw_data.color_attachments[0].height() as f32)
                 .min_depth(0.0)
                 .max_depth(1.0)
                 .x(0.0)
@@ -280,13 +280,13 @@ impl Task for EguiDraw {
             .layer_count(1)
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.color_attachments[0].extent(),
+                extent: draw_data.color_attachments[0].extent_2d(),
             })
             .color_attachments(&attachment_infos);
         
         unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
 
-        data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, draw_data.color_attachments[0].extent(), data.pixels_per_point, &data.clipped_primitives).unwrap();
+        data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, draw_data.color_attachments[0].extent_2d(), data.pixels_per_point, &data.clipped_primitives).unwrap();
 
         stats.draw_calls += 1;
 
@@ -309,7 +309,7 @@ impl Task for Present {
         
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
 
-        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image(), data.swapchain_images[data.image_index], draw_data.color_attachments[0].extent(), data.swapchain_extent, vk::Filter::NEAREST);
+        copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image(), data.swapchain_images[data.image_index], draw_data.color_attachments[0].extent_2d(), data.swapchain_extent, vk::Filter::NEAREST);
 
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::transfer_dst(), AccessType::present_src(), vk::ImageAspectFlags::COLOR);
         end_command_label(instance, device, command_buffer);
