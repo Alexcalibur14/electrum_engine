@@ -4,7 +4,6 @@ use anyhow::{Result, anyhow};
 
 use std::ptr::copy_nonoverlapping as memcpy;
 
-use crate::image::Image;
 use crate::{begin_single_time_commands, end_single_time_commands, set_object_name, RendererData};
 
 pub fn create_buffer(
@@ -192,7 +191,7 @@ impl Buffer {
         self.size = 0;
     }
 
-    /// Copies data into the buffer, if you are trying to copy a vec use [copy_vec_into_buffer](Buffer::copy_vec_into_buffer)
+    /// Copies data into the buffer, if you are trying to copy a vec use [`copy_vec_into_buffer()`](Buffer::copy_vec_into_buffer)
     pub fn copy_data_into_buffer<T>(&self, device: &Device, data: &T) {
         let buffer_mem =
             unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
@@ -203,7 +202,7 @@ impl Buffer {
         unsafe { device.unmap_memory(self.memory) };
     }
 
-    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use [copy_vec_into_buffer_with_offset](Buffer::copy_vec_into_buffer_with_offset)
+    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use [`copy_vec_into_buffer_with_offset()`](Buffer::copy_vec_into_buffer_with_offset)
     pub fn copy_data_into_buffer_with_offset<T>(
         &self,
         device: &Device,
@@ -267,30 +266,6 @@ impl Buffer {
 
         unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
 
-        Ok(())
-    }
-
-    pub fn copy_to_image(&self, device: &Device, command_buffer: vk::CommandBuffer, image: Image, dst_image_layout: vk::ImageLayout) {
-        let region = vk::BufferImageCopy::default()
-            .image_extent(image.extent_3d())
-            .buffer_offset(0)
-            .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 });
-
-        unsafe { device.cmd_copy_buffer_to_image(command_buffer, self.buffer, image.image(), dst_image_layout, &[region]) };
-    }
-
-    pub fn copy_to_image_immediate(&self, instance: &Instance, device: &Device, data: &RendererData, image: Image, dst_image_layout: vk::ImageLayout) -> Result<()> {
-        let command_buffer = unsafe { begin_single_time_commands(instance, device, data, "Copy buffer to image") }?;
-
-        let region = vk::BufferImageCopy::default()
-            .image_extent(image.extent_3d())
-            .buffer_offset(0)
-            .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 });
-
-        unsafe { device.cmd_copy_buffer_to_image(command_buffer, self.buffer, image.image(), dst_image_layout, &[region]) };
-
-        unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
-        
         Ok(())
     }
 }

@@ -14,11 +14,27 @@ pub enum MipLevels {
 }
 
 impl MipLevels {
-    pub fn mips(&self, width: u32, height: u32) -> u32 {
+    pub fn mips_1d(&self, width: u32) -> u32 {
+        match self {
+            MipLevels::One => 1,
+            MipLevels::Value(v) => *v,
+            MipLevels::Maximum => (width as f32).log2().floor() as u32 + 1,
+        }
+    }
+
+    pub fn mips_2d(&self, width: u32, height: u32) -> u32 {
         match self {
             MipLevels::One => 1,
             MipLevels::Value(v) => *v,
             MipLevels::Maximum => (width.max(height) as f32).log2().floor() as u32 + 1,
+        }
+    }
+
+    pub fn mips_3d(&self, width: u32, height: u32, depth: u32) -> u32 {
+        match self {
+            MipLevels::One => 1,
+            MipLevels::Value(v) => *v,
+            MipLevels::Maximum => (width.max(height).max(depth) as f32).log2().floor() as u32 + 1,
         }
     }
 }
@@ -34,6 +50,83 @@ pub struct Image {
 }
 
 impl Image {
+    pub fn new_1d(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        width: u32,
+        mip_levels: MipLevels,
+        samples: vk::SampleCountFlags,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        view_type: vk::ImageViewType,
+        layer_count: u32,
+        properties: vk::MemoryPropertyFlags,
+        aspects: vk::ImageAspectFlags,
+        sampler: Option<(Filter, AddressMode)>,
+        name: &str
+    ) -> Self {
+        let mips = mip_levels.mips_1d(width);
+
+        let (image, memory) = unsafe {
+            create_image_1d(
+                instance,
+                device,
+                data,
+                width,
+                mips,
+                layer_count,
+                samples,
+                format,
+                tiling,
+                usage,
+                properties,
+            )
+        }
+        .unwrap();
+
+        set_object_name(instance, device, name, image).unwrap();
+        set_object_name(instance, device, &format!("{name}_memory"), memory).unwrap();
+
+        let view = unsafe { create_image_view(
+            device,
+            image,
+            format,
+            aspects,
+            view_type,
+            mips,
+            layer_count,
+        ) }.unwrap();
+
+        set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
+
+        let sampler = match sampler {
+            Some((filter, address_mode)) => {
+                let sampler = unsafe { create_texture_sampler(
+                    instance,
+                    device,
+                    &mips,
+                    &filter,
+                    &address_mode,
+                    ""
+                ) }.unwrap();
+                set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+                Some(sampler)
+            },
+            None => None,
+        };
+
+        Image {
+            image,
+            memory,
+            view,
+            mip_level: mips,
+            sampler,
+            extent: vk::Extent3D { width, height: 1, depth: 1 }
+        }
+    }
+
     pub fn new_2d(
         instance: &Instance,
         device: &Device,
@@ -52,10 +145,10 @@ impl Image {
         sampler: Option<(Filter, AddressMode)>,
         name: &str,
     ) -> Self {
-        let mips = mip_levels.mips(width, height);
+        let mips = mip_levels.mips_2d(width, height);
 
         let (image, memory) = unsafe {
-            create_image(
+            create_image_2d(
                 instance,
                 device,
                 data,
@@ -110,6 +203,87 @@ impl Image {
             mip_level: mips,
             sampler,
             extent: vk::Extent3D { width, height, depth: 1 }
+        }
+    }
+
+    pub fn new_3d(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        width: u32,
+        height: u32,
+        depth: u32,
+        mip_levels: MipLevels,
+        samples: vk::SampleCountFlags,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        view_type: vk::ImageViewType,
+        layer_count: u32,
+        properties: vk::MemoryPropertyFlags,
+        aspects: vk::ImageAspectFlags,
+        sampler: Option<(Filter, AddressMode)>,
+        name: &str,
+    ) -> Self {
+        let mips = mip_levels.mips_3d(width, height, depth);
+
+        let (image, memory) = unsafe {
+            create_image_3d(
+                instance,
+                device,
+                data,
+                width,
+                height,
+                depth,
+                mips,
+                layer_count,
+                samples,
+                format,
+                tiling,
+                usage,
+                properties,
+            )
+        }
+        .unwrap();
+
+        set_object_name(instance, device, name, image).unwrap();
+        set_object_name(instance, device, &format!("{name}_memory"), memory).unwrap();
+
+        let view = unsafe { create_image_view(
+            device,
+            image,
+            format,
+            aspects,
+            view_type,
+            mips,
+            layer_count,
+        ) }.unwrap();
+
+        set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
+
+        let sampler = match sampler {
+            Some((filter, address_mode)) => {
+                let sampler = unsafe { create_texture_sampler(
+                    instance,
+                    device,
+                    &mips,
+                    &filter,
+                    &address_mode,
+                    ""
+                ) }.unwrap();
+                set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+                Some(sampler)
+            },
+            None => None,
+        };
+
+        Image {
+            image,
+            memory,
+            view,
+            mip_level: mips,
+            sampler,
+            extent: vk::Extent3D { width, height, depth }
         }
     }
 
@@ -191,7 +365,56 @@ impl Image {
     }
 }
 
-pub unsafe fn create_image(
+pub unsafe fn create_image_1d(
+    instance: &Instance,
+    device: &Device,
+    data: &RendererData,
+    width: u32,
+    mip_levels: u32,
+    layers: u32,
+    samples: vk::SampleCountFlags,
+    format: vk::Format,
+    tiling: vk::ImageTiling,
+    usage: vk::ImageUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+) -> Result<(vk::Image, vk::DeviceMemory)> {
+    let info = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_1D)
+        .extent(vk::Extent3D {
+            width,
+            height: 1,
+            depth: 1,
+        })
+        .mip_levels(mip_levels)
+        .array_layers(layers)
+        .format(format)
+        .tiling(tiling)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .usage(usage)
+        .samples(samples)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+    let image = device.create_image(&info, None)?;
+
+    let requirements = device.get_image_memory_requirements(image);
+
+    let info = vk::MemoryAllocateInfo::default()
+        .allocation_size(requirements.size)
+        .memory_type_index(get_memory_type_index(
+            instance,
+            data,
+            properties,
+            requirements,
+        )?);
+
+    let image_memory = device.allocate_memory(&info, None)?;
+
+    device.bind_image_memory(image, image_memory, 0)?;
+
+    Ok((image, image_memory))
+}
+
+pub unsafe fn create_image_2d(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
@@ -211,6 +434,57 @@ pub unsafe fn create_image(
             width,
             height,
             depth: 1,
+        })
+        .mip_levels(mip_levels)
+        .array_layers(layers)
+        .format(format)
+        .tiling(tiling)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .usage(usage)
+        .samples(samples)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+    let image = device.create_image(&info, None)?;
+
+    let requirements = device.get_image_memory_requirements(image);
+
+    let info = vk::MemoryAllocateInfo::default()
+        .allocation_size(requirements.size)
+        .memory_type_index(get_memory_type_index(
+            instance,
+            data,
+            properties,
+            requirements,
+        )?);
+
+    let image_memory = device.allocate_memory(&info, None)?;
+
+    device.bind_image_memory(image, image_memory, 0)?;
+
+    Ok((image, image_memory))
+}
+
+pub unsafe fn create_image_3d(
+    instance: &Instance,
+    device: &Device,
+    data: &RendererData,
+    width: u32,
+    height: u32,
+    depth: u32,
+    mip_levels: u32,
+    layers: u32,
+    samples: vk::SampleCountFlags,
+    format: vk::Format,
+    tiling: vk::ImageTiling,
+    usage: vk::ImageUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+) -> Result<(vk::Image, vk::DeviceMemory)> {
+    let info = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_3D)
+        .extent(vk::Extent3D {
+            width,
+            height,
+            depth,
         })
         .mip_levels(mip_levels)
         .array_layers(layers)
@@ -268,7 +542,7 @@ pub unsafe fn create_texture_image(
 
     // Create (image)
 
-    let (texture_image, texture_image_memory) = create_image(
+    let (texture_image, texture_image_memory) = create_image_2d(
         instance,
         device,
         data,
