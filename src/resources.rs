@@ -2,50 +2,58 @@ use std::marker::PhantomData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Handle<T> {
-    handle: usize,
+    id: usize,
     _phantom: PhantomData<T>,
 }
 
 impl<T> Handle<T> {
-    pub fn new(handle: usize) -> Self {
+    pub fn new(id: usize) -> Self {
         Handle {
-            handle,
+            id,
             _phantom: PhantomData,
         }
     }
 
-    pub fn index(&self) -> usize {
-        self.handle
+    pub fn id(&self) -> usize {
+        self.id
     }
 }
 
 pub struct Collection<'a, T> {
+    current_id: usize,
     items: Vec<T>,
-    tags: Vec<Vec<&'a str>>
+    ids: Vec<usize>,
+    tags: Vec<Vec<&'a str>>,
 }
 
 impl<'a, T> Collection<'a, T> {
     pub fn new() -> Self {
         Collection {
+            current_id: 0,
             items: vec![],
-            tags: vec![]
+            ids: vec![],
+            tags: vec![],
         }
     }
 
     pub fn push(&mut self, item: T, tags: &[&'a str]) -> Handle<T> {
-        let index = self.items.len();
+        let id = self.current_id;
         self.items.push(item);
+        self.ids.push(id);
         self.tags.push(tags.to_vec());
 
-        Handle::new(index)
+        self.current_id += 1;
+
+        Handle::new(id)
     }
 
     pub fn get(&self, handle: &Handle<T>) -> Option<&T> {
-        self.items.get(handle.index())
+        self.items.get(self.get_index_from_handle(handle).unwrap())
     }
 
     pub fn get_mut(&mut self, handle: &Handle<T>) -> Option<&mut T> {
-        self.items.get_mut(handle.index())
+        let index = self.get_index_from_handle(handle).unwrap();
+        self.items.get_mut(index)
     }
 
     pub fn get_with_tag(&self, tag: &str) -> Vec<&T> {
@@ -67,5 +75,17 @@ impl<'a, T> Collection<'a, T> {
             }
         })
         .collect::<Vec<&mut T>>()
+    }
+
+    pub fn remove(&mut self, handle: &Handle<T>) {
+        let index = self.get_index_from_handle(handle).unwrap();
+
+        self.items.swap_remove(index);
+        self.ids.swap_remove(index);
+        self.tags.swap_remove(index);
+    }
+
+    fn get_index_from_handle(&self, handle: &Handle<T>) -> Option<usize> {
+        self.ids.iter().position(|id| handle.id == *id)
     }
 }

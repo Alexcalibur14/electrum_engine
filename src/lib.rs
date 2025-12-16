@@ -1,10 +1,10 @@
+use ash::vk;
 use ash::util::read_spv;
-pub use ash::vk;
 use ash::ext::debug_utils;
 use ash::vk::Handle;
 use ash::{Entry, Instance, Device};
-use ash_window;
 use ash::khr::{surface, swapchain};
+use ash_window;
 
 use electrum_engine_macros::Vertex;
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
