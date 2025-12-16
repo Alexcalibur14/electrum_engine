@@ -167,6 +167,52 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    pub fn new(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+        name: &str
+    ) -> Self {
+        create_buffer(instance, device, data, size, usage, properties, name).unwrap()
+    }
+
+    pub fn create_and_load<T>(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        contents: &[T],
+        usage: vk::BufferUsageFlags,
+        name: &str
+    ) -> Self {
+        let buffer = create_buffer(
+            instance,
+            device,
+            data,
+            size_of_val(contents) as u64,
+            usage,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            name
+        ).unwrap();
+
+        buffer.copy_vec_into_buffer(device, contents);
+
+        buffer
+    }
+
+    pub fn create_and_stage<T>(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        contents: &[T],
+        usage: vk::BufferUsageFlags,
+        name: &str
+    ) -> Self {
+        create_and_stage_buffer(instance, device, data, usage, name, contents).unwrap()
+    }
+
     pub fn buffer(&self) -> vk::Buffer {
         self.buffer
     }
