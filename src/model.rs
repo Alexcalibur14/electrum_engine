@@ -1,19 +1,21 @@
+use std::path::Path;
+
 use ash::{Device, Instance, vk};
 
 use crate::{RendererData, Vertex, buffer::Buffer};
 
-pub struct MeshData<'a> {
-    name: &'a str,
+pub struct MeshData {
+    name: String,
     vertex_buffer: Option<Buffer>,
     index_type: Option<vk::IndexType>,
     index_buffer: Option<Buffer>,
     instance_buffer: Option<Buffer>,
 }
 
-impl<'a> MeshData<'a> {
-    pub fn new(name: &'a str) -> Self {
+impl MeshData {
+    pub fn new(name: &str) -> Self {
         MeshData {
-            name,
+            name: name.to_owned(),
             vertex_buffer: None,
             index_type : None,
             index_buffer: None,
@@ -158,4 +160,57 @@ impl<'a> MeshData<'a> {
         }
         self.instance_buffer = None;
     }
+}
+
+
+pub fn basic_obj_loader<'a>(instance: &Instance, device: &Device, data: &RendererData, path: &Path) -> Vec<MeshData> {
+    let (models, _) = tobj::load_obj(path, &tobj::LoadOptions::default()).unwrap();
+
+    models.iter().map(|model| {
+        let name = model.name.clone();
+        let indices = model.mesh.indices.clone();
+        let (positions, _) = model.mesh.positions.as_chunks::<3>();
+        let (normals, _) = model.mesh.normals.as_chunks::<3>();
+        let (colours, _) = model.mesh.vertex_color.as_chunks::<3>();
+        let (uvs, _) = model.mesh.texcoords.as_chunks::<2>();
+
+        let mut vertices = vec![];
+
+        for i in 0..positions.len() {
+            let position = positions[i];
+            let normal = if normals.len() > 0 { normals[i] } else { [0.0, 0.0, 0.0] };
+            let colour = if colours.len() > 0 { colours[i] } else { [0.0, 0.0, 0.0] };
+            let uv = if uvs.len() > 0 { uvs[i] } else { [0.0, 0.0] };
+
+            vertices.push(
+                OBJVertex {
+                    position,
+                    normal,
+                    colour,
+                    uv,
+                }
+            );
+        }
+
+
+        let mut mesh_data = MeshData::new(&name);
+
+        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
+        mesh_data.build_vertex_staged(instance, device, data, &vertices);
+
+        mesh_data
+    }).collect::<Vec<MeshData>>()
+}
+
+#[repr(C)]
+#[derive(Debug, Vertex)]
+pub struct OBJVertex {
+    #[vertex(format = "R32G32B32_SFLOAT")]
+    position: [f32; 3],
+    #[vertex(format = "R32G32B32_SFLOAT")]
+    normal: [f32; 3],
+    #[vertex(format = "R32G32B32_SFLOAT")]
+    colour: [f32; 3],
+    #[vertex(format = "R32G32_SFLOAT")]
+    uv: [f32; 2],
 }
