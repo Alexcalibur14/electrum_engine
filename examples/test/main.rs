@@ -7,12 +7,11 @@ use ash::vk;
 use anyhow::Result;
 use electrum_engine::TestVertex;
 use electrum_engine::begin_command_label;
-use electrum_engine::buffer::create_and_stage_buffer;
 use electrum_engine::create_pipeline;
-use electrum_engine::draw::bind_index_vertex;
 use electrum_engine::end_command_label;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
+use electrum_engine::model::MeshData;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
 use tracing::{info, level_filters::LevelFilter};
@@ -57,23 +56,26 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipeline = pipeline;
         renderer.data.pipeline_layout = layout;
 
-        let vertices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex Buffer", &[
+        let vertices = [
             TestVertex{ position: [ 0.0 , -0.5 ], colour: [0.0 , 1.0 , 0.0] },
             TestVertex{ position: [-0.25, -0.25], colour: [0.25, 0.75, 0.25] },
             TestVertex{ position: [ 0.25, -0.25], colour: [0.25, 0.75, 0.25] },
             TestVertex{ position: [-0.25,  0.25], colour: [0.75, 0.25, 0.75] },
             TestVertex{ position: [ 0.25,  0.25], colour: [0.75, 0.25, 0.75] },
             TestVertex{ position: [ 0.0 ,  0.5 ], colour: [1.0 , 0.0 , 1.0] },
-        ]).unwrap();
-        renderer.data.vertices = vertices;
+        ];
 
-        let indices = create_and_stage_buffer(&renderer.instance, &renderer.device, &renderer.data, vk::BufferUsageFlags::INDEX_BUFFER, "Index Buffer", &[
+        let indices: [u16; 12] = [
             0, 1, 2,
             1, 3, 2,
             2, 3, 4,
             3, 5, 4,
-        ]).unwrap();
-        renderer.data.indices = indices;
+        ];
+
+        let mut mesh_data = MeshData::new("test_mesh");
+        mesh_data.build_vertex_staged(&renderer.instance, &renderer.device, &renderer.data, &vertices);
+        mesh_data.build_index_staged(&renderer.instance, &renderer.device, &renderer.data, &indices, vk::IndexType::UINT16);
+        renderer.data.mesh_data = mesh_data;
 
         let mut task_graph = TaskGraph::new();
 
@@ -244,7 +246,7 @@ impl Task for MainDraw {
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
-        bind_index_vertex(device, command_buffer, data.indices.buffer(), vk::IndexType::UINT32, data.vertices.buffer());
+        data.mesh_data.bind_buffers(device, command_buffer);
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipeline) };
         unsafe { device.cmd_draw_indexed(command_buffer, 12, 1, 0, 0, 0) };
 

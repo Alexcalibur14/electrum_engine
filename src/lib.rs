@@ -36,6 +36,8 @@ use image::*;
 use present::*;
 use task_graph::*;
 
+use crate::model::MeshData;
+
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 
@@ -329,8 +331,7 @@ impl<'a> Drop for Renderer<'a> {
         task_graph.destroy(&self.device);
         self.data.task_graph = task_graph;
 
-        self.data.vertices.destroy(&self.device);
-        self.data.indices.destroy(&self.device);
+        self.data.mesh_data.destroy(&self.device);
 
         unsafe { self.device.destroy_pipeline(self.data.pipeline, None) };
         unsafe { self.device.destroy_pipeline_layout(self.data.pipeline_layout, None);}
@@ -415,8 +416,7 @@ pub struct RendererData<'a> {
     pub msaa_samples: vk::SampleCountFlags,
 
     // Temp
-    pub vertices: Buffer,
-    pub indices: Buffer,
+    pub mesh_data: MeshData,
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
 
@@ -455,8 +455,7 @@ impl<'a> Default for RendererData<'a> {
             render_semaphores: Default::default(),
             render_fences: Default::default(),
             msaa_samples: Default::default(),
-            vertices: Default::default(),
-            indices: Default::default(),
+            mesh_data: MeshData::new(""),
             pipeline: Default::default(),
             pipeline_layout: Default::default(),
             image_index: Default::default(),
