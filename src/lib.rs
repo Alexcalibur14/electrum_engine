@@ -36,7 +36,7 @@ use image::*;
 use present::*;
 use task_graph::*;
 
-use crate::model::MeshData;
+use crate::model::{MeshData, OBJVertex};
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -1060,8 +1060,8 @@ pub fn create_pipeline(device: &Device) -> (vk::Pipeline, vk::PipelineLayout) {
         .name(c"main")
         .stage(vk::ShaderStageFlags::FRAGMENT);
 
-    let attributs = TestVertex::attribute_descriptions();
-    let bindings = TestVertex::binding_descriptions();
+    let attributs = OBJVertex::attribute_descriptions();
+    let bindings = OBJVertex::binding_descriptions();
     let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_attribute_descriptions(&attributs)
         .vertex_binding_descriptions(&bindings);

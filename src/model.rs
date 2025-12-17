@@ -1,15 +1,20 @@
+use core::fmt;
 use std::path::Path;
 
 use ash::{Device, Instance, vk};
 
 use crate::{RendererData, Vertex, buffer::Buffer};
 
+#[derive(Debug, Clone)]
 pub struct MeshData {
     name: String,
     vertex_buffer: Option<Buffer>,
+    vertex_len: u32,
     index_type: Option<vk::IndexType>,
     index_buffer: Option<Buffer>,
+    index_len: u32,
     instance_buffer: Option<Buffer>,
+    instance_len: u32,
 }
 
 impl MeshData {
@@ -17,14 +22,21 @@ impl MeshData {
         MeshData {
             name: name.to_owned(),
             vertex_buffer: None,
+            vertex_len: 0,
             index_type : None,
             index_buffer: None,
-            instance_buffer: None
+            index_len: 0,
+            instance_buffer: None,
+            instance_len: 0,
         }
     }
 
     pub fn vertex_buffer(&self) -> Option<Buffer> {
         self.vertex_buffer
+    }
+
+    pub fn vertex_len(&self) -> u32 {
+        self.vertex_len
     }
 
     pub fn index_buffer(&self) -> Option<Buffer> {
@@ -35,20 +47,30 @@ impl MeshData {
         self.index_type
     }
 
+    pub fn index_len(&self) -> u32 {
+        self.index_len
+    }
+
     pub fn instance_buffer(&self) -> Option<Buffer> {
         self.instance_buffer
+    }
+
+    pub fn instance_len(&self) -> u32 {
+        self.instance_len
     }
 
     /// Creates a buffer with [HOST_COHERENT](vk::MemoryPropertyFlags::HOST_COHERENT) and [HOST_VISIBLE](vk::MemoryPropertyFlags::HOST_VISIBLE)
     /// as memory properties and fills it with the [vertices](Self::vertices). \ Recomended only for vertex data that changes often
     pub fn build_vertex_host<V: Vertex>(&mut self, instance: &Instance, device: &Device, data: &RendererData, vertices: &[V]) {
+        self.vertex_len = vertices.len() as u32;
+        
         let vertex_buffer = Buffer::create_and_load(
             instance,
             device,
             data,
             vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
-            &format!("{} Vertex Buffer", self.name)
+            &format!("{} Vertex", self.name)
         );
 
         self.vertex_buffer = Some(vertex_buffer);
@@ -57,13 +79,15 @@ impl MeshData {
     /// Creates a buffer with [HOST_COHERENT](vk::MemoryPropertyFlags::HOST_COHERENT) and [HOST_VISIBLE](vk::MemoryPropertyFlags::HOST_VISIBLE)
     /// as memory properties and fills it with the [indices](Self::indices). \ Recomended only for index data that changes often
     pub fn build_index_host<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
+        self.index_len = indices.len() as u32;
+        
         self.index_buffer = Some(Buffer::create_and_load(
             instance,
             device,
             data,
             indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
-            &format!("{} Index Buffer", self.name)
+            &format!("{} Index", self.name)
         ));
 
         self.index_type = Some(index_type)
@@ -72,39 +96,45 @@ impl MeshData {
     /// Creates a buffer with [HOST_COHERENT](vk::MemoryPropertyFlags::HOST_COHERENT) and [HOST_VISIBLE](vk::MemoryPropertyFlags::HOST_VISIBLE)
     /// as memory properties and fills it with the [instances](Self::instances). \ Recomended only for instance data that changes often
     pub fn build_instance_host<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, instances: &[I]) {
+        self.instance_len = instances.len() as u32;
+        
         self.instance_buffer = Some(Buffer::create_and_load(
             instance,
             device,
             data,
             instances,
             vk::BufferUsageFlags::VERTEX_BUFFER,
-            &format!("{} Instance Buffer", self.name)
+            &format!("{} Instance", self.name)
         ));
     }
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
     /// as memory properties and fills it with the [vertices](Self::vertices). \ Recomended only for static vertex data
     pub fn build_vertex_staged<V: Vertex>(&mut self, instance: &Instance, device: &Device, data: &RendererData, vertices: &[V]) {
+        self.vertex_len = vertices.len() as u32;
+
         self.vertex_buffer = Some(Buffer::create_and_stage(
             instance,
             device,
             data,
             vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
-            &format!("{} Vertex Buffer", self.name)
+            &format!("{} Vertex", self.name)
         ));
     }
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
     /// as memory properties and fills it with the [indices](Self::indices). \ Recomended only for static index data
     pub fn build_index_staged<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
+        self.index_len = indices.len() as u32;
+        
         self.index_buffer = Some(Buffer::create_and_stage(
             instance,
             device,
             data,
             indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
-            &format!("{} Index Buffer", self.name)
+            &format!("{} Index", self.name)
         ));
 
         self.index_type = Some(index_type);
@@ -113,13 +143,15 @@ impl MeshData {
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
     /// as memory properties and fills it with the [instances](Self::instances). \ Recomended only for static instance data
     pub fn build_instance_staged<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, instances: &[I]) {
+        self.instance_len = instances.len() as u32;
+        
         self.instance_buffer = Some(Buffer::create_and_stage(
             instance,
             device,
             data,
             instances,
             vk::BufferUsageFlags::VERTEX_BUFFER,
-            &format!("{} Instance Buffer", self.name)
+            &format!("{} Instance", self.name)
         ));
     }
 
@@ -149,22 +181,30 @@ impl MeshData {
             vertex_buffer.destroy(device);
         }
         self.vertex_buffer = None;
+        self.vertex_len = 0;
 
         if let Some(index_buffer) = self.index_buffer.as_mut() {
             index_buffer.destroy(device);
         }
         self.index_buffer = None;
+        self.index_len = 0;
 
         if let Some(instance_buffer) = self.instance_buffer.as_mut() {
             instance_buffer.destroy(device);
         }
         self.instance_buffer = None;
+        self.instance_len = 0;
     }
 }
 
 
-pub fn basic_obj_loader<'a>(instance: &Instance, device: &Device, data: &RendererData, path: &Path) -> Vec<MeshData> {
-    let (models, _) = tobj::load_obj(path, &tobj::LoadOptions::default()).unwrap();
+pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device: &Device, data: &RendererData, path: P) -> Vec<MeshData> {
+    let (models, _) = tobj::load_obj(path, &tobj::LoadOptions {
+        single_index: true,
+        triangulate: false,
+        ignore_points: true,
+        ignore_lines: true,
+    }).unwrap();
 
     models.iter().map(|model| {
         let name = model.name.clone();
@@ -194,6 +234,8 @@ pub fn basic_obj_loader<'a>(instance: &Instance, device: &Device, data: &Rendere
 
 
         let mut mesh_data = MeshData::new(&name);
+
+        println!("vertices: {}, indices: {}", vertices.len(), indices.len());
 
         mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
         mesh_data.build_vertex_staged(instance, device, data, &vertices);
