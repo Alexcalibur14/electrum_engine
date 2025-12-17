@@ -19,6 +19,7 @@ impl<T> Handle<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct Collection<'a, T> {
     current_id: usize,
     items: Vec<T>,
@@ -87,5 +88,16 @@ impl<'a, T> Collection<'a, T> {
 
     fn get_index_from_handle(&self, handle: &Handle<T>) -> Option<usize> {
         self.ids.iter().position(|id| handle.id == *id)
+    }
+}
+
+// terrible implementation but I don't know how else to do it
+impl<'a, T> IntoIterator for Collection<'a, T> {
+    type Item = (T, usize, Vec<&'a str>);
+
+    type IntoIter = <std::vec::Vec<<Collection<'a, T> as IntoIterator>::Item> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.into_iter().zip(self.ids.into_iter().zip(self.tags)).map(|(item, (id, tags))| (item, id, tags)).collect::<Vec<_>>().into_iter()
     }
 }

@@ -235,8 +235,6 @@ pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device
 
         let mut mesh_data = MeshData::new(&name);
 
-        println!("vertices: {}, indices: {}", vertices.len(), indices.len());
-
         mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
         mesh_data.build_vertex_staged(instance, device, data, &vertices);
 
