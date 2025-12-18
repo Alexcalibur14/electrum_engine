@@ -1,5 +1,4 @@
 use ash::vk;
-use ash::util::read_spv;
 use ash::ext::debug_utils;
 use ash::vk::Handle;
 use ash::{Entry, Instance, Device};
@@ -18,7 +17,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::{self, CStr};
 use std::mem::ManuallyDrop;
-use std::{fs, ptr};
+use std::ptr;
 use std::time::{Duration, Instant};
 
 pub mod command;
@@ -29,6 +28,7 @@ pub mod resources;
 pub mod draw;
 pub mod task_graph;
 pub mod model;
+pub mod shader;
 
 use command::*;
 use buffer::*;
@@ -36,8 +36,9 @@ use image::*;
 use present::*;
 use task_graph::*;
 
-use crate::model::{MeshData, OBJVertex};
+use crate::model::MeshData;
 use crate::resources::Collection;
+use crate::shader::GraphicsProgram;
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -336,8 +337,16 @@ impl<'a> Drop for Renderer<'a> {
         meshes.into_iter().for_each(|(mut item, _, _)| item.destroy(&self.device));
         self.data.meshs = Collection::new();
 
-        unsafe { self.device.destroy_pipeline(self.data.pipeline, None) };
-        unsafe { self.device.destroy_pipeline_layout(self.data.pipeline_layout, None);}
+        let pipelines = self.data.pipelines.clone();
+        pipelines.into_iter().for_each(|((pipeline, layout), _, _)| {
+            unsafe { self.device.destroy_pipeline(pipeline, None) };
+            unsafe { self.device.destroy_pipeline_layout(layout, None) };
+        });
+        self.data.pipelines = Collection::new();
+
+        let graphics_shaders = self.data.graphics_shaders.clone();
+        graphics_shaders.into_iter().for_each(|(mut s, ..)| s.destroy(&self.device));
+        self.data.graphics_shaders = Collection::new();
         
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
         unsafe { swapchain_loader.destroy_swapchain(self.data.swapchain, None) };
@@ -420,8 +429,8 @@ pub struct RendererData<'a> {
 
     // Temp
     pub meshs: Collection<'a, MeshData>,
-    pub pipeline: vk::Pipeline,
-    pub pipeline_layout: vk::PipelineLayout,
+    pub pipelines: Collection<'a, (vk::Pipeline, vk::PipelineLayout)>,
+    pub graphics_shaders: Collection<'a, GraphicsProgram<'a>>,
 
     pub image_index: usize,
     pub task_graph: TaskGraph<'a>,
@@ -459,8 +468,9 @@ impl<'a> Default for RendererData<'a> {
             render_fences: Default::default(),
             msaa_samples: Default::default(),
             meshs: Collection::new(),
-            pipeline: Default::default(),
-            pipeline_layout: Default::default(),
+            pipelines: Collection::new(),
+            graphics_shaders: Collection::new(),
+
             image_index: Default::default(),
             task_graph: TaskGraph::new(),
 
@@ -1038,122 +1048,7 @@ where
     }
 }
 
-
-pub fn create_pipeline(device: &Device) -> (vk::Pipeline, vk::PipelineLayout) {
-    let bytecode = read_spv(&mut fs::File::open("res/shaders/test.vert.spv").unwrap()).unwrap();
-    let create_info = vk::ShaderModuleCreateInfo::default()
-        .code(&bytecode);
-
-    let vertex = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
-
-    let vertex_stage_info = vk::PipelineShaderStageCreateInfo::default()
-        .module(vertex)
-        .name(c"main")
-        .stage(vk::ShaderStageFlags::VERTEX);
-
-
-    let bytecode = read_spv(&mut fs::File::open("res/shaders/test.frag.spv").unwrap()).unwrap();
-    let create_info = vk::ShaderModuleCreateInfo::default()
-        .code(&bytecode);
-
-    let fragment = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
-
-    let fragment_stage_info = vk::PipelineShaderStageCreateInfo::default()
-        .module(fragment)
-        .name(c"main")
-        .stage(vk::ShaderStageFlags::FRAGMENT);
-
-    let attributs = OBJVertex::attribute_descriptions();
-    let bindings = OBJVertex::binding_descriptions();
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-        .vertex_attribute_descriptions(&attributs)
-        .vertex_binding_descriptions(&bindings);
-
-    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-
-    let attachments = [
-        vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-            .alpha_blend_op(vk::BlendOp::ADD)
-    ];
-
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-        .attachments(&attachments)
-        .logic_op_enable(false)
-        .logic_op(vk::LogicOp::COPY)
-        .blend_constants([0.0, 0.0, 0.0, 0.0]);
-
-    let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
-        .flags(vk::PipelineMultisampleStateCreateFlags::empty())
-        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-        .sample_shading_enable(false);
-
-    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
-        .depth_clamp_enable(false)
-        .rasterizer_discard_enable(false)
-        .polygon_mode(vk::PolygonMode::FILL)
-        .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-        .depth_bias_enable(false);
-
-    let mut viewport_state = vk::PipelineViewportStateCreateInfo::default();
-    viewport_state.p_scissors = ptr::null();
-    viewport_state.scissor_count = 1;
-    viewport_state.p_viewports = ptr::null();
-    viewport_state.viewport_count = 1;
-
-    let layout_create_info = vk::PipelineLayoutCreateInfo::default()
-        .flags(vk::PipelineLayoutCreateFlags::empty())
-        .set_layouts(&[])
-        .push_constant_ranges(&[]);
-
-    let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
-
-    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
-
-    let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
-        .color_attachment_formats(&[vk::Format::R16G16B16A16_SFLOAT]);
-
-    let binding = [vertex_stage_info, fragment_stage_info];
-    let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-        .vertex_input_state(&vertex_input_state)
-        .input_assembly_state(&input_assembly_state)
-        .color_blend_state(&color_blend_state)
-        .multisample_state(&multisample_state)
-        .rasterization_state(&rasterization_state)
-        .viewport_state(&viewport_state)
-        .layout(layout)
-        .dynamic_state(&dynamic_state)
-        .push_next(&mut pipeline_info2)
-        .stages(&binding);
-
-    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None) }.unwrap()[0];
-
-    unsafe { device.destroy_shader_module(vertex, None) };
-    unsafe { device.destroy_shader_module(fragment, None) };
-
-    (pipeline, layout)
-}
-
 pub trait Vertex {
     fn binding_descriptions() -> Vec<vk::VertexInputBindingDescription>;
     fn attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription>;
-}
-
-#[repr(C)]
-#[derive(Debug, Vertex)]
-pub struct TestVertex {
-    #[vertex(format = "R32G32_SFLOAT")]
-    pub position: [f32; 2],
-    #[vertex(format = "R32G32B32_SFLOAT")]
-    pub colour: [f32; 3]
 }

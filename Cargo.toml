@@ -11,7 +11,6 @@ edition = "2021"
 anyhow = "1.0.92"
 glam = "0.29.0"
 ash = "0.38.0"
-shaderc = "0.8.3"
 thiserror = "1.0.67"
 tobj = { version = "4.0.2", features = ["log"] }
 tracing = "0.1.40"

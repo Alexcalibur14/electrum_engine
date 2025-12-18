@@ -6,11 +6,16 @@ use ash::vk;
 
 use anyhow::Result;
 use electrum_engine::begin_command_label;
-use electrum_engine::create_pipeline;
 use electrum_engine::end_command_label;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
+use electrum_engine::model::OBJVertex;
 use electrum_engine::model::basic_obj_loader;
+use electrum_engine::shader::DepthStencilData;
+use electrum_engine::shader::GraphicsProgram;
+use electrum_engine::shader::MultisampleData;
+use electrum_engine::shader::RasterizationData;
+use electrum_engine::shader::create_basic_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
 use tracing::{info, level_filters::LevelFilter};
@@ -51,9 +56,42 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let mut renderer = Renderer::new(&window).unwrap();
 
-        let (pipeline, layout) = create_pipeline(&renderer.device);
-        renderer.data.pipeline = pipeline;
-        renderer.data.pipeline_layout = layout;
+        let mut program = GraphicsProgram::new("test", "res/shaders/test.vert.spv");
+        program.set_fragment_path("res/shaders/test.frag.spv");
+        program.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+
+        let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
+            &renderer.instance,
+            &renderer.device,
+            &program,
+            RasterizationData {
+                cull_mode: vk::CullModeFlags::BACK,
+                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                polygon_mode: vk::PolygonMode::FILL,
+                line_width: 0.0,
+            },
+            MultisampleData {
+                samples: vk::SampleCountFlags::TYPE_1,
+                sample_shading_enable: false,
+            },
+            DepthStencilData {
+                depth_test_enable: false,
+                depth_write_enable: false,
+                stencil_test_enable: false,
+                compare_op: vk::CompareOp::ALWAYS,
+            },
+            0,
+            &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
+            &[vk::Format::R16G16B16A16_SFLOAT],
+            vk::Format::UNDEFINED,
+            vk::Format::UNDEFINED,
+            &[],
+            &[],
+            vk::PrimitiveTopology::TRIANGLE_LIST
+        );
+
+        renderer.data.graphics_shaders.push(program, &["main"]);
+        renderer.data.pipelines.push((pipeline, layout), &["main"]);
 
         let monkey_model = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
 
@@ -231,7 +269,7 @@ impl Task for MainDraw {
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
-        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipeline) };
+        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipelines.get_with_tag("main")[0].0) };
         data.meshs.get_with_tag("main").iter().for_each(|mesh| {
             mesh.bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, mesh.index_len(), 1, 0, 0, 0) };
