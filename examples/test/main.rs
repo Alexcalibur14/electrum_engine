@@ -216,6 +216,12 @@ impl<'a> ApplicationHandler for App<'a> {
 
                 self.window.as_ref().unwrap().request_redraw();
             }
+            WindowEvent::Resized(new_size) => {
+                let renderer = self.renderer.as_mut().unwrap();
+                renderer.resized = true;
+                renderer.width = new_size.width;
+                renderer.height = new_size.height;
+            }
             _ => (),
         }
     }
