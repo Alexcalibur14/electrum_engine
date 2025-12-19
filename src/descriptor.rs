@@ -5,6 +5,8 @@ use thiserror::Error;
 use ash::vk;
 use ash::Device;
 
+use crate::RendererData;
+
 
 const STANDARD_SIZES: [(vk::DescriptorType, u32); 10] = [
     (vk::DescriptorType::SAMPLER, 1),
@@ -255,6 +257,19 @@ impl<'a> DescriptorBuilder<'a> {
     pub fn build(&'a mut self, device: &Device, layout_cache: &mut DescriptorLayoutCache, allocator: &mut DescriptorAllocator) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
         let layout = layout_cache.create_descriptor_set_layout(device, &self.bindings);
         let set = allocator.allocate(device, &layout)?;
+
+        for write in self.writes.iter_mut() {
+            write.dst_set = set;
+        }
+
+        unsafe { device.update_descriptor_sets(&self.writes, &[]) };
+
+        Ok((set, layout))
+    }
+
+    pub fn build_data(&'a mut self, device: &Device, data: &mut RendererData) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
+        let layout = data.descriptor_layout_cache.create_descriptor_set_layout(device, &self.bindings);
+        let set = data.descriptor_pool.allocate(device, &layout)?;
 
         for write in self.writes.iter_mut() {
             write.dst_set = set;

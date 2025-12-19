@@ -86,18 +86,70 @@ impl<'a, T> Collection<'a, T> {
         self.tags.swap_remove(index);
     }
 
+    pub fn clear(&mut self) {
+        self.ids.clear();
+        self.items.clear();
+        self.tags.clear();
+    }
+
+    pub fn items(&self) -> &[T] {
+        &self.items
+    }
+
+    pub fn items_mut(&mut self) -> &mut [T] {
+        &mut self.items
+    }
+
     fn get_index_from_handle(&self, handle: &Handle<T>) -> Option<usize> {
         self.ids.iter().position(|id| handle.id == *id)
     }
 }
 
-// terrible implementation but I don't know how else to do it
-impl<'a, T> IntoIterator for Collection<'a, T> {
-    type Item = (T, usize, Vec<&'a str>);
+#[derive(Clone)]
+pub struct NamedVec<'a, T> {
+    items: Vec<T>,
+    names: Vec<&'a str>,
+}
 
-    type IntoIter = <std::vec::Vec<<Collection<'a, T> as IntoIterator>::Item> as IntoIterator>::IntoIter;
+impl<'a, T> NamedVec<'a, T> {
+    pub fn new() -> Self {
+        NamedVec {
+            items: vec![],
+            names: vec![],
+        }
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.items.into_iter().zip(self.ids.into_iter().zip(self.tags)).map(|(item, (id, tags))| (item, id, tags)).collect::<Vec<_>>().into_iter()
+    pub fn push(&mut self, item: T, name: &'a str) {
+        self.items.push(item);
+        self.names.push(name);
+    }
+
+    pub fn remove(&mut self, name: &str) -> T {
+        let index = self.names.iter().position(|n| *n == name).unwrap();
+        self.names.swap_remove(index);
+        self.items.swap_remove(index)
+    }
+
+    pub fn get(&self, name: &str) -> &T {
+        let index = self.names.iter().position(|n| *n == name).unwrap();
+        self.items.get(index).unwrap()
+    }
+
+    pub fn get_mut(&mut self, name: &str) -> &mut T {
+        let index = self.names.iter().position(|n| *n == name).unwrap();
+        self.items.get_mut(index).unwrap()
+    }
+
+    pub fn items(&self) -> &[T] {
+        &self.items
+    }
+
+    pub fn items_mut(&mut self) -> &mut [T] {
+        &mut self.items
+    }
+
+    pub fn clear(&mut self) {
+        self.names.clear();
+        self.items.clear();
     }
 }

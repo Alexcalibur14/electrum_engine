@@ -40,7 +40,7 @@ use task_graph::*;
 use resources::Handle as CollectionHandle;
 
 use crate::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
-use crate::model::MeshData;
+use crate::model::Object;
 use crate::resources::Collection;
 use crate::shader::GraphicsProgram;
 
@@ -337,20 +337,20 @@ impl<'a> Drop for Renderer<'a> {
         task_graph.destroy(&self.device);
         self.data.task_graph = task_graph;
 
-        let meshes = self.data.meshs.clone();
-        meshes.into_iter().for_each(|(mut item, _, _)| item.destroy(&self.device));
-        self.data.meshs = Collection::new();
+        let mut objects = self.data.objects.clone();
+        objects.items_mut().iter_mut().for_each(|object| object.destroy(&self.device));
+        self.data.objects.clear();
 
         let pipelines = self.data.pipelines.clone();
-        pipelines.into_iter().for_each(|((pipeline, layout), _, _)| {
-            unsafe { self.device.destroy_pipeline(pipeline, None) };
-            unsafe { self.device.destroy_pipeline_layout(layout, None) };
+        pipelines.items().iter().for_each(|(pipeline, layout)| {
+            unsafe { self.device.destroy_pipeline(*pipeline, None) };
+            unsafe { self.device.destroy_pipeline_layout(*layout, None) };
         });
-        self.data.pipelines = Collection::new();
+        self.data.pipelines.clear();
 
-        let graphics_shaders = self.data.graphics_shaders.clone();
-        graphics_shaders.into_iter().for_each(|(mut s, ..)| s.destroy(&self.device));
-        self.data.graphics_shaders = Collection::new();
+        let mut graphics_shaders = self.data.graphics_shaders.clone();
+        graphics_shaders.items_mut().iter_mut().for_each(|s| s.destroy(&self.device));
+        self.data.graphics_shaders.clear();
 
         self.data.descriptor_pool.destroy(&self.device);
         self.data.descriptor_layout_cache.destroy(&self.device);
@@ -434,8 +434,8 @@ pub struct RendererData<'a> {
     // MSAA
     pub msaa_samples: vk::SampleCountFlags,
 
-    // Temp
-    pub meshs: Collection<'a, MeshData>,
+    // Draw Data
+    pub objects: Collection<'a, Object<'a>>,
     pub pipelines: Collection<'a, (vk::Pipeline, vk::PipelineLayout)>,
     pub graphics_shaders: Collection<'a, GraphicsProgram<'a>>,
 
@@ -479,7 +479,8 @@ impl<'a> Default for RendererData<'a> {
             render_semaphores: Default::default(),
             render_fences: Default::default(),
             msaa_samples: Default::default(),
-            meshs: Collection::new(),
+
+            objects: Collection::new(),
             pipelines: Collection::new(),
             graphics_shaders: Collection::new(),
 

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use ash::{Device, Instance, vk};
 
-use crate::{RendererData, Vertex, buffer::Buffer};
+use crate::{RendererData, Vertex, buffer::Buffer, image::Image, resources::NamedVec};
 
 #[derive(Debug, Clone)]
 pub struct MeshData {
@@ -27,7 +27,7 @@ impl MeshData {
             index_buffer: None,
             index_len: 0,
             instance_buffer: None,
-            instance_len: 0,
+            instance_len: 1,
         }
     }
 
@@ -253,4 +253,142 @@ pub struct OBJVertex {
     colour: [f32; 3],
     #[vertex(format = "R32G32_SFLOAT")]
     uv: [f32; 2],
+}
+
+#[derive(Clone)]
+pub struct Object<'a> {
+    name: &'a str,
+    mesh_data: MeshData,
+    buffers: NamedVec<'a, Buffer>,
+    images: NamedVec<'a, Image>,
+    descriptor_sets: NamedVec<'a, vk::DescriptorSet>
+}
+
+impl<'a> Object<'a> {
+    pub fn new(name: &'a str) -> Self {
+        Object {
+            name,
+            mesh_data: MeshData::new(name),
+            buffers: NamedVec::new(),
+            images: NamedVec::new(),
+            descriptor_sets: NamedVec::new(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name
+    }
+
+    pub fn mesh_data(&self) -> &MeshData {
+        &self.mesh_data
+    }
+
+    pub fn mesh_data_mut(&mut self) -> &mut MeshData {
+        &mut self.mesh_data
+    }
+
+    pub fn buffers(&self) -> &NamedVec<'a, Buffer> {
+        &self.buffers
+    }
+
+    pub fn images(&self) -> &NamedVec<'a, Image> {
+        &self.images
+    }
+
+    pub fn descriptor_sets(&self) -> &NamedVec<'a, vk::DescriptorSet> {
+        &self.descriptor_sets
+    }
+
+    pub fn get_buffer(&self, name: &'a str) -> &Buffer {
+        self.buffers.get(name)
+    }
+
+    pub fn get_image(&self, name: &'a str) -> &Image {
+        self.images.get(name)
+    }
+
+    pub fn get_descriptor_set(&self, name: &'a str) -> &vk::DescriptorSet {
+        self.descriptor_sets.get(name)
+    }
+}
+
+
+impl<'a> Object<'a> {
+    pub fn add_buffer(&mut self, buffer: Buffer, name: &'a str) {
+        self.buffers.push(buffer, name);
+    }
+
+    pub fn add_image(&mut self, image: Image, name: &'a str) {
+        self.images.push(image, name);
+    }
+
+    pub fn add_descriptor_set(&mut self, descriptor_set: vk::DescriptorSet, name: &'a str) {
+        self.descriptor_sets.push(descriptor_set, name);
+    }
+
+    pub fn create_buffer_host(&mut self, instance: &Instance, device: &Device, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
+        let buffer = Buffer::new(
+            instance,
+            device,
+            data,
+            size,
+            usage,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            name
+        );
+
+        self.buffers.push(buffer, name);
+    }
+
+    pub fn create_buffer_device(&mut self, instance: &Instance, device: &Device, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
+        let buffer = Buffer::new(
+            instance,
+            device,
+            data,
+            size,
+            usage,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            name
+        );
+
+        self.buffers.push(buffer, name);
+    }
+
+    pub fn create_and_load_buffer_host<T>(&mut self, instance: &Instance, device: &Device, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
+        let buffer = Buffer::create_and_load(
+            instance,
+            device,
+            data,
+            contents,
+            usage,
+            name
+        );
+
+        self.buffers.push(buffer, name);
+    }
+
+    pub fn create_and_load_buffer_device<T>(&mut self, instance: &Instance, device: &Device, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
+        let buffer = Buffer::create_and_stage(
+            instance,
+            device,
+            data,
+            contents,
+            usage,
+            name
+        );
+
+        self.buffers.push(buffer, name);
+    }
+
+    pub fn destroy(&mut self, device: &Device) {
+        self.mesh_data.destroy(device);
+
+        self.buffers.items_mut().iter_mut().for_each(|buffer| buffer.destroy(device));
+        self.buffers.clear();
+
+        self.images.items_mut().iter_mut().for_each(|image| image.destroy(device));
+        self.images.clear();
+
+        self.descriptor_sets.clear()
+    }
 }

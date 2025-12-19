@@ -1,4 +1,4 @@
-use ash::vk::{self, Handle};
+use ash::vk;
 use ash::{Device, Instance};
 use anyhow::{Result, anyhow};
 
@@ -226,12 +226,10 @@ impl Buffer {
     }
 
     pub fn destroy(&mut self, device: &Device) {
-        if !self.buffer.is_null() {
-            unsafe {device.destroy_buffer(self.buffer, None);}
-        }
-        if !self.memory.is_null() {
-            unsafe { device.free_memory(self.memory, None); }
-        }
+        unsafe { device.destroy_buffer(self.buffer, None) };
+
+        unsafe { device.free_memory(self.memory, None) };
+
         self.buffer = vk::Buffer::null();
         self.memory = vk::DeviceMemory::null();
         self.size = 0;

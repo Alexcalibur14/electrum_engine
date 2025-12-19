@@ -12,6 +12,7 @@ use electrum_engine::end_command_label;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
 use electrum_engine::model::OBJVertex;
+use electrum_engine::model::Object;
 use electrum_engine::model::basic_obj_loader;
 use electrum_engine::shader::DepthStencilData;
 use electrum_engine::shader::GraphicsProgram;
@@ -74,15 +75,17 @@ impl<'a> ApplicationHandler for App<'a> {
                 .range(object_buffer.size())
         ];
 
-        let mut cache = renderer.data.descriptor_layout_cache.clone();
-
         let (object_descriptor, layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
-            .build(&renderer.device, &mut cache, &mut renderer.data.descriptor_pool).unwrap();
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        renderer.data.descriptor_layout_cache = cache;
-        let layout_handle = renderer.data.layouts.push(layout, &[""]);
-        renderer.data.descriptors.push((object_descriptor, layout_handle), &["monkey"]);
+        let mut monkey = Object::new("monkey");
+        monkey.add_buffer(object_buffer, "mvp");
+        monkey.add_descriptor_set(object_descriptor, "mvp");
+
+        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
+
+        renderer.data.objects.push(monkey, &["main"]);
 
         let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
@@ -116,13 +119,6 @@ impl<'a> ApplicationHandler for App<'a> {
 
         renderer.data.graphics_shaders.push(program, &["main"]);
         renderer.data.pipelines.push((pipeline, layout), &["main"]);
-
-        let monkey_model = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
-
-        renderer.data.meshs.push(
-            monkey_model,
-            &["main"],
-        );
 
         let mut task_graph = TaskGraph::new();
 
@@ -319,11 +315,12 @@ impl Task for MainDraw {
         let (pipeline, pipeline_layout) = data.pipelines.get_with_tag("main")[0];
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
 
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[data.descriptors.get_with_tag("monkey")[0].0], &[]) };
-
-        data.meshs.get_with_tag("main").iter().for_each(|mesh| {
-            mesh.bind_buffers(device, command_buffer);
-            unsafe { device.cmd_draw_indexed(command_buffer, mesh.index_len(), 1, 0, 0, 0) };
+        
+        data.objects.get_with_tag("main").iter().for_each(|object| {
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*object.get_descriptor_set("mvp")], &[]) };
+            
+            object.mesh_data().bind_buffers(device, command_buffer);
+            unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };
         });
 
         stats.draw_calls += 1;
