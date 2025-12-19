@@ -9,8 +9,12 @@ layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec3 outColour;
 layout(location = 2) out vec2 outUV;
 
+layout(set = 0, binding = 0) uniform ModelViewProjection {
+    mat4 model_matrix;
+};
+
 void main() {
-    gl_Position = vec4(inPosition, 1.0);
+    gl_Position = model_matrix * vec4(inPosition, 1.0);
     outNormal = inNormal;
     outColour = inColour;
     outUV = inUV;

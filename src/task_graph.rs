@@ -1,3 +1,5 @@
+use std::ops::BitOr;
+
 use ash::{Device, Instance, vk};
 
 use crate::{RenderStats, RendererData, buffer::Buffer, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
@@ -601,6 +603,18 @@ impl AccessType {
         access_mask: vk::AccessFlags2::NONE,
         image_layout: vk::ImageLayout::UNDEFINED,
     };
+}
+
+impl BitOr for AccessType {
+    type Output = AccessType;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        AccessType {
+            pipeline_stage: self.pipeline_stage | rhs.pipeline_stage,
+            access_mask: self.access_mask | rhs.access_mask,
+            image_layout: if self.image_layout == rhs.image_layout { self.image_layout } else { vk::ImageLayout::UNDEFINED },
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]

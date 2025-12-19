@@ -29,6 +29,7 @@ pub mod draw;
 pub mod task_graph;
 pub mod model;
 pub mod shader;
+pub mod descriptor;
 
 use command::*;
 use buffer::*;
@@ -36,6 +37,9 @@ use image::*;
 use present::*;
 use task_graph::*;
 
+use resources::Handle as CollectionHandle;
+
+use crate::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
 use crate::model::MeshData;
 use crate::resources::Collection;
 use crate::shader::GraphicsProgram;
@@ -347,6 +351,9 @@ impl<'a> Drop for Renderer<'a> {
         let graphics_shaders = self.data.graphics_shaders.clone();
         graphics_shaders.into_iter().for_each(|(mut s, ..)| s.destroy(&self.device));
         self.data.graphics_shaders = Collection::new();
+
+        self.data.descriptor_pool.destroy(&self.device);
+        self.data.descriptor_layout_cache.destroy(&self.device);
         
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
         unsafe { swapchain_loader.destroy_swapchain(self.data.swapchain, None) };
@@ -432,6 +439,11 @@ pub struct RendererData<'a> {
     pub pipelines: Collection<'a, (vk::Pipeline, vk::PipelineLayout)>,
     pub graphics_shaders: Collection<'a, GraphicsProgram<'a>>,
 
+    pub descriptor_pool: DescriptorAllocator,
+    pub descriptor_layout_cache: DescriptorLayoutCache,
+    pub descriptors: Collection<'a, (vk::DescriptorSet, CollectionHandle<vk::DescriptorSetLayout>)>,
+    pub layouts: Collection<'a, vk::DescriptorSetLayout>,
+
     pub image_index: usize,
     pub task_graph: TaskGraph<'a>,
 
@@ -470,6 +482,11 @@ impl<'a> Default for RendererData<'a> {
             meshs: Collection::new(),
             pipelines: Collection::new(),
             graphics_shaders: Collection::new(),
+
+            descriptor_pool: DescriptorAllocator::new(),
+            descriptor_layout_cache: DescriptorLayoutCache::new(),
+            descriptors: Collection::new(),
+            layouts: Collection::new(),
 
             image_index: Default::default(),
             task_graph: TaskGraph::new(),

@@ -6,6 +6,8 @@ use ash::vk;
 
 use anyhow::Result;
 use electrum_engine::begin_command_label;
+use electrum_engine::buffer::Buffer;
+use electrum_engine::descriptor::DescriptorBuilder;
 use electrum_engine::end_command_label;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
@@ -18,6 +20,8 @@ use electrum_engine::shader::RasterizationData;
 use electrum_engine::shader::create_basic_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
+use glam::Quat;
+use glam::vec3;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ControlFlow, EventLoopBuilder}, platform::x11::EventLoopBuilderExtX11, window::Window};
@@ -60,6 +64,26 @@ impl<'a> ApplicationHandler for App<'a> {
         program.set_fragment_path("res/shaders/test.frag.spv");
         program.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
+        let matrix = glam::Mat4::from_scale_rotation_translation(vec3(0.8, -0.8, 0.8), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &matrix.to_cols_array(), vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(object_buffer.buffer())
+                .offset(0)
+                .range(object_buffer.size())
+        ];
+
+        let mut cache = renderer.data.descriptor_layout_cache.clone();
+
+        let (object_descriptor, layout) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .build(&renderer.device, &mut cache, &mut renderer.data.descriptor_pool).unwrap();
+
+        renderer.data.descriptor_layout_cache = cache;
+        let layout_handle = renderer.data.layouts.push(layout, &[""]);
+        renderer.data.descriptors.push((object_descriptor, layout_handle), &["monkey"]);
+
         let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
             &renderer.device,
@@ -75,18 +99,18 @@ impl<'a> ApplicationHandler for App<'a> {
                 sample_shading_enable: false,
             },
             DepthStencilData {
-                depth_test_enable: false,
-                depth_write_enable: false,
+                depth_test_enable: true,
+                depth_write_enable: true,
                 stencil_test_enable: false,
-                compare_op: vk::CompareOp::ALWAYS,
+                compare_op: vk::CompareOp::GREATER,
             },
             0,
             &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
             &[vk::Format::R16G16B16A16_SFLOAT],
-            vk::Format::UNDEFINED,
+            vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[],
+            &[layout],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
@@ -115,10 +139,25 @@ impl<'a> ApplicationHandler for App<'a> {
             "color_attachment"
         );
 
+        let depth = ImageData::new(
+            ImageSize::Swapchain,
+            vk::Format::D32_SFLOAT,
+            MipLevels::One,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageViewType::TYPE_2D,
+            1,
+            vk::ImageAspectFlags::DEPTH,
+            None,
+            "depth_attachment",
+        );
+
         task_graph.add_image(image);
+        task_graph.add_image(depth);
 
         let mut main_node = Node::new();
         main_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        main_node.set_depth("depth_attachment", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write());
         main_node.set_task(Box::new(MainDraw));
         task_graph.add_node(main_node);
 
@@ -242,13 +281,21 @@ impl Task for MainDraw {
             .image_view(draw_data.color_attachments[0].view())
         ];
 
+        let depth_attachment = vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 }  })
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .image_view(draw_data.depth_attachment.unwrap().view());
+
         let rendering_info = vk::RenderingInfo::default()
             .layer_count(1)
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: draw_data.color_attachments[0].extent_2d(),
             })
-            .color_attachments(&attachment_infos);
+            .color_attachments(&attachment_infos)
+            .depth_attachment(&depth_attachment);
 
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
@@ -269,7 +316,11 @@ impl Task for MainDraw {
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
-        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, data.pipelines.get_with_tag("main")[0].0) };
+        let (pipeline, pipeline_layout) = data.pipelines.get_with_tag("main")[0];
+        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
+
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[data.descriptors.get_with_tag("monkey")[0].0], &[]) };
+
         data.meshs.get_with_tag("main").iter().for_each(|mesh| {
             mesh.bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, mesh.index_len(), 1, 0, 0, 0) };
