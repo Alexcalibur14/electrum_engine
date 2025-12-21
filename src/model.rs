@@ -5,7 +5,7 @@ use ash::{Device, Instance, vk};
 
 use crate::{RendererData, Vertex, buffer::Buffer, image::Image, resources::NamedVec};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MeshData {
     name: String,
     vertex_buffer: Option<Buffer>,
@@ -255,7 +255,7 @@ pub struct OBJVertex {
     uv: [f32; 2],
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Object<'a> {
     name: &'a str,
     mesh_data: MeshData,

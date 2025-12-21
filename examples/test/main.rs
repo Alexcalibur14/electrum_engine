@@ -9,6 +9,9 @@ use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::descriptor::DescriptorBuilder;
 use electrum_engine::end_command_label;
+use electrum_engine::extra::Projection;
+use electrum_engine::extra::SimpleCamera;
+use electrum_engine::extra::radians;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
 use electrum_engine::model::OBJVertex;
@@ -21,7 +24,9 @@ use electrum_engine::shader::RasterizationData;
 use electrum_engine::shader::create_basic_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
+use glam::Mat4;
 use glam::Quat;
+use glam::Vec3;
 use glam::vec3;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -50,6 +55,8 @@ struct App<'a> {
     renderer: Option<Renderer<'a>>,
 
     egui_data: EguiData,
+
+    camera: SimpleCamera,
 }
 
 impl<'a> ApplicationHandler for App<'a> {
@@ -61,12 +68,24 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let mut renderer = Renderer::new(&window).unwrap();
 
+
+        let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
+
+        let view = Mat4::look_at_rh(vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
+        let camera = SimpleCamera::new_view(&renderer.instance, &renderer.device, &mut renderer.data, view, projection);
+
+        self.camera = camera;
+
         let mut program = GraphicsProgram::new("test", "res/shaders/test.vert.spv");
         program.set_fragment_path("res/shaders/test.frag.spv");
         program.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
-        let matrix = glam::Mat4::from_scale_rotation_translation(vec3(0.8, -0.8, 0.8), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
-        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &matrix.to_cols_array(), vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+        let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
+        let model_data = ModelData {
+            model: model_matrix,
+            normal: model_matrix.inverse().transpose(),
+        };
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
 
         let buffer_info = &[
             vk::DescriptorBufferInfo::default()
@@ -113,7 +132,7 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[layout],
+            &[*renderer.data.layouts.get("main_camera"), layout],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
@@ -321,9 +340,11 @@ impl Task for MainDraw {
         let (pipeline, pipeline_layout) = data.pipelines.get_with_tag("main")[0];
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
 
+        let camera = data.objects.get_with_tag("main_camera")[0];
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*camera.get_descriptor_set("camera_data")], &[]) };
         
         data.objects.get_with_tag("main").iter().for_each(|object| {
-            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*object.get_descriptor_set("mvp")], &[]) };
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
             
             object.mesh_data().bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };
@@ -399,4 +420,10 @@ impl Task for Present {
     fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
 
     fn destroy(&mut self, _: &Device) {}
+}
+
+#[repr(C)]
+struct ModelData {
+    model: Mat4,
+    normal: Mat4,
 }

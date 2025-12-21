@@ -30,6 +30,7 @@ pub mod task_graph;
 pub mod model;
 pub mod shader;
 pub mod descriptor;
+pub mod extra;
 
 use command::*;
 use buffer::*;
@@ -41,7 +42,7 @@ use resources::Handle as CollectionHandle;
 
 use crate::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
 use crate::model::Object;
-use crate::resources::Collection;
+use crate::resources::{Collection, NamedVec};
 use crate::shader::GraphicsProgram;
 
 /// Whether the validation layers should be enabled.
@@ -441,8 +442,8 @@ pub struct RendererData<'a> {
 
     pub descriptor_pool: DescriptorAllocator,
     pub descriptor_layout_cache: DescriptorLayoutCache,
-    pub descriptors: Collection<'a, (vk::DescriptorSet, CollectionHandle<vk::DescriptorSetLayout>)>,
-    pub layouts: Collection<'a, vk::DescriptorSetLayout>,
+    pub descriptors: Collection<'a, (vk::DescriptorSet, CollectionHandle)>,
+    pub layouts: NamedVec<'a, vk::DescriptorSetLayout>,
 
     pub image_index: usize,
     pub task_graph: TaskGraph<'a>,
@@ -487,7 +488,7 @@ impl<'a> Default for RendererData<'a> {
             descriptor_pool: DescriptorAllocator::new(),
             descriptor_layout_cache: DescriptorLayoutCache::new(),
             descriptors: Collection::new(),
-            layouts: Collection::new(),
+            layouts: NamedVec::new(),
 
             image_index: Default::default(),
             task_graph: TaskGraph::new(),

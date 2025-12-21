@@ -9,13 +9,20 @@ layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec3 outColour;
 layout(location = 2) out vec2 outUV;
 
-layout(set = 0, binding = 0) uniform ModelViewProjection {
+layout(set = 0, binding = 0) uniform CameraData {
+    mat4 view_matrix;
+    mat4 projection_matrix;
+    vec3 position;
+};
+
+layout(set = 1, binding = 0) uniform ModelViewProjection {
     mat4 model_matrix;
+    mat4 normal_matrix;
 };
 
 void main() {
-    gl_Position = model_matrix * vec4(inPosition, 1.0);
-    outNormal = inNormal;
+    gl_Position = projection_matrix * view_matrix * model_matrix * vec4(inPosition, 1.0);
+    outNormal = (normal_matrix * vec4(inNormal, 0.0)).xyz;
     outColour = inColour;
     outUV = inUV;
 }

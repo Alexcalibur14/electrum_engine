@@ -1,16 +1,13 @@
-use std::marker::PhantomData;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Handle<T> {
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Handle {
     id: usize,
-    _phantom: PhantomData<T>,
 }
 
-impl<T> Handle<T> {
+impl Handle {
     pub fn new(id: usize) -> Self {
         Handle {
             id,
-            _phantom: PhantomData,
         }
     }
 
@@ -37,7 +34,7 @@ impl<'a, T> Collection<'a, T> {
         }
     }
 
-    pub fn push(&mut self, item: T, tags: &[&'a str]) -> Handle<T> {
+    pub fn push(&mut self, item: T, tags: &[&'a str]) -> Handle {
         let id = self.current_id;
         self.items.push(item);
         self.ids.push(id);
@@ -48,11 +45,11 @@ impl<'a, T> Collection<'a, T> {
         Handle::new(id)
     }
 
-    pub fn get(&self, handle: &Handle<T>) -> Option<&T> {
+    pub fn get(&self, handle: &Handle) -> Option<&T> {
         self.items.get(self.get_index_from_handle(handle).unwrap())
     }
 
-    pub fn get_mut(&mut self, handle: &Handle<T>) -> Option<&mut T> {
+    pub fn get_mut(&mut self, handle: &Handle) -> Option<&mut T> {
         let index = self.get_index_from_handle(handle).unwrap();
         self.items.get_mut(index)
     }
@@ -78,7 +75,7 @@ impl<'a, T> Collection<'a, T> {
         .collect::<Vec<&mut T>>()
     }
 
-    pub fn remove(&mut self, handle: &Handle<T>) {
+    pub fn remove(&mut self, handle: &Handle) {
         let index = self.get_index_from_handle(handle).unwrap();
 
         self.items.swap_remove(index);
@@ -100,12 +97,12 @@ impl<'a, T> Collection<'a, T> {
         &mut self.items
     }
 
-    fn get_index_from_handle(&self, handle: &Handle<T>) -> Option<usize> {
+    fn get_index_from_handle(&self, handle: &Handle) -> Option<usize> {
         self.ids.iter().position(|id| handle.id == *id)
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct NamedVec<'a, T> {
     items: Vec<T>,
     names: Vec<&'a str>,
