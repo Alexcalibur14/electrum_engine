@@ -9,6 +9,7 @@ use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::descriptor::DescriptorBuilder;
 use electrum_engine::end_command_label;
+use electrum_engine::extra::Plane;
 use electrum_engine::extra::Projection;
 use electrum_engine::extra::SimpleCamera;
 use electrum_engine::extra::radians;
@@ -69,7 +70,7 @@ impl<'a> ApplicationHandler for App<'a> {
         let mut renderer = Renderer::new(&window).unwrap();
 
 
-        let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
+        let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 10.0);
 
         let view = Mat4::look_at_rh(vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
         let camera = SimpleCamera::new_view(&renderer.instance, &renderer.device, &mut renderer.data, view, projection);
@@ -79,6 +80,33 @@ impl<'a> ApplicationHandler for App<'a> {
         let mut program = GraphicsProgram::new("test", "res/shaders/test.vert.spv");
         program.set_fragment_path("res/shaders/test.frag.spv");
         program.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+
+        let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.5, 0.0));
+        let model_data = ModelData {
+            model: model_matrix,
+            normal: model_matrix.inverse().transpose(),
+        };
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(object_buffer.buffer())
+                .offset(0)
+                .range(object_buffer.size())
+        ];
+
+        let (object_descriptor, _) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        let mut monkey = Object::new("monkey");
+        monkey.add_buffer(object_buffer, "mvp");
+        monkey.add_descriptor_set(object_descriptor, "mvp");
+
+        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
+
+        renderer.data.objects.push(monkey, &["main"]);
+
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
         let model_data = ModelData {
@@ -98,13 +126,11 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let mut monkey = Object::new("monkey");
-        monkey.add_buffer(object_buffer, "mvp");
-        monkey.add_descriptor_set(object_descriptor, "mvp");
+        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 2.0, 2.0);
+        let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
+        plane_object.add_buffer(object_buffer, "mvp");
+        plane_object.add_descriptor_set(object_descriptor, "mvp");
 
-        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
-
-        renderer.data.objects.push(monkey, &["main"]);
 
         let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
@@ -343,7 +369,7 @@ impl Task for MainDraw {
         let camera = data.objects.get_with_tag("main_camera")[0];
         unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*camera.get_descriptor_set("camera_data")], &[]) };
         
-        data.objects.get_with_tag("main").iter().for_each(|object| {
+        data.objects.get_with_tag("main").iter().rev().for_each(|object| {
             unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
             
             object.mesh_data().bind_buffers(device, command_buffer);

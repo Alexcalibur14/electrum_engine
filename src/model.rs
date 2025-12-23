@@ -246,13 +246,13 @@ pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device
 #[derive(Debug, Vertex)]
 pub struct OBJVertex {
     #[vertex(format = "R32G32B32_SFLOAT")]
-    position: [f32; 3],
+    pub position: [f32; 3],
     #[vertex(format = "R32G32B32_SFLOAT")]
-    normal: [f32; 3],
+    pub normal: [f32; 3],
     #[vertex(format = "R32G32B32_SFLOAT")]
-    colour: [f32; 3],
+    pub colour: [f32; 3],
     #[vertex(format = "R32G32_SFLOAT")]
-    uv: [f32; 2],
+    pub uv: [f32; 2],
 }
 
 #[derive(Clone, Default)]

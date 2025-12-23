@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use ash::{Device, Instance, vk};
 use glam::{Mat4, Quat, Vec3, vec3, vec4};
 
-use crate::{RendererData, descriptor::DescriptorBuilder, model::Object, resources::Handle};
+use crate::{RendererData, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
 
 
 #[repr(C)]
@@ -148,7 +148,7 @@ impl SimpleCamera {
 
 #[derive(Debug, Clone, Default)]
 pub struct Projection {
-    pub fov_y_rad: f32,
+    pub fov_y_radians: f32,
     pub aspect_ratio: f32,
     pub z_near: f32,
     pub z_far: f32,
@@ -157,13 +157,13 @@ pub struct Projection {
 }
 
 impl Projection {
-    pub fn new(fov_y_rad: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> Self {
-        let correction = Mat4 { x_axis: vec4(1.0, 0.0, 0.0, 0.0), y_axis: vec4(0.0,-1.0, 0.0, 0.0), z_axis: vec4(0.0, 0.0, 0.5, 0.0), w_axis: vec4(0.0, 0.0, 0.5, 1.0) };
-        let proj = correction * Mat4::perspective_rh(fov_y_rad, aspect_ratio, z_near, z_far);
+    pub fn new(fov_y_radians: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> Self {
+        let proj = projection(fov_y_radians, aspect_ratio, z_near, z_far);
+        
         let inv_proj = proj.inverse();
 
         Projection {
-            fov_y_rad,
+            fov_y_radians,
             aspect_ratio,
             z_near,
             z_far,
@@ -173,10 +173,85 @@ impl Projection {
     }
 
     pub fn recalculate(&mut self) {
-        let proj = Mat4::perspective_rh(self.fov_y_rad, self.aspect_ratio, self.z_near, self.z_far);
+        let proj = projection(self.fov_y_radians, self.aspect_ratio, self.z_near, self.z_far);
 
         self.proj = proj;
         self.inv_proj = proj.inverse();
+    }
+}
+
+pub struct Plane {
+    width: f32,
+    height: f32,
+    object_handle: Handle,
+}
+
+impl Plane {
+    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, width: f32, height: f32) -> Self {
+        let vertices = [
+            OBJVertex { position: [-width / 2.0, 0.0, -height / 2.0], normal: [0.0, 0.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 0.0] },
+            OBJVertex { position: [ width / 2.0, 0.0, -height / 2.0], normal: [1.0, 0.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 0.0] },
+            OBJVertex { position: [-width / 2.0, 0.0,  height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 1.0] },
+            OBJVertex { position: [ width / 2.0, 0.0,  height / 2.0], normal: [1.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 1.0] },
+        ];
+
+        // CCW Winding
+        let indices = [
+            0, 2, 1,
+            1, 2, 3u16
+        ];
+
+        // CW Winding
+        // let indices = [
+        //     0, 1, 2,
+        //     1, 3, 2u16
+        // ];
+
+        let mut mesh_data = MeshData::new("Plane");
+        mesh_data.build_vertex_staged(instance, device, data, &vertices);
+        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT16);
+
+        let mut plane_object = Object::new("Plane");
+        *plane_object.mesh_data_mut() = mesh_data;
+
+        let handle = data.objects.push(plane_object, &["main"]);
+        
+        Plane {
+            width,
+            height,
+            object_handle: handle,
+        }
+    }
+
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    pub fn height(&self) -> f32 {
+        self.height
+    }
+
+    pub fn object(&self) -> Handle {
+        self.object_handle
+    }
+}
+
+/// Calculates a perspective projection matrix
+/// 
+/// taken from https://www.vincentparizet.com/blog/posts/vulkan_perspective_matrix/#implementation
+pub fn projection(fov_y_radians: f32, aspect: f32, z_near: f32, z_far: f32) -> Mat4 {
+    let focal_length = 1.0 / (fov_y_radians / 2.0).tan();
+
+    let x = focal_length / aspect;
+    let y = -focal_length;
+    let a = z_near / (z_far - z_near);
+    let b = z_far * a;
+
+    Mat4 {
+        x_axis: vec4(x, 0.0, 0.0, 0.0),
+        y_axis: vec4(0.0,   y, 0.0,  0.0),
+        z_axis: vec4(0.0, 0.0,   a, -1.0),
+        w_axis: vec4(0.0, 0.0,   b,  0.0),
     }
 }
 
