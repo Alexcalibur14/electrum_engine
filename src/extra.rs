@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use ash::{Device, Instance, vk};
 use glam::{Mat4, Quat, Vec3, vec3, vec4};
 
-use crate::{RendererData, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
+use crate::{RendererData, buffer::Buffer, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
 
 
 #[repr(C)]
@@ -104,7 +104,7 @@ impl SimpleCamera {
         ];
 
         let (descriptor_set, layout) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, &buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .bind_buffer(0, 1, &buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL_GRAPHICS)
             .build_data(device, data).unwrap();
 
         camera_object.add_descriptor_set(descriptor_set, "camera_data");
@@ -189,10 +189,10 @@ pub struct Plane {
 impl Plane {
     pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, width: f32, height: f32) -> Self {
         let vertices = [
-            OBJVertex { position: [-width / 2.0, 0.0, -height / 2.0], normal: [0.0, 0.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 0.0] },
-            OBJVertex { position: [ width / 2.0, 0.0, -height / 2.0], normal: [1.0, 0.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 0.0] },
+            OBJVertex { position: [-width / 2.0, 0.0, -height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 0.0] },
+            OBJVertex { position: [ width / 2.0, 0.0, -height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 0.0] },
             OBJVertex { position: [-width / 2.0, 0.0,  height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 1.0] },
-            OBJVertex { position: [ width / 2.0, 0.0,  height / 2.0], normal: [1.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 1.0] },
+            OBJVertex { position: [ width / 2.0, 0.0,  height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 1.0] },
         ];
 
         // CCW Winding
@@ -200,12 +200,6 @@ impl Plane {
             0, 2, 1,
             1, 2, 3u16
         ];
-
-        // CW Winding
-        // let indices = [
-        //     0, 1, 2,
-        //     1, 3, 2u16
-        // ];
 
         let mut mesh_data = MeshData::new("Plane");
         mesh_data.build_vertex_staged(instance, device, data, &vertices);
@@ -234,6 +228,67 @@ impl Plane {
     pub fn object(&self) -> Handle {
         self.object_handle
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Light {
+    data: LightData,
+    object_handle: Handle,
+}
+
+impl Light {
+    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, light_data: LightData) -> Self {
+        let light_buffer = Buffer::create_and_stage(instance, device, data, &[light_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_data");
+        
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(light_buffer.buffer())
+                .offset(0)
+                .range(light_buffer.size())
+        ];
+
+        let (light_descriptor, layout) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .build_data(device, data).unwrap();
+
+        let mut light_object = Object::new("light");
+        light_object.add_buffer(light_buffer, "light_data");
+        light_object.add_descriptor_set(light_descriptor, "light_data");
+
+        data.layouts.push(layout, "light_data");
+        let object_handle = data.objects.push(light_object, &["light"]);
+
+        Light {
+            data: light_data,
+            object_handle,
+        }
+    }
+
+    pub fn data(&self) -> &LightData {
+        &self.data
+    }
+
+    pub fn object(&self) -> &Handle {
+        &self.object_handle
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LightData {
+    pub position: [f32; 3],
+    pub strength: f32,
+    pub direction: [f32; 3],
+    pub light_type: LightType,
+    pub colour: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u32)]
+pub enum LightType {
+    Point,
+    #[default]
+    Directional
 }
 
 /// Calculates a perspective projection matrix

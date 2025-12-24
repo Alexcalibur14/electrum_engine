@@ -9,6 +9,9 @@ use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::descriptor::DescriptorBuilder;
 use electrum_engine::end_command_label;
+use electrum_engine::extra::Light;
+use electrum_engine::extra::LightData;
+use electrum_engine::extra::LightType;
 use electrum_engine::extra::Plane;
 use electrum_engine::extra::Projection;
 use electrum_engine::extra::SimpleCamera;
@@ -58,6 +61,7 @@ struct App<'a> {
     egui_data: EguiData,
 
     camera: SimpleCamera,
+    light: Light,
 }
 
 impl<'a> ApplicationHandler for App<'a> {
@@ -99,9 +103,29 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
+        let monkey_material = MaterialData {
+            colour: [1.0, 0.5, 0.31],
+            specular: 0.5,
+        };
+
+        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[monkey_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material");
+
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(material_buffer.buffer())
+                .offset(0)
+                .range(material_buffer.size())
+        ];
+
+        let (material_descriptor, _) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
         let mut monkey = Object::new("monkey");
         monkey.add_buffer(object_buffer, "mvp");
         monkey.add_descriptor_set(object_descriptor, "mvp");
+        monkey.add_buffer(material_buffer, "material");
+        monkey.add_descriptor_set(material_descriptor, "material");
 
         *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
 
@@ -126,11 +150,42 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 2.0, 2.0);
+        let plane_material = MaterialData {
+            colour: [1.0, 0.5, 0.31],
+            specular: 0.3,
+        };
+
+        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material");
+
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(material_buffer.buffer())
+                .offset(0)
+                .range(material_buffer.size())
+        ];
+
+        let (material_descriptor, material_layout) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0);
         let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
         plane_object.add_buffer(object_buffer, "mvp");
         plane_object.add_descriptor_set(object_descriptor, "mvp");
+        plane_object.add_buffer(material_buffer, "material");
+        plane_object.add_descriptor_set(material_descriptor, "material");
 
+
+        let light_position = vec3(3.0, -3.0, 0.0);
+        let light_direction = (vec3(0.0, 0.0, 0.0) - light_position).normalize();
+        let light_data = LightData {
+            position: light_position.to_array(),
+            direction: light_direction.to_array(),
+            colour: [1.0, 1.0, 1.0],
+            strength: 1.0,
+            light_type: LightType::Directional,
+        };
+        self.light = Light::new(&renderer.instance, &renderer.device, &mut renderer.data, light_data);
 
         let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
@@ -158,7 +213,7 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[*renderer.data.layouts.get("main_camera"), layout],
+            &[*renderer.data.layouts.get("main_camera"), layout, material_layout, *renderer.data.layouts.get("light_data")],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
@@ -245,6 +300,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 }
 
                 unsafe { renderer.render(window, &mut |ctx| {
+                    ctx.style_mut(|style| style.visuals.window_shadow = egui::epaint::Shadow::NONE);
                     let _ = egui::Window::new("Render Info")
                         .anchor(egui::Align2::LEFT_TOP, (0.0, 0.0))
                         .title_bar(false)
@@ -321,7 +377,7 @@ impl Task for MainDraw {
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.01, 0.01, 0.01, 1.0]}})
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -368,9 +424,13 @@ impl Task for MainDraw {
 
         let camera = data.objects.get_with_tag("main_camera")[0];
         unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*camera.get_descriptor_set("camera_data")], &[]) };
-        
+
+        let light = data.objects.get_with_tag("light")[0];
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 3, &[*light.get_descriptor_set("light_data")], &[]) };
+
         data.objects.get_with_tag("main").iter().rev().for_each(|object| {
             unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 2, &[*object.get_descriptor_set("material")], &[]) };
             
             object.mesh_data().bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };
@@ -452,4 +512,10 @@ impl Task for Present {
 struct ModelData {
     model: Mat4,
     normal: Mat4,
+}
+
+#[repr(C)]
+struct MaterialData {
+    colour: [f32; 3],
+    specular: f32,
 }
