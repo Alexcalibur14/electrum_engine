@@ -187,7 +187,7 @@ pub struct Plane {
 }
 
 impl Plane {
-    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, width: f32, height: f32) -> Self {
+    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, width: f32, height: f32, tags: &[&'static str]) -> Self {
         let vertices = [
             OBJVertex { position: [-width / 2.0, 0.0, -height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 0.0] },
             OBJVertex { position: [ width / 2.0, 0.0, -height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 0.0] },
@@ -195,7 +195,6 @@ impl Plane {
             OBJVertex { position: [ width / 2.0, 0.0,  height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 1.0] },
         ];
 
-        // CCW Winding
         let indices = [
             0, 2, 1,
             1, 2, 3u16
@@ -208,7 +207,7 @@ impl Plane {
         let mut plane_object = Object::new("Plane");
         *plane_object.mesh_data_mut() = mesh_data;
 
-        let handle = data.objects.push(plane_object, &["main"]);
+        let handle = data.objects.push(plane_object, tags);
         
         Plane {
             width,

@@ -9,6 +9,7 @@ use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::descriptor::DescriptorBuilder;
 use electrum_engine::end_command_label;
+use electrum_engine::extra::CameraData;
 use electrum_engine::extra::Light;
 use electrum_engine::extra::LightData;
 use electrum_engine::extra::LightType;
@@ -16,6 +17,8 @@ use electrum_engine::extra::Plane;
 use electrum_engine::extra::Projection;
 use electrum_engine::extra::SimpleCamera;
 use electrum_engine::extra::radians;
+use electrum_engine::image::AddressMode;
+use electrum_engine::image::Filter;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
 use electrum_engine::model::OBJVertex;
@@ -73,6 +76,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let mut renderer = Renderer::new(&window).unwrap();
 
+        setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
         let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 10.0);
 
@@ -129,7 +133,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
 
-        renderer.data.objects.push(monkey, &["main"]);
+        renderer.data.objects.push(monkey, &["main", "shadow"]);
 
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
@@ -146,7 +150,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .range(object_buffer.size())
         ];
 
-        let (object_descriptor, layout) = DescriptorBuilder::new()
+        let (object_descriptor, object_layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
@@ -168,7 +172,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0);
+        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0, &["main", "shadow"]);
         let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
         plane_object.add_buffer(object_buffer, "mvp");
         plane_object.add_descriptor_set(object_descriptor, "mvp");
@@ -186,6 +190,42 @@ impl<'a> ApplicationHandler for App<'a> {
             light_type: LightType::Directional,
         };
         self.light = Light::new(&renderer.instance, &renderer.device, &mut renderer.data, light_data);
+        
+        let (depth_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "shadow_map").unwrap();
+        
+        let image_info = &[
+            vk::DescriptorImageInfo::default()
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .image_view(depth_image.image().view())
+            .sampler(depth_image.image().sampler().unwrap())
+            ];
+            let (shadow_map_descriptor, shadow_map_layout) = DescriptorBuilder::new()
+            .bind_image(0, 1, image_info, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+        
+        let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
+        light_object.add_descriptor_set(shadow_map_descriptor, "shadow_map");
+
+        let light_camera_data = CameraData {
+            view: Mat4::look_to_rh(light_position, light_direction, Vec3::Y),
+            proj: Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 0.01, 10.0),
+            position: light_position,
+        };
+        let light_camera_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[light_camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_camera_data");
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(light_camera_buffer.buffer())
+                .offset(0)
+                .range(light_camera_buffer.size())
+        ];
+        let (light_camera_descriptor, light_camera_layout) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
+        light_object.add_buffer(light_camera_buffer, "camera_data");
+        light_object.add_descriptor_set(light_camera_descriptor, "camera_data");
+
 
         let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
@@ -213,63 +253,49 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[*renderer.data.layouts.get("main_camera"), layout, material_layout, *renderer.data.layouts.get("light_data")],
+            &[*renderer.data.layouts.get("main_camera"), object_layout, material_layout, *renderer.data.layouts.get("light_data"), shadow_map_layout, light_camera_layout],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
         renderer.data.graphics_shaders.push(program, &["main"]);
         renderer.data.pipelines.push((pipeline, layout), &["main"]);
 
-        let mut task_graph = TaskGraph::new();
 
-        let image = ImageData::new(
-            ImageSize::SwapchainRelative { multiplier: 1.0 },
-            vk::Format::R16G16B16A16_SFLOAT,
-            MipLevels::One,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
-            vk::SampleCountFlags::TYPE_1,
-            vk::ImageViewType::TYPE_2D,
-            1,
-            vk::ImageAspectFlags::COLOR,
-            None,
-            "color_attachment"
-        );
+        let mut shadow_shader = GraphicsProgram::new("Shadow", "res/shaders/test_shadow.vert.spv");
+        shadow_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
-        let depth = ImageData::new(
-            ImageSize::Swapchain,
+        let (shadow_pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
+            &renderer.instance,
+            &renderer.device,
+            &shadow_shader,
+            RasterizationData {
+                cull_mode: vk::CullModeFlags::BACK,
+                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                polygon_mode: vk::PolygonMode::FILL,
+                line_width: 0.0,
+            },
+            MultisampleData {
+                samples: vk::SampleCountFlags::TYPE_1,
+                sample_shading_enable: false,
+            },
+            DepthStencilData {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                stencil_test_enable: false,
+                compare_op: vk::CompareOp::GREATER,
+            },
+            0,
+            &[],
+            &[],
             vk::Format::D32_SFLOAT,
-            MipLevels::One,
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::SampleCountFlags::TYPE_1,
-            vk::ImageViewType::TYPE_2D,
-            1,
-            vk::ImageAspectFlags::DEPTH,
-            None,
-            "depth_attachment",
+            vk::Format::UNDEFINED,
+            &[],
+            &[light_camera_layout, object_layout],
+            vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
-        task_graph.add_image(image);
-        task_graph.add_image(depth);
-
-        let mut main_node = Node::new();
-        main_node.add_attachment("color_attachment", AccessType::color_attachment_write());
-        main_node.set_depth("depth_attachment", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write());
-        main_node.set_task(Box::new(MainDraw));
-        task_graph.add_node(main_node);
-
-        let mut egui_node = Node::new();
-        egui_node.add_attachment("color_attachment", AccessType::color_attachment_write());
-        egui_node.set_task(Box::new(EguiDraw));
-        task_graph.add_node(egui_node);
-
-        let mut present_node = Node::new();
-        present_node.add_attachment("color_attachment", AccessType::blit_src());
-        present_node.set_task(Box::new(Present));
-        task_graph.add_node(present_node);
-
-        task_graph.create_images(&renderer.instance, &renderer.device, &renderer.data);
-        renderer.data.task_graph = task_graph;
-
+        renderer.data.graphics_shaders.push(shadow_shader, &["shadow"]);
+        renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
 
         self.window = Some(window);
         self.renderer = Some(renderer);
@@ -328,6 +354,78 @@ impl<'a> ApplicationHandler for App<'a> {
     }
 }
 
+fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererData) {
+    let mut task_graph = TaskGraph::new();
+
+        let image = ImageData::new(
+            ImageSize::SwapchainRelative { multiplier: 1.0 },
+            vk::Format::R16G16B16A16_SFLOAT,
+            MipLevels::One,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageViewType::TYPE_2D,
+            1,
+            vk::ImageAspectFlags::COLOR,
+            None,
+            "color_attachment"
+        );
+
+        let depth = ImageData::new(
+            ImageSize::Swapchain,
+            vk::Format::D32_SFLOAT,
+            MipLevels::One,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageViewType::TYPE_2D,
+            1,
+            vk::ImageAspectFlags::DEPTH,
+            None,
+            "depth_attachment",
+        );
+
+        let shadow_map = ImageData::new(
+            ImageSize::Fixed { width: 1024, height: 1024 },
+            vk::Format::D32_SFLOAT,
+            MipLevels::One,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageViewType::TYPE_2D,
+            1,
+            vk::ImageAspectFlags::DEPTH,
+            Some((Filter::LINEAR, AddressMode::CLAMP_TO_EDGE)),
+            "shadow_map",
+        );
+
+        task_graph.add_image(image);
+        task_graph.add_image(depth);
+        task_graph.add_image(shadow_map);
+
+        let mut shadow_pass_node = Node::new();
+        shadow_pass_node.set_depth("shadow_map", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write() );
+        shadow_pass_node.set_task(Box::new(ShadowPass));
+        task_graph.add_node(shadow_pass_node);
+
+        let mut main_node = Node::new();
+        main_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        main_node.set_depth("depth_attachment", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write());
+        main_node.add_internal_image("shadow_map", AccessType::fragment_shader_sampled_read());
+        main_node.set_task(Box::new(MainDraw));
+        task_graph.add_node(main_node);
+
+        let mut egui_node = Node::new();
+        egui_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        egui_node.set_task(Box::new(EguiDraw));
+        task_graph.add_node(egui_node);
+
+        let mut present_node = Node::new();
+        present_node.add_attachment("color_attachment", AccessType::blit_src());
+        present_node.set_task(Box::new(Present));
+        task_graph.add_node(present_node);
+
+        task_graph.create_images(instance, device, data);
+        data.task_graph = task_graph;
+}
+
 #[derive(Debug, Default)]
 struct EguiData {
     frame_times: VecDeque<u128>,
@@ -367,6 +465,72 @@ impl EguiData {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ShadowPass;
+
+impl Task for ShadowPass {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(instance, device, command_buffer, "Shadow Pass", [0.0, 0.6, 0.2, 1.0]);
+        
+        let depth_attachment = vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 }  })
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .image_view(draw_data.depth_attachment.unwrap().view());
+
+        let rendering_info = vk::RenderingInfo::default()
+            .layer_count(1)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: draw_data.depth_attachment.unwrap().extent_2d(),
+            })
+            .depth_attachment(&depth_attachment);
+
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: draw_data.depth_attachment.unwrap().extent_2d(),
+        }];
+    
+        let viewports = [
+            vk::Viewport::default()
+                .width(draw_data.depth_attachment.unwrap().width() as f32)
+                .height(draw_data.depth_attachment.unwrap().height() as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .x(0.0)
+                .y(0.0)
+        ];
+
+        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+
+        unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
+        unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
+
+        let (pipeline, pipeline_layout) = data.pipelines.get_with_tag("shadow")[0];
+        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
+
+        let light = data.objects.get_with_tag("light")[0];
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*light.get_descriptor_set("camera_data")], &[]) };
+
+        data.objects.get_with_tag("shadow").iter().for_each(|object| {
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
+            
+            object.mesh_data().bind_buffers(device, command_buffer);
+            unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };
+            
+            stats.draw_calls += 1;
+        });
+
+        unsafe { device.cmd_end_rendering(command_buffer) };
+        
+        end_command_label(instance, device, command_buffer);
+    }
+
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+
+    fn destroy(&mut self, _: &Device) {}
+}
 
 #[derive(Debug, Clone, Copy)]
 struct MainDraw;
@@ -427,17 +591,19 @@ impl Task for MainDraw {
 
         let light = data.objects.get_with_tag("light")[0];
         unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 3, &[*light.get_descriptor_set("light_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 4, &[*light.get_descriptor_set("shadow_map")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 5, &[*light.get_descriptor_set("camera_data")], &[]) };
 
-        data.objects.get_with_tag("main").iter().rev().for_each(|object| {
+        data.objects.get_with_tag("main").iter().for_each(|object| {
             unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
             unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 2, &[*object.get_descriptor_set("material")], &[]) };
             
             object.mesh_data().bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };
+            
+            stats.draw_calls += 1;
         });
 
-        stats.draw_calls += 1;
-        
         unsafe { device.cmd_end_rendering(command_buffer) };
 
         end_command_label(instance, device, command_buffer);
@@ -452,7 +618,7 @@ impl Task for MainDraw {
 struct EguiDraw;
 
 impl Task for EguiDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
         begin_command_label(instance, device, command_buffer, "Egui Draw", [0.4, 0.5, 0.7, 1.0]);
         
         let attachment_infos = [
@@ -475,8 +641,6 @@ impl Task for EguiDraw {
         unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
 
         data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, draw_data.color_attachments[0].extent_2d(), data.pixels_per_point, &data.clipped_primitives).unwrap();
-
-        stats.draw_calls += 1;
 
         unsafe { device.cmd_end_rendering(command_buffer) };
 

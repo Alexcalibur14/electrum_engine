@@ -160,7 +160,8 @@ impl<'a> TaskGraph<'a> {
                         .dst_access_mask(dst_access.access_mask)
                         .src_stage_mask(src_access.pipeline_stage)
                         .dst_stage_mask(dst_access.pipeline_stage)
-                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::COLOR))
+                        // TODO: maybe images should need to specify which aspect to transition?
+                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::DEPTH))
                 );
             });
 
@@ -700,6 +701,14 @@ impl<'a> ImageData<'a> {
             },
             ImageSize::Fixed {..} => false,
         }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name
+    }
+
+    pub fn image(&self) -> &Image {
+        &self.image
     }
 
     /// Destroys image
