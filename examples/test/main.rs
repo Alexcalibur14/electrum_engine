@@ -37,6 +37,7 @@ use glam::Vec3;
 use glam::vec3;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use winit::event::KeyEvent;
 use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ControlFlow, EventLoopBuilder}, platform::x11::EventLoopBuilderExtX11, window::Window};
 
 fn main() -> Result<()> {
@@ -344,10 +345,42 @@ impl<'a> ApplicationHandler for App<'a> {
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(new_size) => {
+                info!("Window Resized!");
+
                 let renderer = self.renderer.as_mut().unwrap();
                 renderer.resized = true;
                 renderer.width = new_size.width;
                 renderer.height = new_size.height;
+
+                self.camera.projection.aspect_ratio = new_size.width as f32 / new_size.height as f32;
+                self.camera.projection.recalculate();
+                self.camera.rebuild(&renderer.device, &renderer.data);
+            }
+            WindowEvent::KeyboardInput { event: KeyEvent { physical_key, .. }, .. } => {
+                match physical_key {
+                    winit::keyboard::PhysicalKey::Code(key_code) => {
+                        match key_code {
+                            winit::keyboard::KeyCode::F11 => {
+                                unsafe { self.renderer.as_ref().unwrap().device.device_wait_idle() }.unwrap();
+
+                                let window = self.window.as_ref().unwrap();
+                                
+                                match window.fullscreen() {
+                                    Some(_) => {
+                                        window.set_fullscreen(None);
+                                        self.renderer.as_mut().unwrap().resized = true;
+                                    },
+                                    None => {
+                                        window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(window.current_monitor())));
+                                        self.renderer.as_mut().unwrap().resized = true;
+                                    },
+                                }
+                            }
+                            _ => {}
+                        }
+                    },
+                    winit::keyboard::PhysicalKey::Unidentified(_) => {},
+                }
             }
             _ => (),
         }

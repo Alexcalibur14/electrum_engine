@@ -60,7 +60,6 @@ void main() {
     vec3 specular_colour = specular_strength * material.specular * light.colour;
 
     float shadow = get_shadow(in_light_space_vert);
-    // shadow = 1.0;
 
     outColor = vec4(material.colour * (ambiant_colour + (diffuse_colour + specular_colour) * shadow) * light.strength * attenuation, 1.0);
 }
