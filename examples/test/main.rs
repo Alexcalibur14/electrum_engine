@@ -16,6 +16,7 @@ use electrum_engine::extra::LightType;
 use electrum_engine::extra::Plane;
 use electrum_engine::extra::Projection;
 use electrum_engine::extra::SimpleCamera;
+use electrum_engine::extra::orthographic;
 use electrum_engine::extra::radians;
 use electrum_engine::image::AddressMode;
 use electrum_engine::image::Filter;
@@ -209,7 +210,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let light_camera_data = CameraData {
             view: Mat4::look_to_rh(light_position, light_direction, Vec3::Y),
-            proj: Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 0.01, 10.0),
+            proj: orthographic(-10.0, 10.0, 10.0, -10.0, 0.01, 10.0),
             position: light_position,
         };
         let light_camera_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[light_camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_camera_data");
@@ -345,8 +346,6 @@ impl<'a> ApplicationHandler for App<'a> {
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(new_size) => {
-                info!("Window Resized!");
-
                 let renderer = self.renderer.as_mut().unwrap();
                 renderer.resized = true;
                 renderer.width = new_size.width;

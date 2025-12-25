@@ -309,6 +309,23 @@ pub fn projection(fov_y_radians: f32, aspect: f32, z_near: f32, z_far: f32) -> M
     }
 }
 
+/// Calculates an orthographic projection matrix
+pub fn orthographic(left: f32, right: f32, top: f32, bottom: f32, near: f32, far: f32) -> Mat4 {
+    let a = 2.0 / (right - left);
+    let b = 2.0 / (top - bottom);
+    let c = -1.0 / (far - near);
+    let tx = -(right + left) / (right - left);
+    let ty = -(top + bottom) / (top - bottom);
+    let tz = near / (far - near);
+
+    Mat4 {
+        x_axis: vec4(  a, 0.0, 0.0, 0.0),
+        y_axis: vec4(0.0,   b, 0.0, 0.0),
+        z_axis: vec4(0.0, 0.0,   c, 0.0),
+        w_axis: vec4( tx,  ty,  tz, 1.0),
+    }
+}
+
 pub fn radians(degrees: f32) -> f32 {
     (degrees / 180.0) * PI
 }
