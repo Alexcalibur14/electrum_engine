@@ -274,7 +274,7 @@ impl<'a> ApplicationHandler for App<'a> {
             &renderer.device,
             &shadow_shader,
             RasterizationData {
-                cull_mode: vk::CullModeFlags::BACK,
+                cull_mode: vk::CullModeFlags::FRONT,
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
                 polygon_mode: vk::PolygonMode::FILL,
                 line_width: 0.0,

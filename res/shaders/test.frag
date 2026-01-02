@@ -36,8 +36,7 @@ float get_shadow(vec4 light_space_vert, vec3 normal, vec3 light_dir) {
     float closest_depth = texture(shadow_map, uv).r;
     float current_depth = proj_coords.z;
 
-    float bias = max(0.05 * (1.0 - dot(normal, light_dir)), 0.05);
-    float shadow = closest_depth - bias > current_depth ? 0.0 : 1.0;
+    float shadow = closest_depth > current_depth ? 0.0 : 1.0;
 
     return shadow;
 }
