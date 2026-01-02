@@ -29,14 +29,15 @@ layout(set = 3, binding = 0) uniform LightData {
 
 layout(set = 4, binding = 0) uniform sampler2D shadow_map;
 
-float get_shadow(vec4 light_space_vert) {
+float get_shadow(vec4 light_space_vert, vec3 normal, vec3 light_dir) {
     vec3 proj_coords = light_space_vert.xyz / light_space_vert.w;
     vec2 uv = proj_coords.xy * 0.5 + 0.5;
 
     float closest_depth = texture(shadow_map, uv).r;
     float current_depth = proj_coords.z;
 
-    float shadow = closest_depth > current_depth ? 0.0 : 1.0;
+    float bias = max(0.05 * (1.0 - dot(normal, light_dir)), 0.05);
+    float shadow = closest_depth - bias > current_depth ? 0.0 : 1.0;
 
     return shadow;
 }
@@ -59,7 +60,7 @@ void main() {
     float specular_strength = pow(max(dot(inNormal, half_dir), 0.0), 32);
     vec3 specular_colour = specular_strength * material.specular * light.colour;
 
-    float shadow = get_shadow(in_light_space_vert);
+    float shadow = get_shadow(in_light_space_vert, inNormal, light.direction);
 
     outColor = vec4(material.colour * (ambiant_colour + (diffuse_colour + specular_colour) * shadow) * light.strength * attenuation, 1.0);
 }
