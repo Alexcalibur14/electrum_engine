@@ -158,7 +158,7 @@ pub struct Projection {
 
 impl Projection {
     pub fn new(fov_y_radians: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> Self {
-        let proj = projection(fov_y_radians, aspect_ratio, z_near, z_far);
+        let proj = perspective(fov_y_radians, aspect_ratio, z_near, z_far);
         
         let inv_proj = proj.inverse();
 
@@ -173,7 +173,7 @@ impl Projection {
     }
 
     pub fn recalculate(&mut self) {
-        let proj = projection(self.fov_y_radians, self.aspect_ratio, self.z_near, self.z_far);
+        let proj = perspective(self.fov_y_radians, self.aspect_ratio, self.z_near, self.z_far);
 
         self.proj = proj;
         self.inv_proj = proj.inverse();
@@ -290,39 +290,88 @@ pub enum LightType {
     Directional
 }
 
+pub fn create_debug_axes_object(instance: &Instance, device: &Device, data: &mut RendererData, model: Mat4) -> Handle {
+    let model_data = ModelData {
+        model,
+        normal: model.inverse().transpose(),
+    };
+    let object_buffer = Buffer::create_and_stage(instance, device, data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+
+    let buffer_info = &[
+        vk::DescriptorBufferInfo::default()
+            .buffer(object_buffer.buffer())
+            .offset(0)
+            .range(object_buffer.size())
+    ];
+
+    let (object_descriptor, _) = DescriptorBuilder::new()
+        .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+        .build_data(device, data).unwrap();
+
+    let mut debug_axes = Object::new("axes");
+    debug_axes.add_buffer(object_buffer, "mvp");
+    debug_axes.add_descriptor_set(object_descriptor, "mvp");
+
+    *debug_axes.mesh_data_mut() = MeshData::new("axes");
+    debug_axes.mesh_data_mut().build_vertex_staged(instance, device, data, &[
+        OBJVertex { position: [0.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], colour: [1.0, 0.0, 0.0], uv: [0.0, 0.0] },
+        OBJVertex { position: [1.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], colour: [1.0, 0.0, 0.0], uv: [0.0, 0.0] },
+        OBJVertex { position: [0.0, 0.0, 0.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 1.0, 0.0], uv: [0.0, 0.0] },
+        OBJVertex { position: [0.0, 1.0, 0.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 1.0, 0.0], uv: [0.0, 0.0] },
+        OBJVertex { position: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], colour: [0.0, 0.0, 1.0], uv: [0.0, 0.0] },
+        OBJVertex { position: [0.0, 0.0, 1.0], normal: [0.0, 0.0, 1.0], colour: [0.0, 0.0, 1.0], uv: [0.0, 0.0] },
+    ]);
+
+    data.objects.push(debug_axes, &["debug"])
+}
+
 /// Calculates a perspective projection matrix
 /// 
 /// taken from https://www.vincentparizet.com/blog/posts/vulkan_perspective_matrix/#implementation
-pub fn projection(fov_y_radians: f32, aspect: f32, z_near: f32, z_far: f32) -> Mat4 {
+pub fn perspective(fov_y_radians: f32, aspect: f32, z_near: f32, z_far: f32) -> Mat4 {
     let focal_length = 1.0 / (fov_y_radians / 2.0).tan();
 
-    let x = focal_length / aspect;
-    let y = -focal_length;
-    let a = z_near / (z_far - z_near);
-    let b = z_far * a;
+    let a = focal_length / aspect;
+    let b = -focal_length;
+    let c = z_near / (z_far - z_near);
+    let tz = z_far * c;
 
     Mat4 {
-        x_axis: vec4(x, 0.0, 0.0, 0.0),
-        y_axis: vec4(0.0,   y, 0.0,  0.0),
-        z_axis: vec4(0.0, 0.0,   a, -1.0),
-        w_axis: vec4(0.0, 0.0,   b,  0.0),
+        x_axis: vec4(  a, 0.0, 0.0,  0.0),
+        y_axis: vec4(0.0,   b, 0.0,  0.0),
+        z_axis: vec4(0.0, 0.0,   c, -1.0),
+        w_axis: vec4(0.0, 0.0,  tz,  0.0),
     }
 }
 
 /// Calculates an orthographic projection matrix
 pub fn orthographic(left: f32, right: f32, top: f32, bottom: f32, near: f32, far: f32) -> Mat4 {
-    let a = 2.0 / (right - left);
-    let b = 2.0 / (top - bottom);
-    let c = -1.0 / (far - near);
+    let a  =            2.0  / (right - left);
+    let b  =           -2.0  / (top - bottom);
+    let c  =            1.0  / (far - near);
     let tx = -(right + left) / (right - left);
-    let ty = -(top + bottom) / (top - bottom);
-    let tz = near / (far - near);
+    let ty =  (top + bottom) / (top - bottom);
+    let tz =            far  / (far - near);
 
     Mat4 {
         x_axis: vec4(  a, 0.0, 0.0, 0.0),
         y_axis: vec4(0.0,   b, 0.0, 0.0),
         z_axis: vec4(0.0, 0.0,   c, 0.0),
         w_axis: vec4( tx,  ty,  tz, 1.0),
+    }
+}
+
+pub fn orthographic_symetric(width: f32, height: f32, near: f32, far: f32) -> Mat4 {
+    let a  =  2.0 / width;
+    let b  = -2.0 / height;
+    let c  =  1.0 / (far - near);
+    let tz =  far / (far - near);
+
+    Mat4 {
+        x_axis: vec4(  a, 0.0, 0.0,  0.0),
+        y_axis: vec4(0.0,   b, 0.0,  0.0),
+        z_axis: vec4(0.0, 0.0,   c,  0.0),
+        w_axis: vec4(0.0, 0.0,  tz,  1.0),
     }
 }
 
@@ -338,12 +387,22 @@ pub fn vec3_rad(x: f32, y: f32, z: f32) -> Vec3 {
     vec3(radians(x), radians(y), radians(z))
 }
 
+pub fn to_ndc(vec: Vec3) -> Vec3 {
+    vec3(vec.x, -vec.y, vec.z)
+}
+
 pub fn look_at(position: Vec3, target: Vec3) -> Vec3 {
-    let direction = target - position;
+    let direction = (target - position).normalize();
     
     vec3(
-        (direction.y).atan2(direction.z),
-        (direction.x).atan2(direction.z),
+        direction.y.atan2(direction.z),
+        direction.x.atan2(direction.z),
         0.0,
     )
+}
+
+#[repr(C)]
+pub struct ModelData {
+    pub model: Mat4,
+    pub normal: Mat4,
 }

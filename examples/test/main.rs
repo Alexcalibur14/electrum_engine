@@ -13,10 +13,11 @@ use electrum_engine::extra::CameraData;
 use electrum_engine::extra::Light;
 use electrum_engine::extra::LightData;
 use electrum_engine::extra::LightType;
+use electrum_engine::extra::ModelData;
 use electrum_engine::extra::Plane;
 use electrum_engine::extra::Projection;
 use electrum_engine::extra::SimpleCamera;
-use electrum_engine::extra::orthographic;
+use electrum_engine::extra::orthographic_symetric;
 use electrum_engine::extra::radians;
 use electrum_engine::image::AddressMode;
 use electrum_engine::image::Filter;
@@ -80,7 +81,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
-        let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 10.0);
+        let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
 
         let view = Mat4::look_at_rh(vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
         let camera = SimpleCamera::new_view(&renderer.instance, &renderer.device, &mut renderer.data, view, projection);
@@ -182,8 +183,9 @@ impl<'a> ApplicationHandler for App<'a> {
         plane_object.add_descriptor_set(material_descriptor, "material");
 
 
-        let light_position = vec3(3.0, -3.0, 0.0);
-        let light_direction = (vec3(0.0, 0.0, 0.0) - light_position).normalize();
+        let light_position = vec3(3.0, 3.0, 0.0);
+        let light_target = Vec3::ZERO;
+        let light_direction = (light_position - light_target).normalize();
         let light_data = LightData {
             position: light_position.to_array(),
             direction: light_direction.to_array(),
@@ -208,9 +210,10 @@ impl<'a> ApplicationHandler for App<'a> {
         let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
         light_object.add_descriptor_set(shadow_map_descriptor, "shadow_map");
 
+        let light_camera_matrix = Mat4::look_at_rh(light_position, light_target, Vec3::Y);
         let light_camera_data = CameraData {
-            view: Mat4::look_to_rh(light_position, light_direction, Vec3::Y),
-            proj: orthographic(-10.0, 10.0, 10.0, -10.0, 0.01, 10.0),
+            view: light_camera_matrix,
+            proj: orthographic_symetric(10.0, 10.0, 0.01, 10.0),
             position: light_position,
         };
         let light_camera_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[light_camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_camera_data");
@@ -293,11 +296,50 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::UNDEFINED,
             &[],
             &[light_camera_layout, object_layout],
-            vk::PrimitiveTopology::TRIANGLE_LIST
+            vk::PrimitiveTopology::TRIANGLE_LIST,
         );
 
         renderer.data.graphics_shaders.push(shadow_shader, &["shadow"]);
         renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
+
+        // create_debug_axes_object(&renderer.instance, &renderer.device, &mut renderer.data, light_camera_matrix);
+
+        let mut debug_shader = GraphicsProgram::new("Debug", "res/shaders/debug.vert.spv");
+        debug_shader.set_fragment_path("res/shaders/debug.frag.spv");
+        debug_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+
+        let (debug_pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
+            &renderer.instance,
+            &renderer.device,
+            &debug_shader,
+            RasterizationData {
+                cull_mode: vk::CullModeFlags::NONE,
+                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                polygon_mode: vk::PolygonMode::LINE,
+                line_width: 1.0,
+            },
+            MultisampleData {
+                samples: vk::SampleCountFlags::TYPE_1,
+                sample_shading_enable: false,
+            },
+            DepthStencilData {
+                depth_test_enable: false,
+                depth_write_enable: false,
+                stencil_test_enable: false,
+                compare_op: vk::CompareOp::GREATER,
+            },
+            0,
+            &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
+            &[vk::Format::R16G16B16A16_SFLOAT],
+            vk::Format::UNDEFINED,
+            vk::Format::UNDEFINED,
+            &[],
+            &[*renderer.data.layouts.get("main_camera"), object_layout],
+            vk::PrimitiveTopology::LINE_LIST,
+        );
+
+        renderer.data.graphics_shaders.push(debug_shader, &["debug"]);
+        renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
 
         self.window = Some(window);
         self.renderer = Some(renderer);
@@ -443,6 +485,11 @@ fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererD
         main_node.add_internal_image("shadow_map", AccessType::fragment_shader_sampled_read());
         main_node.set_task(Box::new(MainDraw));
         task_graph.add_node(main_node);
+
+        let mut debug_node = Node::new();
+        debug_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        debug_node.set_task(Box::new(DebugDraw));
+        task_graph.add_node(debug_node);
 
         let mut egui_node = Node::new();
         egui_node.add_attachment("color_attachment", AccessType::color_attachment_write());
@@ -651,6 +698,10 @@ struct EguiDraw;
 
 impl Task for EguiDraw {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+        let enable = false;
+
+        if !enable { return; }
+
         begin_command_label(instance, device, command_buffer, "Egui Draw", [0.4, 0.5, 0.7, 1.0]);
         
         let attachment_infos = [
@@ -685,6 +736,74 @@ impl Task for EguiDraw {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct DebugDraw;
+
+impl Task for DebugDraw {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(instance, device, command_buffer, "Debug Draw", [0.0, 0.6, 0.2, 1.0]);
+
+        let attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.01, 0.01, 0.01, 1.0]}})
+            .load_op(vk::AttachmentLoadOp::LOAD)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .image_view(draw_data.color_attachments[0].view())
+        ];
+
+        let rendering_info = vk::RenderingInfo::default()
+            .layer_count(1)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: draw_data.color_attachments[0].extent_2d(),
+            })
+            .color_attachments(&attachment_infos);
+
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: draw_data.color_attachments[0].extent_2d(),
+        }];
+    
+        let viewports = [
+            vk::Viewport::default()
+                .width(draw_data.color_attachments[0].width() as f32)
+                .height(draw_data.color_attachments[0].height() as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .x(0.0)
+                .y(0.0)
+        ];
+        
+        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+
+        unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
+        unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
+        let (pipeline, pipeline_layout) = data.pipelines.get_with_tag("debug")[0];
+        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
+
+        let camera = data.objects.get_with_tag("main_camera")[0];
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*camera.get_descriptor_set("camera_data")], &[]) };
+
+        data.objects.get_with_tag("debug").iter().for_each(|object| {
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
+
+            object.mesh_data().bind_buffers(device, command_buffer);
+            unsafe { device.cmd_draw(command_buffer, object.mesh_data().vertex_len(), object.mesh_data().instance_len(), 0, 0) };
+
+            stats.draw_calls += 1;
+        });
+
+        unsafe { device.cmd_end_rendering(command_buffer) };
+
+        end_command_label(instance, device, command_buffer);
+    }
+
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+
+    fn destroy(&mut self, _: &Device) {}
+}
+
+#[derive(Debug, Clone, Copy)]
 struct Present;
 
 impl Task for Present {
@@ -702,12 +821,6 @@ impl Task for Present {
     fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
 
     fn destroy(&mut self, _: &Device) {}
-}
-
-#[repr(C)]
-struct ModelData {
-    model: Mat4,
-    normal: Mat4,
 }
 
 #[repr(C)]
