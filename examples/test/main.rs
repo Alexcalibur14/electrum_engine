@@ -175,7 +175,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0, &["main", "shadow"]);
+        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0, 10, 10, &["main", "shadow"]);
         let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
         plane_object.add_buffer(object_buffer, "mvp");
         plane_object.add_descriptor_set(object_descriptor, "mvp");
@@ -199,11 +199,11 @@ impl<'a> ApplicationHandler for App<'a> {
         
         let image_info = &[
             vk::DescriptorImageInfo::default()
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .image_view(depth_image.image().view())
-            .sampler(depth_image.image().sampler().unwrap())
-            ];
-            let (shadow_map_descriptor, shadow_map_layout) = DescriptorBuilder::new()
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image_view(depth_image.image().view())
+                .sampler(depth_image.image().sampler().unwrap())
+        ];
+        let (shadow_map_descriptor, shadow_map_layout) = DescriptorBuilder::new()
             .bind_image(0, 1, image_info, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
         
@@ -301,8 +301,6 @@ impl<'a> ApplicationHandler for App<'a> {
 
         renderer.data.graphics_shaders.push(shadow_shader, &["shadow"]);
         renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
-
-        // create_debug_axes_object(&renderer.instance, &renderer.device, &mut renderer.data, light_camera_matrix);
 
         let mut debug_shader = GraphicsProgram::new("Debug", "res/shaders/debug.vert.spv");
         debug_shader.set_fragment_path("res/shaders/debug.frag.spv");

@@ -187,22 +187,44 @@ pub struct Plane {
 }
 
 impl Plane {
-    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, width: f32, height: f32, tags: &[&'static str]) -> Self {
-        let vertices = [
-            OBJVertex { position: [-width / 2.0, 0.0, -height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 0.0] },
-            OBJVertex { position: [ width / 2.0, 0.0, -height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 0.0] },
-            OBJVertex { position: [-width / 2.0, 0.0,  height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [0.0, 1.0] },
-            OBJVertex { position: [ width / 2.0, 0.0,  height / 2.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [1.0, 1.0] },
-        ];
+    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, width: f32, height: f32, x_subdivisions: u32, z_subdivisions: u32, tags: &[&'static str]) -> Self {
+        let neg_x = -width / 2.0;
+        let pos_x =  width / 2.0;
 
-        let indices = [
-            0, 2, 1,
-            1, 2, 3u16
-        ];
+        let neg_z = -height / 2.0;
+        let pos_z =  height / 2.0;
+
+        let mut vertices = vec![];
+        let mut indices = vec![];
+
+        for z_i in 0..=z_subdivisions {
+            let z_percent = lerp(0.0, 1.0, z_i as f32 / z_subdivisions as f32);
+            let z = lerp(neg_z, pos_z, z_percent);
+
+            for x_i in 0..=x_subdivisions {
+                let x_percent = lerp(0.0, 1.0, x_i as f32 / x_subdivisions as f32);
+                let x = lerp(neg_x, pos_x, x_percent);
+
+                vertices.push(OBJVertex { position: [x, 0.0, z], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [x_percent, z_percent] });
+
+                if z_i == z_subdivisions || x_i == x_subdivisions {
+                    continue;
+                }
+
+                indices.push( z_i      * (z_subdivisions + 1) + x_i);
+                indices.push((z_i + 1) * (z_subdivisions + 1) + x_i);
+                indices.push( z_i      * (z_subdivisions + 1) + x_i + 1);
+
+                indices.push( z_i      * (z_subdivisions + 1) + x_i + 1);
+                indices.push((z_i + 1) * (z_subdivisions + 1) + x_i);
+                indices.push((z_i + 1) * (z_subdivisions + 1) + x_i + 1);
+            }
+        }
+        
 
         let mut mesh_data = MeshData::new("Plane");
         mesh_data.build_vertex_staged(instance, device, data, &vertices);
-        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT16);
+        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
 
         let mut plane_object = Object::new("Plane");
         *plane_object.mesh_data_mut() = mesh_data;
@@ -399,6 +421,10 @@ pub fn look_at(position: Vec3, target: Vec3) -> Vec3 {
         direction.x.atan2(direction.z),
         0.0,
     )
+}
+
+pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 #[repr(C)]
