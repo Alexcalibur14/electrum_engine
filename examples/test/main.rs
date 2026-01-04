@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ops::RangeInclusive;
 
 use ash::Device;
 use ash::Instance;
@@ -41,6 +42,7 @@ use glam::Vec3;
 use glam::vec3;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use winit::dpi::PhysicalSize;
 use winit::event::KeyEvent;
 use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ControlFlow, EventLoopBuilder}, platform::x11::EventLoopBuilderExtX11, window::Window};
 
@@ -70,6 +72,7 @@ struct App<'a> {
 
     camera: SimpleCamera,
     light: Light,
+    colour_correction: ColourCorrection,
 }
 
 impl<'a> ApplicationHandler for App<'a> {
@@ -77,6 +80,7 @@ impl<'a> ApplicationHandler for App<'a> {
         let window = event_loop.create_window(Window::default_attributes()
             .with_title("Electrum Renderer Example")
             .with_resizable(true)
+            .with_inner_size(PhysicalSize::new(1500, 1000))
         ).unwrap();
 
         let mut renderer = Renderer::new(&window).unwrap();
@@ -345,14 +349,19 @@ impl<'a> ApplicationHandler for App<'a> {
         cc_shader.set_fragment_path("res/shaders/colour_correction.frag.spv");
         cc_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
-        let colour_correction_data = ColourCorrection {
+        let levels = Levels {
             in_black: 0.0,
             in_white: 1.0,
             out_black: 0.0,
             out_white: 1.0,
             gamma: 2.2,
         };
-        let cc_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data");
+
+        let colour_correction_data = ColourCorrection {
+            levels,
+        };
+        self.colour_correction = colour_correction_data;
+        let cc_buffer = Buffer::create_and_load(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data");
         let buffer_info = &[
             vk::DescriptorBufferInfo::default()
                 .buffer(cc_buffer.buffer())
@@ -448,6 +457,10 @@ impl<'a> ApplicationHandler for App<'a> {
                     return;
                 }
 
+                let cc_object = renderer.data.objects.get_with_tag("colour_correction")[0];
+                let cc_buffer = cc_object.get_buffer("colour_correction_data");
+                cc_buffer.copy_data_into_buffer(&renderer.device, &self.colour_correction);
+
                 unsafe { renderer.render(window, &mut |ctx| {
                     ctx.style_mut(|style| style.visuals.window_shadow = egui::epaint::Shadow::NONE);
                     let _ = egui::Window::new("Render Info")
@@ -461,6 +474,36 @@ impl<'a> ApplicationHandler for App<'a> {
                             ui.label(format!("Frame number: {}", stats.frame));
                             ui.label(format!("Draw Calls: {}", stats.draw_calls));
                             ui.label(format!("Command Buffer time: {:.2} us", self.egui_data.get_cmd_buf_record_time()))
+                    });
+
+                    let _ = egui::Window::new("Colour Correction")
+                        .anchor(egui::Align2::RIGHT_TOP, (0.0, 0.0))
+                        .title_bar(false)
+                        .resizable([false, false])
+                        .show(ctx, |ui| {
+                            ui.collapsing("Levels", |ui| {
+                                egui::Grid::new("level_grid").show(ui, |ui| {
+                                    ui.label("Black In");
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.in_black).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.end_row();
+
+                                    ui.label("White In");
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.in_white).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.end_row();
+
+                                    ui.label("Black Out");
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.out_black).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.end_row();
+
+                                    ui.label("White Out");
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.out_white).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.end_row();
+
+                                    ui.label("Gamma");
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.gamma).speed(0.1).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.end_row();
+                                });
+                            })
                     });
                 }) }.unwrap();
 
@@ -873,7 +916,7 @@ struct EguiDraw;
 
 impl Task for EguiDraw {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
-        let enable = false;
+        let enable = true;
 
         if !enable { return; }
 
@@ -1005,7 +1048,14 @@ struct MaterialData {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct ColourCorrection {
+    levels: Levels,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Levels {
     in_black: f32,
     in_white: f32,
     out_black: f32,

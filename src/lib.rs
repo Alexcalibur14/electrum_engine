@@ -126,7 +126,7 @@ impl<'a> Renderer<'a> {
         );
         
         let dynamic_rendering = egui_ash_renderer::DynamicRendering {
-            color_attachment_format: vk::Format::R16G16B16A16_SFLOAT,
+            color_attachment_format: vk::Format::R8G8B8A8_SRGB,
             depth_attachment_format: None,
         };
         let options = egui_ash_renderer::Options {
