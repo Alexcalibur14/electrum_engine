@@ -43,7 +43,7 @@ use resources::Handle as CollectionHandle;
 use crate::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
 use crate::model::Object;
 use crate::resources::{Collection, NamedVec};
-use crate::shader::GraphicsProgram;
+use crate::shader::{ComputeProgram, GraphicsProgram};
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -439,6 +439,7 @@ pub struct RendererData<'a> {
     pub objects: Collection<'a, Object<'a>>,
     pub pipelines: Collection<'a, (vk::Pipeline, vk::PipelineLayout)>,
     pub graphics_shaders: Collection<'a, GraphicsProgram<'a>>,
+    pub compute_shaders: Collection<'a, ComputeProgram<'a>>,
 
     pub descriptor_pool: DescriptorAllocator,
     pub descriptor_layout_cache: DescriptorLayoutCache,
@@ -484,6 +485,7 @@ impl<'a> Default for RendererData<'a> {
             objects: Collection::new(),
             pipelines: Collection::new(),
             graphics_shaders: Collection::new(),
+            compute_shaders: Collection::new(),
 
             descriptor_pool: DescriptorAllocator::new(),
             descriptor_layout_cache: DescriptorLayoutCache::new(),

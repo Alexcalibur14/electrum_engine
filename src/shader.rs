@@ -349,3 +349,73 @@ pub struct DepthStencilData {
     pub stencil_test_enable: bool,
     pub compare_op: vk::CompareOp,
 }
+
+pub struct ComputeProgram<'a> {
+    name: &'a str,
+    compute_path: &'a str,
+    compute_module: Option<vk::PipelineShaderStageCreateInfo<'a>>,
+}
+
+impl<'a> ComputeProgram<'a> {
+    pub fn new(name: &'a str, path: &'a str) -> Self {
+        ComputeProgram {
+            name,
+            compute_path: path,
+            compute_module: None,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name
+    }
+
+    pub fn path(&self) -> &str {
+        self.compute_path
+    }
+
+    pub fn compute_module(&self) -> Option<vk::PipelineShaderStageCreateInfo<'a>> {
+        self.compute_module
+    }
+
+    pub fn load_shader_module_spirv(&mut self, instance: &Instance, device: &Device) {
+        let bytecode = read_spv(&mut fs::File::open(self.compute_path).unwrap()).unwrap();
+        let create_info = vk::ShaderModuleCreateInfo::default()
+            .code(&bytecode);
+
+        let compute = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
+
+        set_object_name(instance, device, &format!("{} Compute Shader", self.name), compute).unwrap();
+
+        let compute_module = vk::PipelineShaderStageCreateInfo::default()
+            .module(compute)
+            .name(c"main")
+            .stage(vk::ShaderStageFlags::COMPUTE);
+
+        self.compute_module = Some(compute_module);
+    }
+}
+
+pub fn create_compute_pipeline(
+    instance: &Instance,
+    device: &Device,
+    program: &ComputeProgram,
+    push_constant_ranges: &[vk::PushConstantRange],
+    set_layouts: &[vk::DescriptorSetLayout],
+) -> (vk::Pipeline, vk::PipelineLayout) {
+
+    let layout_create_info = vk::PipelineLayoutCreateInfo::default()
+        .set_layouts(set_layouts)
+        .push_constant_ranges(push_constant_ranges);
+
+    let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
+    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+
+    let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
+        .stage(program.compute_module.unwrap())
+        .layout(layout);
+
+    let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
+    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+
+    (pipeline, layout)
+}

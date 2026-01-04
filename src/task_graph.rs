@@ -96,9 +96,9 @@ impl<'a> TaskGraph<'a> {
                 }
             };
 
-            let internal_images = node.internal_images.iter().map(|(name, dst_access)| {
+            let internal_images = node.internal_images.iter().map(|(name, dst_access, aspect)| {
                 let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find internal image with name: {:?}", name));
-                (image_data, src_access, dst_access)
+                (image_data, src_access, dst_access, aspect)
             }).collect::<Vec<_>>();
 
             let internal_buffers = node.internal_buffers.iter().map(|(name, dst_access)| {
@@ -150,7 +150,7 @@ impl<'a> TaskGraph<'a> {
                 );
             }
 
-            internal_images.iter().for_each(|(image_data, src_access, dst_access)| {
+            internal_images.iter().for_each(|(image_data, src_access, dst_access, aspect)| {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
                         .image(image_data.image.image())
@@ -160,8 +160,7 @@ impl<'a> TaskGraph<'a> {
                         .dst_access_mask(dst_access.access_mask)
                         .src_stage_mask(src_access.pipeline_stage)
                         .dst_stage_mask(dst_access.pipeline_stage)
-                        // TODO: maybe images should need to specify which aspect to transition?
-                        .subresource_range(image_subresource_range(vk::ImageAspectFlags::DEPTH))
+                        .subresource_range(image_subresource_range(**aspect))
                 );
             });
 
@@ -188,7 +187,7 @@ impl<'a> TaskGraph<'a> {
                 color_attachments: color_attachments.iter().map(|(image_data, _, _)| &image_data.image).collect(),
                 depth_attachment: if let Some((image_data, _, _)) = depth_attachment { Some(&image_data.image) } else { None },
                 stencil_attachment: if let Some((image_data, _, _)) = stencil_attachment { Some(&image_data.image) } else { None },
-                internal_images: internal_images.iter().map(|(image_data, _, _)| &image_data.image).collect(),
+                internal_images: internal_images.iter().map(|(image_data, _, _, _)| &image_data.image).collect(),
                 internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| *buffer).collect(),
                 external_images: vec![],
                 external_buffers: vec![],
@@ -213,7 +212,7 @@ impl<'a> TaskGraph<'a> {
                 *latest_access = dst_access;
             }
 
-            node.internal_images.iter().for_each(|(name, dst_access)| {
+            node.internal_images.iter().for_each(|(name, dst_access, _)| {
                 let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == *name).expect("msg");
                 *latest_access = *dst_access;
             });
@@ -245,9 +244,9 @@ pub struct Node<'a> {
     color_attachments: Vec<(&'a str, AccessType)>,
     depth_attachment: Option<(&'a str, AccessType)>,
     stencil_attachment: Option<(&'a str, AccessType)>,
-    internal_images: Vec<(&'a str, AccessType)>,
+    internal_images: Vec<(&'a str, AccessType, vk::ImageAspectFlags)>,
     internal_buffers: Vec<(&'a str, AccessType)>,
-    external_images: Vec<(&'a str, AccessType)>,
+    external_images: Vec<(&'a str, AccessType, vk::ImageAspectFlags)>,
     external_buffers: Vec<(&'a str, AccessType)>,
     task: Box<dyn Task>,
 }
@@ -278,8 +277,8 @@ impl<'a> Node<'a> {
         self.stencil_attachment = Some((name, access_type));
     }
 
-    pub fn add_internal_image(&mut self, name: &'a str, access_type: AccessType) {
-        self.internal_images.push((name, access_type));
+    pub fn add_internal_image(&mut self, name: &'a str, aspect: vk::ImageAspectFlags, access_type: AccessType) {
+        self.internal_images.push((name, access_type, aspect));
     }
 
     pub fn add_internal_buffer(&mut self, name: &'a str, access_type: AccessType) {
@@ -287,8 +286,8 @@ impl<'a> Node<'a> {
     }
 
     /// `access_type` currently does nothing
-    pub fn add_external_image(&mut self, name: &'a str, access_type: AccessType) {
-        self.external_images.push((name, access_type));
+    pub fn add_external_image(&mut self, name: &'a str, aspect: vk::ImageAspectFlags, access_type: AccessType) {
+        self.external_images.push((name, access_type, aspect));
     }
 
     /// `access_type` currently does nothing

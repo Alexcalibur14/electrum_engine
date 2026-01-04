@@ -33,6 +33,8 @@ use electrum_engine::shader::RasterizationData;
 use electrum_engine::shader::create_basic_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
+use electrum_engine::Vertex;
+use electrum_engine_macros::Vertex;
 use glam::Mat4;
 use glam::Quat;
 use glam::Vec3;
@@ -339,6 +341,85 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.graphics_shaders.push(debug_shader, &["debug"]);
         renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
 
+        let mut cc_shader = GraphicsProgram::new("Colour Correction", "res/shaders/colour_correction.vert.spv");
+        cc_shader.set_fragment_path("res/shaders/colour_correction.frag.spv");
+        cc_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+
+        let colour_correction_data = ColourCorrection {
+            in_black: 0.0,
+            in_white: 1.0,
+            out_black: 0.0,
+            out_white: 1.0,
+            gamma: 2.2,
+        };
+        let cc_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data");
+        let buffer_info = &[
+            vk::DescriptorBufferInfo::default()
+                .buffer(cc_buffer.buffer())
+                .offset(0)
+                .range(cc_buffer.size())
+        ];
+        let (cc_descriptor, cc_layout) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        let mut cc_object = Object::new("colour_correction_data");
+        cc_object.add_buffer(cc_buffer, "colour_correction_data");
+        cc_object.add_descriptor_set(cc_descriptor, "colour_correction_data");
+
+        let (main_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "color_attachment").unwrap();
+
+        let (cc_image_descriptor, cc_image_layout) = DescriptorBuilder::new()
+            .bind_image(
+                0,
+                1,
+                &[
+                    vk::DescriptorImageInfo::default()
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .image_view(main_image.image().view())
+                        .sampler(main_image.image().sampler().unwrap())
+                ],
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                vk::ShaderStageFlags::FRAGMENT
+            )
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        cc_object.add_descriptor_set(cc_image_descriptor, "colour_correction_images");
+
+        let (cc_pipeline, layout) = create_basic_graphics_pipeline::<NullVertex>(
+            &renderer.instance,
+            &renderer.device,
+            &cc_shader,
+            RasterizationData {
+                cull_mode: vk::CullModeFlags::BACK,
+                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                polygon_mode: vk::PolygonMode::FILL,
+                line_width: 1.0,
+            },
+            MultisampleData {
+                samples: vk::SampleCountFlags::TYPE_1,
+                sample_shading_enable: false,
+            },
+            DepthStencilData {
+                depth_test_enable: false,
+                depth_write_enable: false,
+                stencil_test_enable: false,
+                compare_op: vk::CompareOp::GREATER,
+            },
+            0,
+            &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
+            &[vk::Format::R8G8B8A8_SRGB],
+            vk::Format::UNDEFINED,
+            vk::Format::UNDEFINED,
+            &[],
+            &[cc_image_layout, cc_layout],
+            vk::PrimitiveTopology::TRIANGLE_LIST,
+        );
+
+        renderer.data.objects.push(cc_object, &["colour_correction"]);
+        renderer.data.graphics_shaders.push(cc_shader, &["colour_correction"]);
+        renderer.data.pipelines.push((cc_pipeline, layout), &["colour_correction"]);
+
         self.window = Some(window);
         self.renderer = Some(renderer);
     }
@@ -433,13 +514,13 @@ fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererD
             ImageSize::SwapchainRelative { multiplier: 1.0 },
             vk::Format::R16G16B16A16_SFLOAT,
             MipLevels::One,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
             vk::SampleCountFlags::TYPE_1,
             vk::ImageViewType::TYPE_2D,
             1,
             vk::ImageAspectFlags::COLOR,
-            None,
-            "color_attachment"
+            Some((Filter::LINEAR, AddressMode::CLAMP_TO_EDGE)),
+            "color_attachment",
         );
 
         let depth = ImageData::new(
@@ -468,9 +549,23 @@ fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererD
             "shadow_map",
         );
 
+        let cc_image = ImageData::new(
+            ImageSize::Swapchain,
+            vk::Format::R8G8B8A8_SRGB,
+            MipLevels::One,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageViewType::TYPE_2D,
+            1,
+            vk::ImageAspectFlags::COLOR,
+            None,
+            "color_correction",
+        );
+
         task_graph.add_image(image);
         task_graph.add_image(depth);
         task_graph.add_image(shadow_map);
+        task_graph.add_image(cc_image);
 
         let mut shadow_pass_node = Node::new();
         shadow_pass_node.set_depth("shadow_map", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write() );
@@ -480,7 +575,7 @@ fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererD
         let mut main_node = Node::new();
         main_node.add_attachment("color_attachment", AccessType::color_attachment_write());
         main_node.set_depth("depth_attachment", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write());
-        main_node.add_internal_image("shadow_map", AccessType::fragment_shader_sampled_read());
+        main_node.add_internal_image("shadow_map", vk::ImageAspectFlags::DEPTH, AccessType::fragment_shader_sampled_read());
         main_node.set_task(Box::new(MainDraw));
         task_graph.add_node(main_node);
 
@@ -489,13 +584,19 @@ fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererD
         debug_node.set_task(Box::new(DebugDraw));
         task_graph.add_node(debug_node);
 
+        let mut cc_node = Node::new();
+        cc_node.add_internal_image("color_attachment", vk::ImageAspectFlags::COLOR, AccessType::fragment_shader_sampled_read());
+        cc_node.add_attachment("color_correction", AccessType::color_attachment_write());
+        cc_node.set_task(Box::new(ColourCorrectionPass));
+        task_graph.add_node(cc_node);
+
         let mut egui_node = Node::new();
-        egui_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        egui_node.add_attachment("color_correction", AccessType::color_attachment_write());
         egui_node.set_task(Box::new(EguiDraw));
         task_graph.add_node(egui_node);
 
         let mut present_node = Node::new();
-        present_node.add_attachment("color_attachment", AccessType::blit_src());
+        present_node.add_attachment("color_correction", AccessType::blit_src());
         present_node.set_task(Box::new(Present));
         task_graph.add_node(present_node);
 
@@ -686,7 +787,83 @@ impl Task for MainDraw {
         end_command_label(instance, device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+
+    fn destroy(&mut self, _: &Device) {}
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ColourCorrectionPass;
+
+impl Task for ColourCorrectionPass {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(instance, device, command_buffer, "Colour Correction", [0.0, 0.5, 0.5, 1.0]);
+
+        let attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 1.0]}})
+            .load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .image_view(draw_data.color_attachments[0].view())
+        ];
+
+        let rendering_info = vk::RenderingInfo::default()
+            .layer_count(1)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: draw_data.color_attachments[0].extent_2d(),
+            })
+            .color_attachments(&attachment_infos);
+
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: draw_data.color_attachments[0].extent_2d(),
+        }];
+    
+        let viewports = [
+            vk::Viewport::default()
+                .width(draw_data.color_attachments[0].width() as f32)
+                .height(draw_data.color_attachments[0].height() as f32)
+                .min_depth(0.0)
+                .max_depth(1.0)
+                .x(0.0)
+                .y(0.0)
+        ];
+        
+        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+
+        unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
+        unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
+
+        let (pipeline, pipeline_layout) = data.pipelines.get_with_tag("colour_correction")[0];
+        unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
+
+        let object = data.objects.get_with_tag("colour_correction")[0];
+        unsafe {
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                *pipeline_layout,
+                0,
+                &[
+                    *object.get_descriptor_set("colour_correction_images"),
+                    *object.get_descriptor_set("colour_correction_data")
+                ],
+                &[],
+            ) 
+        };
+
+        unsafe { device.cmd_draw(command_buffer, 3, 1, 0, 0) };
+
+        stats.draw_calls += 1;
+
+        unsafe { device.cmd_end_rendering(command_buffer) };
+
+        end_command_label(instance, device, command_buffer);
+    }
+
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
 
     fn destroy(&mut self, _: &Device) {}
 }
@@ -826,3 +1003,15 @@ struct MaterialData {
     colour: [f32; 3],
     specular: f32,
 }
+
+#[repr(C)]
+struct ColourCorrection {
+    in_black: f32,
+    in_white: f32,
+    out_black: f32,
+    out_white: f32,
+    gamma: f32
+}
+
+#[derive(Vertex)]
+pub struct NullVertex;
