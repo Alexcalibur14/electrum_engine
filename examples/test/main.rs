@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::f32::consts::PI;
 use std::ops::RangeInclusive;
 
 use ash::Device;
@@ -354,7 +355,8 @@ impl<'a> ApplicationHandler for App<'a> {
             in_white: 1.0,
             out_black: 0.0,
             out_white: 1.0,
-            gamma: 2.2,
+            gamma: 1.0,
+            hue_shift: 0.0,
         };
 
         let colour_correction_data = ColourCorrection {
@@ -484,15 +486,15 @@ impl<'a> ApplicationHandler for App<'a> {
                             ui.collapsing("Levels", |ui| {
                                 egui::Grid::new("level_grid").show(ui, |ui| {
                                     ui.label("Black In");
-                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.in_black).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.in_black).speed(0.001).range(RangeInclusive::new(-1.0, 2.0)));
                                     ui.end_row();
 
                                     ui.label("White In");
-                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.in_white).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.in_white).speed(0.01).range(RangeInclusive::new(-1.0, 5.0)));
                                     ui.end_row();
 
                                     ui.label("Black Out");
-                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.out_black).speed(0.01).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.out_black).speed(0.001).range(RangeInclusive::new(-5.0, 5.0)));
                                     ui.end_row();
 
                                     ui.label("White Out");
@@ -500,12 +502,16 @@ impl<'a> ApplicationHandler for App<'a> {
                                     ui.end_row();
 
                                     ui.label("Gamma");
-                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.gamma).speed(0.1).range(RangeInclusive::new(-5.0, 5.0)));
+                                    ui.add(egui::DragValue::new(&mut self.colour_correction.levels.gamma).speed(0.01).range(RangeInclusive::new(-1.0, 2.0)));
                                     ui.end_row();
                                 });
-                            })
-                    });
-                }) }.unwrap();
+                            });
+                            ui.label("Hue Shift");
+                            ui.add(egui::Slider::new(&mut self.colour_correction.levels.hue_shift, RangeInclusive::new(0.0, 2.0 * PI)));
+                            ui.end_row();
+                        });
+                    })
+                }.unwrap();
 
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -1060,7 +1066,8 @@ struct Levels {
     in_white: f32,
     out_black: f32,
     out_white: f32,
-    gamma: f32
+    gamma: f32,
+    hue_shift: f32,
 }
 
 #[derive(Vertex)]
