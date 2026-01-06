@@ -356,11 +356,11 @@ impl<'a> ApplicationHandler for App<'a> {
             out_black: 0.0,
             out_white: 1.0,
             gamma: 1.0,
-            hue_shift: 0.0,
         };
-
+        
         let colour_correction_data = ColourCorrection {
             levels,
+            hue_shift: 0.0,
         };
         self.colour_correction = colour_correction_data;
         let cc_buffer = Buffer::create_and_load(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data");
@@ -507,7 +507,7 @@ impl<'a> ApplicationHandler for App<'a> {
                                 });
                             });
                             ui.label("Hue Shift");
-                            ui.add(egui::Slider::new(&mut self.colour_correction.levels.hue_shift, RangeInclusive::new(0.0, 2.0 * PI)));
+                            ui.add(egui::Slider::new(&mut self.colour_correction.hue_shift, RangeInclusive::new(0.0, 2.0 * PI)));
                             ui.end_row();
                         });
                     })
@@ -1057,9 +1057,11 @@ struct MaterialData {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct ColourCorrection {
     levels: Levels,
+    hue_shift: f32,
 }
 
 #[repr(C)]
+#[repr(align(16))]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct Levels {
     in_black: f32,
@@ -1067,7 +1069,6 @@ struct Levels {
     out_black: f32,
     out_white: f32,
     gamma: f32,
-    hue_shift: f32,
 }
 
 #[derive(Vertex)]

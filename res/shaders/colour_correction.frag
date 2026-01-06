@@ -12,11 +12,11 @@ struct Levels {
     float out_black;
     float out_white;
     float gamma;
-    float hue_shift;
 };
 
 layout(set = 1, binding = 0) uniform ColourCorrectionData {
     Levels levels;
+    float hue_shift;
 };
 
 vec3 calc_levels(vec3 in_colour, Levels levels) {
@@ -80,7 +80,7 @@ void main() {
     vec3 mapped = calc_levels(in_colour, levels);
 
     vec3 oklch = oklab_to_oklch(rgb_to_oklab(mapped));
-    oklch.b += levels.hue_shift;
+    oklch.b += hue_shift;
     vec3 final = oklab_to_rgb(oklch_to_oklab(oklch));
 
     out_colour = vec4(final, 1.0);
