@@ -34,5 +34,5 @@ void main() {
     outNormal = (normal_matrix * vec4(inNormal, 0.0)).xyz;
     outColour = inColour;
     outUV = inUV;
-    out_light_space_vert = light.projection_matrix * light.view_matrix * vec4(inPosition, 1.0);
+    out_light_space_vert = light.projection_matrix * light.view_matrix * model_matrix * vec4(inPosition, 1.0);
 }
