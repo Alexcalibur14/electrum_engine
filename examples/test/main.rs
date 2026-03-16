@@ -10,6 +10,7 @@ use anyhow::Result;
 use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::descriptor::DescriptorBuilder;
+use electrum_engine::descriptor::update_image_binding;
 use electrum_engine::end_command_label;
 use electrum_engine::extra::CameraData;
 use electrum_engine::extra::Light;
@@ -915,25 +916,21 @@ impl Task for ColourCorrectionPass {
 
         info!("cc image view: {:?}", image.view());
 
-        let (cc_image_descriptor, _) = DescriptorBuilder::new()
-            .bind_image(
-                0,
-                1,
-                &[
-                    vk::DescriptorImageInfo::default()
-                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                        .image_view(image.view())
-                        .sampler(image.sampler().unwrap())
-                ],
-                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                vk::ShaderStageFlags::FRAGMENT
-            )
-            .build_data(device, data).unwrap();
+        let cc_objects = data.objects.get_mut_with_tag("colour_correction");
 
-        info!("cc descriptor changed to {:?}", cc_image_descriptor);
-
-        let mut cc_objects = data.objects.get_mut_with_tag("colour_correction");
-        cc_objects[0].replace_descriptor_set(cc_image_descriptor, "colour_correction_images");
+        let descriptor_set = cc_objects[0].get_descriptor_set("colour_correction_images");
+        update_image_binding(
+            device,
+            &[
+                vk::DescriptorImageInfo::default()
+                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                    .image_view(image.view())
+                    .sampler(image.sampler().unwrap())
+            ],
+            *descriptor_set,
+            0,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        );
     }
 
     fn destroy(&mut self, _: &Device) {}

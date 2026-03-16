@@ -286,3 +286,23 @@ impl<'a> Default for DescriptorBuilder<'a> {
         Self::new()
     }
 }
+
+pub fn update_image_binding(device: &Device, image_info: &[vk::DescriptorImageInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
+    let write = vk::WriteDescriptorSet::default()
+        .dst_set(set)
+        .dst_binding(binding)
+        .descriptor_type(descriptor_type)
+        .image_info(image_info);
+
+    unsafe { device.update_descriptor_sets(&[write], &[]) };
+}
+
+pub fn update_buffer_binding(device: &Device, buffer_info: &[vk::DescriptorBufferInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
+    let write = vk::WriteDescriptorSet::default()
+        .dst_set(set)
+        .dst_binding(binding)
+        .descriptor_type(descriptor_type)
+        .buffer_info(buffer_info);
+
+    unsafe { device.update_descriptor_sets(&[write], &[]) };
+}
