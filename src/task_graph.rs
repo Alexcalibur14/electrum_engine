@@ -1,7 +1,6 @@
 use std::ops::BitOr;
 
 use ash::{Device, Instance, vk::{self}};
-use tracing::info;
 
 use crate::{RenderStats, RendererData, buffer::Buffer, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
 
@@ -60,22 +59,13 @@ impl<'a> TaskGraph<'a> {
         }
         
         self.images.iter_mut().for_each(|(image_data, access_type)| {
-            info!("image {:?}", image_data.name);
-            info!("    pre view: {:?}", image_data.image.view());
-
             let resized = image_data.recreate_swapchain(instance, device, data);
             
             if resized {
-                info!("    resized");
-                info!("    post view: {:?}", image_data.image.view());
                 *access_type = AccessType::UNDEFINED
-            } else {
-                info!("    did not resize");
             }
         });
 
-        self.images().iter().for_each(|(image_data, _)| info!("recreated image {:?}, view: {:?}", image_data.name(), image_data.image().view()));
-        
         self.swapchain_extent = data.swapchain_extent;
         self.nodes.iter_mut().for_each(|node| {
 

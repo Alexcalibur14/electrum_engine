@@ -914,8 +914,6 @@ impl Task for ColourCorrectionPass {
     fn recreate_swapchain(&mut self, _: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData) {
         let image = draw_data.internal_images[0];
 
-        info!("cc image view: {:?}", image.view());
-
         let cc_objects = data.objects.get_mut_with_tag("colour_correction");
 
         let descriptor_set = cc_objects[0].get_descriptor_set("colour_correction_images");
