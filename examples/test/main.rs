@@ -94,8 +94,8 @@ impl<'a> ApplicationHandler for App<'a> {
 
         self.camera = camera;
 
-        let mut program = GraphicsProgram::new("test", "res/shaders/test.vert.spv");
-        program.set_fragment_path("res/shaders/test.frag.spv");
+        let mut program = GraphicsProgram::new("test", "examples/test/res/shaders/test.vert.spv");
+        program.set_fragment_path("examples/test/res/shaders/test.frag.spv");
         program.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.5, 0.0));
@@ -140,7 +140,7 @@ impl<'a> ApplicationHandler for App<'a> {
         monkey.add_buffer(material_buffer, "material");
         monkey.add_descriptor_set(material_descriptor, "material");
 
-        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "res/models/MONKEY.obj")[0].clone();
+        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "examples/test/res/models/MONKEY.obj")[0].clone();
 
         renderer.data.objects.push(monkey, &["main", "shadow"]);
 
@@ -272,7 +272,7 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipelines.push((pipeline, layout), &["main"]);
 
 
-        let mut shadow_shader = GraphicsProgram::new("Shadow", "res/shaders/test_shadow.vert.spv");
+        let mut shadow_shader = GraphicsProgram::new("Shadow", "examples/test/res/shaders/test_shadow.vert.spv");
         shadow_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
         let (shadow_pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
@@ -308,8 +308,8 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.graphics_shaders.push(shadow_shader, &["shadow"]);
         renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
 
-        let mut debug_shader = GraphicsProgram::new("Debug", "res/shaders/debug.vert.spv");
-        debug_shader.set_fragment_path("res/shaders/debug.frag.spv");
+        let mut debug_shader = GraphicsProgram::new("Debug", "examples/test/res/shaders/debug.vert.spv");
+        debug_shader.set_fragment_path("examples/test/res/shaders/debug.frag.spv");
         debug_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
         let (debug_pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
@@ -345,8 +345,8 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.graphics_shaders.push(debug_shader, &["debug"]);
         renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
 
-        let mut cc_shader = GraphicsProgram::new("Colour Correction", "res/shaders/colour_correction.vert.spv");
-        cc_shader.set_fragment_path("res/shaders/colour_correction.frag.spv");
+        let mut cc_shader = GraphicsProgram::new("Colour Correction", "examples/test/res/shaders/colour_correction.vert.spv");
+        cc_shader.set_fragment_path("examples/test/res/shaders/colour_correction.frag.spv");
         cc_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
         let levels = Levels {
