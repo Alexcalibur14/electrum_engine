@@ -43,7 +43,6 @@ use glam::Vec3;
 use glam::vec3;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
-use winit::dpi::PhysicalSize;
 use winit::event::KeyEvent;
 use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ControlFlow, EventLoopBuilder}, platform::x11::EventLoopBuilderExtX11, window::Window};
 
@@ -81,7 +80,6 @@ impl<'a> ApplicationHandler for App<'a> {
         let window = event_loop.create_window(Window::default_attributes()
             .with_title("Electrum Renderer Example")
             .with_resizable(true)
-            .with_inner_size(PhysicalSize::new(1500, 1000))
         ).unwrap();
 
         let mut renderer = Renderer::new(&window).unwrap();
@@ -516,7 +514,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(new_size) => {
-                let renderer = self.renderer.as_mut().unwrap();
+                info!("Resize requested: {}x{}, frame: {}", new_size.width, new_size.height, renderer.stats.frame);
                 renderer.resized = true;
                 renderer.width = new_size.width;
                 renderer.height = new_size.height;
@@ -696,7 +694,7 @@ impl EguiData {
 struct ShadowPass;
 
 impl Task for ShadowPass {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(instance, device, command_buffer, "Shadow Pass", [0.0, 0.6, 0.2, 1.0]);
         
         let depth_attachment = vk::RenderingAttachmentInfo::default()
@@ -754,7 +752,7 @@ impl Task for ShadowPass {
         end_command_label(instance, device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
 
     fn destroy(&mut self, _: &Device) {}
 }
@@ -763,7 +761,7 @@ impl Task for ShadowPass {
 struct MainDraw;
 
 impl Task for MainDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(instance, device, command_buffer, "Main Draw", [0.0, 0.6, 0.2, 1.0]);
 
         let attachment_infos = [
@@ -836,7 +834,7 @@ impl Task for MainDraw {
         end_command_label(instance, device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
 
     fn destroy(&mut self, _: &Device) {}
 }
@@ -845,7 +843,7 @@ impl Task for MainDraw {
 struct ColourCorrectionPass;
 
 impl Task for ColourCorrectionPass {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(instance, device, command_buffer, "Colour Correction", [0.0, 0.5, 0.5, 1.0]);
 
         let attachment_infos = [
@@ -912,7 +910,31 @@ impl Task for ColourCorrectionPass {
         end_command_label(instance, device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData) {
+        let image = draw_data.internal_images[0];
+
+        info!("cc image view: {:?}", image.view());
+
+        let (cc_image_descriptor, _) = DescriptorBuilder::new()
+            .bind_image(
+                0,
+                1,
+                &[
+                    vk::DescriptorImageInfo::default()
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .image_view(image.view())
+                        .sampler(image.sampler().unwrap())
+                ],
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                vk::ShaderStageFlags::FRAGMENT
+            )
+            .build_data(device, data).unwrap();
+
+        info!("cc descriptor changed to {:?}", cc_image_descriptor);
+
+        let mut cc_objects = data.objects.get_mut_with_tag("colour_correction");
+        cc_objects[0].replace_descriptor_set(cc_image_descriptor, "colour_correction_images");
+    }
 
     fn destroy(&mut self, _: &Device) {}
 }
@@ -921,7 +943,7 @@ impl Task for ColourCorrectionPass {
 struct EguiDraw;
 
 impl Task for EguiDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
         let enable = true;
 
         if !enable { return; }
@@ -954,7 +976,7 @@ impl Task for EguiDraw {
         end_command_label(instance, device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
 
     fn destroy(&mut self, _: &Device) {}
 }
@@ -963,7 +985,7 @@ impl Task for EguiDraw {
 struct DebugDraw;
 
 impl Task for DebugDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(instance, device, command_buffer, "Debug Draw", [0.0, 0.6, 0.2, 1.0]);
 
         let attachment_infos = [
@@ -1022,7 +1044,7 @@ impl Task for DebugDraw {
         end_command_label(instance, device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
 
     fn destroy(&mut self, _: &Device) {}
 }
@@ -1031,7 +1053,7 @@ impl Task for DebugDraw {
 struct Present;
 
 impl Task for Present {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, _: &mut RenderStats) {
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
         begin_command_label(instance, device, command_buffer, "Present", [0.7, 0.0, 0.7, 1.0]);
         
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
@@ -1042,7 +1064,7 @@ impl Task for Present {
         end_command_label(instance, device, command_buffer);
     }
     
-    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &RendererData) {}
+    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
 
     fn destroy(&mut self, _: &Device) {}
 }

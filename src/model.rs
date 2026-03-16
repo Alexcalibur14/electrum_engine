@@ -326,6 +326,10 @@ impl<'a> Object<'a> {
         self.descriptor_sets.push(descriptor_set, name);
     }
 
+    pub fn replace_descriptor_set(&mut self, descriptor_set: vk::DescriptorSet, name: &'a str) {
+        *self.descriptor_sets.get_mut(name) = descriptor_set;
+    }
+
     pub fn create_buffer_host(&mut self, instance: &Instance, device: &Device, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
         let buffer = Buffer::new(
             instance,

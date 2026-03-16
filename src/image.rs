@@ -2,6 +2,7 @@ use ash::vk::{self, Handle};
 use ash::{Device, Instance};
 
 use anyhow::{Result, anyhow};
+use tracing::info;
 
 use crate::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
@@ -342,6 +343,7 @@ impl Image {
     }
 
     pub fn destroy(&mut self, device: &Device) {
+        info!("destroying image view: {:?}", self.view);
         if let Some(sampler) = self.sampler {
             if !sampler.is_null() {
                 unsafe { device.destroy_sampler(sampler, None) };
@@ -362,6 +364,7 @@ impl Image {
         self.mip_level = 0;
         self.sampler = None;
         self.extent = vk::Extent3D::default();
+        info!("    view: {:?}", self.view);
     }
 }
 

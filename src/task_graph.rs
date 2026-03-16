@@ -1,6 +1,7 @@
 use std::ops::BitOr;
 
-use ash::{Device, Instance, vk};
+use ash::{Device, Instance, vk::{self}};
+use tracing::info;
 
 use crate::{RenderStats, RendererData, buffer::Buffer, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
 
@@ -53,20 +54,78 @@ impl<'a> TaskGraph<'a> {
         self.swapchain_extent = vk::Extent2D::default();
     }
 
-    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
-        self.nodes.iter_mut().for_each(|node| node.recreate_swapchain(instance, device, data));
-        
+    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &mut RendererData) {
         if self.swapchain_extent == data.swapchain_extent {
             return;
         }
-
+        
         self.images.iter_mut().for_each(|(image_data, access_type)| {
-            if image_data.recreate_swapchain(instance, device, data) {
+            info!("image {:?}", image_data.name);
+            info!("    pre view: {:?}", image_data.image.view());
+
+            let resized = image_data.recreate_swapchain(instance, device, data);
+            
+            if resized {
+                info!("    resized");
+                info!("    post view: {:?}", image_data.image.view());
                 *access_type = AccessType::UNDEFINED
+            } else {
+                info!("    did not resize");
             }
         });
 
+        self.images().iter().for_each(|(image_data, _)| info!("recreated image {:?}, view: {:?}", image_data.name(), image_data.image().view()));
+        
         self.swapchain_extent = data.swapchain_extent;
+        self.nodes.iter_mut().for_each(|node| {
+
+            let color_attachments = node.color_attachments.iter().map(|(name, dst_access)| {
+                let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find color attachment with name: {:?}", name));
+                (image_data, src_access, dst_access)
+            }).collect::<Vec<_>>();
+
+            let depth_attachment = {
+                match node.depth_attachment {
+                    Some((name, dst_access)) => {
+                        let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find depth attachment with name: {:?}", name));
+                        Some((image_data, src_access, dst_access))
+                    },
+                    None => None,
+                }
+            };
+
+            let stencil_attachment = {
+                match node.stencil_attachment {
+                    Some((name, dst_access)) => {
+                        let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find stencil attachment with name: {:?}", name));
+                        Some((image_data, src_access, dst_access))
+                    },
+                    None => None,
+                }
+            };
+
+            let internal_images = node.internal_images.iter().map(|(name, dst_access, aspect)| {
+                let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find internal image with name: {:?}", name));
+                (image_data, src_access, dst_access, aspect)
+            }).collect::<Vec<_>>();
+
+            let internal_buffers = node.internal_buffers.iter().map(|(name, dst_access)| {
+                let (_, buffer, src_access) = self.buffers.iter().find(|(buffer_name, _, _)| buffer_name == name).expect(&format!("could not find internal buffer with name: {:?}", name));
+                (buffer, src_access, dst_access)
+            }).collect::<Vec<_>>();
+
+            let draw_data = DrawData {
+                color_attachments: color_attachments.iter().map(|(image_data, _, _)| image_data.image).collect(),
+                depth_attachment: if let Some((image_data, _, _)) = depth_attachment { Some(image_data.image) } else { None },
+                stencil_attachment: if let Some((image_data, _, _)) = stencil_attachment { Some(image_data.image) } else { None },
+                internal_images: internal_images.iter().map(|(image_data, _, _, _)| image_data.image).collect(),
+                internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| **buffer).collect(),
+                external_images: vec![],
+                external_buffers: vec![],
+            };
+        
+            node.recreate_swapchain(instance, device, data, &draw_data);
+        });
     }
 
     pub fn execute(&mut self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, data: &mut RendererData, stats: &mut RenderStats) {
@@ -184,16 +243,16 @@ impl<'a> TaskGraph<'a> {
             unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
 
             let draw_data = DrawData {
-                color_attachments: color_attachments.iter().map(|(image_data, _, _)| &image_data.image).collect(),
-                depth_attachment: if let Some((image_data, _, _)) = depth_attachment { Some(&image_data.image) } else { None },
-                stencil_attachment: if let Some((image_data, _, _)) = stencil_attachment { Some(&image_data.image) } else { None },
-                internal_images: internal_images.iter().map(|(image_data, _, _, _)| &image_data.image).collect(),
-                internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| *buffer).collect(),
+                color_attachments: color_attachments.iter().map(|(image_data, _, _)| image_data.image).collect(),
+                depth_attachment: if let Some((image_data, _, _)) = depth_attachment { Some(image_data.image) } else { None },
+                stencil_attachment: if let Some((image_data, _, _)) = stencil_attachment { Some(image_data.image) } else { None },
+                internal_images: internal_images.iter().map(|(image_data, _, _, _)| image_data.image).collect(),
+                internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| **buffer).collect(),
                 external_images: vec![],
                 external_buffers: vec![],
             };
 
-            node.execute(instance, device, command_buffer, draw_data, data, stats);
+            node.execute(instance, device, command_buffer, &draw_data, data, stats);
 
             let mut images_clone = self.images.clone();
             
@@ -299,12 +358,12 @@ impl<'a> Node<'a> {
         self.task = task
     }
 
-    pub fn execute(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats) {
+    pub fn execute(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         self.task.execute(instance, device, command_buffer, draw_data, data, stats);
     }
 
-    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
-        self.task.recreate_swapchain(instance, device, data);
+    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData) {
+        self.task.recreate_swapchain(instance, device, data, draw_data);
     }
 
     pub fn destroy(&mut self, device: &Device) {
@@ -313,8 +372,8 @@ impl<'a> Node<'a> {
 }
 
 pub trait Task: TaskClone {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: DrawData<'a>, data: &mut RendererData, stats: &mut RenderStats);
-    fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData);
+    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats);
+    fn recreate_swapchain<'a>(&mut self, instance: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData);
     fn destroy(&mut self, device: &Device);
 }
 
@@ -337,22 +396,22 @@ impl Clone for Box<dyn Task> {
     }
 }
 
-pub struct DrawData<'a> {
-    pub color_attachments: Vec<&'a Image>,
-    pub depth_attachment: Option<&'a Image>,
-    pub stencil_attachment: Option<&'a Image>,
-    pub internal_images: Vec<&'a Image>,
-    pub internal_buffers: Vec<&'a Buffer>,
-    pub external_images: Vec<&'a Image>,
-    pub external_buffers: Vec<&'a Buffer>,
+pub struct DrawData {
+    pub color_attachments: Vec<Image>,
+    pub depth_attachment: Option<Image>,
+    pub stencil_attachment: Option<Image>,
+    pub internal_images: Vec<Image>,
+    pub internal_buffers: Vec<Buffer>,
+    pub external_images: Vec<Image>,
+    pub external_buffers: Vec<Buffer>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct DummyTask;
 
 impl Task for DummyTask {
-    fn execute<'a>(&self, _: &Instance, _: &Device, _: vk::CommandBuffer, _: DrawData<'a>, _: &mut RendererData, _: &mut RenderStats) {}
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &RendererData) {}
+    fn execute<'a>(&self, _: &Instance, _: &Device, _: vk::CommandBuffer, _: &DrawData, _: &mut RendererData, _: &mut RenderStats) {}
+    fn recreate_swapchain<'a>(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
     fn destroy(&mut self, _: &Device) {}
 }
 

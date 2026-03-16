@@ -314,7 +314,7 @@ impl<'a> Renderer<'a> {
         create_command_buffers(&self.device, &mut self.data)?;
 
         let mut task_graph = self.data.task_graph.clone();
-        task_graph.recreate_swapchain(&self.instance, &self.device, &self.data);
+        task_graph.recreate_swapchain(&self.instance, &self.device, &mut self.data);
         self.data.task_graph = task_graph;
 
         Ok(())
