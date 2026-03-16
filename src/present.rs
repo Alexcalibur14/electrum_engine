@@ -22,9 +22,13 @@ pub(crate) unsafe fn create_swapchain(
 
     let surface_format = get_swapchain_surface_format(&support.formats);
     let present_mode = get_swapchain_present_mode(&support.present_modes);
+
+    let vk::Extent2D { width: min_width, height: min_height } = support.capabilities.min_image_extent;
+    let vk::Extent2D { width: max_width, height: max_height } = support.capabilities.max_image_extent;
+
     let extent = vk::Extent2D {
-        width,
-        height,
+        width: width.clamp(min_width, max_width),
+        height: height.clamp(min_height, max_height),
     };
 
     data.swapchain_format = surface_format.format;
