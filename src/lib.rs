@@ -1,74 +1,85 @@
-pub use ash::vk;
+use ash::vk;
 use ash::ext::debug_utils;
-use ash::vk::{Extent2D, Handle};
+use ash::vk::Handle;
 use ash::{Entry, Instance, Device};
-use ash_window;
 use ash::khr::{surface, swapchain};
+use ash_window;
 
-use raw_window_handle::{self, DisplayHandle, WindowHandle};
+use electrum_engine_macros::Vertex;
+use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 
 use anyhow::{anyhow, Result};
 use thiserror::Error;
 use tracing::*;
+use winit::window::Window;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::{self, CStr};
+use std::mem::ManuallyDrop;
 use std::ptr;
 use std::time::{Duration, Instant};
 
-mod buffer;
-mod camera;
-mod command;
-mod light;
-mod model;
-mod present;
-mod render_pass;
-mod shader;
-mod texture;
-mod descriptor;
+pub mod command;
+pub mod buffer;
+pub mod image;
+pub mod present;
+pub mod resources;
+pub mod draw;
+pub mod task_graph;
+pub mod model;
+pub mod shader;
+pub mod descriptor;
+pub mod extra;
 
-pub use buffer::*;
-pub use camera::*;
-pub use light::*;
-pub use mesh::*;
-pub use model::*;
-pub use present::*;
-pub use render_pass::*;
-pub use shader::*;
-pub use texture::*;
-pub use record::*;
-pub use descriptor::*;
+use command::*;
+use buffer::*;
+use image::*;
+use present::*;
+use task_graph::*;
 
-use command::{create_command_buffers, create_command_pools};
+use resources::Handle as CollectionHandle;
 
-pub use electrum_engine_macros;
+use crate::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
+use crate::model::Object;
+use crate::resources::{Collection, NamedVec};
+use crate::shader::{ComputeProgram, GraphicsProgram};
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 
 /// The required device extensions.
-const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME];
+const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME, ash::khr::dynamic_rendering::NAME];
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-#[derive(Clone)]
-pub struct Renderer {
+
+pub struct Renderer<'a> {
     _entry: Entry,
     pub instance: Instance,
     pub device: Device,
-    pub data: RendererData,
+    pub data: ManuallyDrop<RendererData<'a>>,
     pub stats: RenderStats,
+    pub width: u32,
+    pub height: u32,
     frame: usize,
     pub resized: bool,
 }
 
-impl Renderer {
+impl<'a> Renderer<'a> {
     /// Creates the Vulkan Renderer.
-    pub fn create(display_handle: DisplayHandle, window_handle: WindowHandle, width: u32, height: u32) -> Result<Self> {
+    pub fn new(window: &Window) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
         let mut data = RendererData::default();
+
+        let display_handle = window.display_handle().unwrap();
+        let window_handle = window.window_handle().unwrap();
+
+        let (width, height) = {
+            let inner_size = window.inner_size();
+            (inner_size.width, inner_size.height)
+        };
 
         let instance = unsafe { create_instance(display_handle.into(), &entry, &mut data)? };
         data.surface = unsafe { ash_window::create_surface(
@@ -82,27 +93,70 @@ impl Renderer {
         unsafe { pick_physical_device(&entry, &instance, &mut data)? };
         let device = unsafe { create_logical_device(&entry, &instance, &mut data)? };
 
-        unsafe { create_swapchain(&entry, &instance, &device, &mut data, width, height) }?;
+        let image_count = unsafe { create_swapchain(&entry, &instance, &device, &mut data, width, height) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
 
         unsafe { create_command_pools(&entry, &instance, &device, &mut data) }.unwrap();
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
-        unsafe { create_sync_objects(&instance, &device, &mut data) }?;
+        unsafe { create_sync_objects(&instance, &device, &mut data, image_count) }?;
 
         let stats = RenderStats {
             start: Instant::now(),
             delta: Duration::ZERO,
-            delda_start: Instant::now(),
+            delta_start: Instant::now(),
+            draw_calls: 0,
+            cmd_buf_record_time: Duration::ZERO,
+            cmd_buf_record_start: Instant::now(),
             frame: 0,
         };
+
+        info!("finished initialising");
+
+        let egui_context = egui::Context::default();
+        egui_extras::install_image_loaders(&egui_context);
+
+        let egui_winit = egui_winit::State::new(
+            egui_context.clone(),
+            egui::ViewportId::ROOT,
+            window,
+            None,
+            None,
+            None,
+        );
+        
+        let dynamic_rendering = egui_ash_renderer::DynamicRendering {
+            color_attachment_format: vk::Format::R8G8B8A8_SRGB,
+            depth_attachment_format: None,
+        };
+        let options = egui_ash_renderer::Options {
+            in_flight_frames: data.swapchain_images.len(),
+            enable_depth_test: false,
+            enable_depth_write: false,
+            srgb_framebuffer: true,
+        };
+        let egui_renderer = egui_ash_renderer::Renderer::with_default_allocator(
+            &instance,
+            data.physical_device.clone(),
+            device.clone(),
+            dynamic_rendering,
+            options,
+        ).unwrap(); 
+
+        data.egui_context = egui_context;
+        data.egui_renderer = Some(egui_renderer);
+        data.egui_winit = Some(egui_winit);
+
+        info!("Initialised Egui");
 
         Ok(Renderer {
             _entry: entry,
             instance,
-            data,
+            data: ManuallyDrop::new(data),
             device,
             frame: 0,
+            width,
+            height,
             resized: false,
             stats,
         })
@@ -112,74 +166,95 @@ impl Renderer {
     ///
     /// # Safety
     /// Do not call this function if the window is minimised or if `destroy` has been called
-    pub unsafe fn render(&mut self, width: u32, height: u32) -> Result<()> {
-        let in_flight_fence = self.data.in_flight_fences[self.frame];
+    pub unsafe fn render<F: FnMut(&egui::Context)>(&mut self, window: &Window, ui: &mut F) -> Result<()> {
+        let render_fence = self.data.render_fences[self.frame];
 
-        self.device
-            .wait_for_fences(&[in_flight_fence], true, u64::MAX)?;
+        self.device.wait_for_fences(&[render_fence], true, 1000000000)?;
+        self.device.reset_fences(&[render_fence])?;
+
+        (self.width, self.height) = {
+            let inner_size = window.inner_size();
+            (inner_size.width, inner_size.height)
+        };
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&self.instance, &self.device);
-
         let result = swapchain_loader.acquire_next_image(
             self.data.swapchain,
-            u64::MAX,
-            self.data.image_available_semaphores[self.frame],
+            1000000000,
+            self.data.swapchain_semaphores[self.frame],
             vk::Fence::null(),
         );
 
         let image_index = match result {
             Ok((image_index, _)) => image_index as usize,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => return self.recreate_swapchain(width, height),
-            Err(e) => return Err(anyhow!(e)),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                warn!("acquire: Out of date");
+                return self.recreate_swapchain()
+            },
+            Err(e) => {
+                warn!("acquire: error");
+                return Err(anyhow!(e))
+            },
         };
 
-        let image_in_flight = self.data.images_in_flight[image_index];
-        if !image_in_flight.is_null() {
-            self.device
-                .wait_for_fences(&[image_in_flight], true, u64::MAX)?;
+        let raw_input = self.data.egui_winit.as_mut().unwrap().take_egui_input(window);
+
+        let egui::FullOutput {
+            platform_output,
+            textures_delta,
+            shapes,
+            pixels_per_point,
+            ..
+        } = self.data.egui_context.run(raw_input, |ctx| {
+            ui(ctx)
+        });
+
+        self.data.egui_winit.as_mut().unwrap().handle_platform_output(window, platform_output);
+
+        if !textures_delta.free.is_empty() {
+            self.data.egui_renderer.as_mut().unwrap().free_textures(&textures_delta.free).unwrap();
         }
 
-        self.data.images_in_flight[image_index] = in_flight_fence;
+        let graphics_queue = self.data.graphics_queue.clone();
+        let command_pool = self.data.command_pool.clone();
 
-        let mut render_passes = self.data.render_passes.clone();
-        for render_pass in render_passes.iter_mut() {
-            for subpass in render_pass.subpasses.iter_mut() {
-                subpass.update(&self.device, &mut self.data, &self.stats, image_index);
-            }
+        if !textures_delta.set.is_empty() {
+            self.data.egui_renderer.as_mut().unwrap()
+                .set_textures(graphics_queue, command_pool, &textures_delta.set)
+                .expect("Failed to update textures");
         }
-        self.data.render_passes = render_passes;
 
+        self.data.clipped_primitives = self.data.egui_context.tessellate(shapes, pixels_per_point);
+        self.data.pixels_per_point = pixels_per_point;
+
+        self.stats.cmd_buf_record_start = Instant::now();
         self.update_command_buffer(image_index)?;
+        self.stats.cmd_buf_record_time = self.stats.cmd_buf_record_start.elapsed();
 
-        let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
-        let wait_stages = &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let command_buffers = &[self.data.command_buffers[image_index]];
-        let signal_semaphores = &[self.data.render_finished_semaphores[self.frame]];
-        let submit_info = vk::SubmitInfo::default()
-            .wait_semaphores(wait_semaphores)
-            .wait_dst_stage_mask(wait_stages)
-            .command_buffers(command_buffers)
-            .signal_semaphores(signal_semaphores);
+        let command_info = [command_buffer_submit_info(&self.data.command_buffers[image_index])];
+        let wait_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::BOTTOM_OF_PIPE, &self.data.swapchain_semaphores[self.frame])];
+        let signal_semaphore_info = [semaphore_submit_info(vk::PipelineStageFlags2::ALL_GRAPHICS, &self.data.render_semaphores[image_index])];
+        
+        let submit_info = submit_info(&command_info, &signal_semaphore_info, &wait_semaphore_info);
+        
+        self.device.queue_submit2(self.data.graphics_queue, &[submit_info], render_fence)?;
 
-        self.device.reset_fences(&[in_flight_fence])?;
-
-        self.device
-            .queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
-
+        let wait_semaphores = &[self.data.render_semaphores[image_index]];
         let swapchains = &[self.data.swapchain];
         let image_indices = &[image_index as u32];
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(signal_semaphores)
+            .wait_semaphores(wait_semaphores)
             .swapchains(swapchains)
             .image_indices(image_indices);
 
         let result = swapchain_loader.queue_present(self.data.present_queue, &present_info);
-        let changed = result == Ok(true)
+        let changed = 
+            result == Ok(true)
             || result == Err(vk::Result::ERROR_OUT_OF_DATE_KHR);
 
         if self.resized || changed {
             self.resized = false;
-            self.recreate_swapchain(width, height)?;
+            self.recreate_swapchain()?;
         } else if let Err(e) = result {
             return Err(anyhow!(e));
         } else {
@@ -189,13 +264,17 @@ impl Renderer {
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
         self.stats.frame += 1;
 
-        self.stats.delta = self.stats.delda_start.elapsed();
-        self.stats.delda_start = Instant::now();
+
+        self.stats.delta = self.stats.delta_start.elapsed();
+        self.stats.delta_start = Instant::now();
 
         Ok(())
     }
 
     unsafe fn update_command_buffer(&mut self, image_index: usize) -> Result<()> {
+        self.stats.draw_calls = 0;
+        self.data.image_index = image_index;
+
         let command_pool = self.data.command_pools[image_index];
         self.device
             .reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
@@ -203,209 +282,124 @@ impl Renderer {
         let command_buffer = self.data.command_buffers[image_index];
 
         let info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE);
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         self.device.begin_command_buffer(command_buffer, &info)?;
 
-        
-        let mut render_passes = self.data.render_passes.clone();
-        for render_pass in render_passes.iter_mut() {
-
-            let render_area = vk::Rect2D::default()
-                .offset(vk::Offset2D::default())
-                .extent(Extent2D {
-                    width: render_pass.width,
-                    height: render_pass.height,
-                });
-
-            let info = vk::RenderPassBeginInfo::default()
-                .render_pass(render_pass.render_pass)
-                .framebuffer(render_pass.framebuffers[image_index])
-                .render_area(render_area)
-                .clear_values(&render_pass.clear_values);
-
-            begin_command_label(
-                &self.instance,
-                &self.device,
-                command_buffer,
-                &render_pass.name,
-                [0.0, 0.1, 0.5, 1.0],
-            );
-
-            self.device.cmd_begin_render_pass(
-                command_buffer,
-                &info,
-                vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
-            );
-
-            render_pass.subpasses.iter_mut().for_each(|s| {
-                s.record_command_buffers(&self.instance, &self.device, &self.data, render_pass.render_pass, render_pass.framebuffers[image_index], image_index)
-                    .unwrap()
-            });
-
-            for (i, render_data) in render_pass.subpasses.iter().enumerate() {
-                if i > 0 {
-                    self.device.cmd_next_subpass(
-                        command_buffer,
-                        vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
-                    );
-                }
-
-                let secondary_command_buffers = vec![render_data.command_buffers[image_index]];
-
-                begin_command_label(&self.instance, &self.device, command_buffer, "Draw Calls", [0.0, 1.0, 1.0, 1.0]);
-                self.device
-                    .cmd_execute_commands(command_buffer, &secondary_command_buffers);
-                end_command_label(&self.instance, &self.device, command_buffer);
-            }
-
-            self.device.cmd_end_render_pass(command_buffer);
-
-            end_command_label(&self.instance, &self.device, command_buffer);   
-        }
-        self.data.render_passes = render_passes;
+        let mut task_graph = self.data.task_graph.clone();
+        task_graph.execute(&self.instance, &self.device, command_buffer, &mut self.data, &mut self.stats);
+        self.data.task_graph = task_graph;
 
         self.device.end_command_buffer(command_buffer)?;
 
         Ok(())
     }
 
-    unsafe fn recreate_swapchain(&mut self, width: u32, height: u32) -> Result<()> {
+    unsafe fn recreate_swapchain(&mut self) -> Result<()> {
         self.data.recreated = true;
 
-        info!("Recreating swapchain");
+        info!("Recreating swapchain, frame: {}", self.stats.frame);
 
         self.device.device_wait_idle()?;
         self.destroy_swapchain();
 
         let old_swapchain = self.data.swapchain;
-        create_swapchain(&self._entry, &self.instance, &self.device, &mut self.data, width, height)?;
+        create_swapchain(&self._entry, &self.instance, &self.device, &mut self.data, self.width, self.height)?;
 
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
         swapchain_loader.destroy_swapchain(old_swapchain, None);
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
-        let mut render_passes = self.data.render_passes.clone();
-        for render_pass in render_passes.iter_mut() {
-            render_pass.recreate_swapchain(&self.instance, &self.device, &mut self.data)?;
-        }
-        self.data.render_passes = render_passes;
-
-        let mut objects = self.data.objects.clone();
-
-        objects
-            .iter_mut()
-            .for_each(|o| o.recreate_swapchain(&self.device, &mut self.data));
-
-        self.data.objects = objects;
-
         create_command_buffers(&self.device, &mut self.data)?;
-        self.data
-            .images_in_flight
-            .resize(self.data.swapchain_images.len(), vk::Fence::null());
+
+        let mut task_graph = self.data.task_graph.clone();
+        task_graph.recreate_swapchain(&self.instance, &self.device, &mut self.data);
+        self.data.task_graph = task_graph;
 
         Ok(())
     }
 
     unsafe fn destroy_swapchain(&mut self) {
-        let render_passes = self.data.render_passes.clone();
-        render_passes.iter().for_each(|r| r.destroy_swapchain(&self.device, &mut self.data));
-        self.data.render_passes = render_passes;
-
-        self.data
-            .objects
-            .iter()
-            .for_each(|o| o.destroy_swapchain(&self.device));
-
         self.data
             .swapchain_image_views
             .iter()
             .for_each(|v| self.device.destroy_image_view(*v, None));
     }
+}
 
-    /// This function will destroy all vulkan objects in the renderer
-    ///
-    /// # Safety
-    /// This function **MUST** be called befoore the end of the program
-    /// and **MUST** be the last function called on the renderer
-    unsafe fn destroy(&mut self) {
-        self.destroy_swapchain();
+impl<'a> Drop for Renderer<'a> {
+    fn drop(&mut self) {
+        unsafe { self.device.device_wait_idle().unwrap() };
+
+        unsafe { self.destroy_swapchain() };
+
+        let mut task_graph = self.data.task_graph.clone();
+        task_graph.destroy(&self.device);
+        self.data.task_graph = task_graph;
+
+        let mut objects = self.data.objects.clone();
+        objects.items_mut().iter_mut().for_each(|object| object.destroy(&self.device));
+        self.data.objects.clear();
+
+        let pipelines = self.data.pipelines.clone();
+        pipelines.items().iter().for_each(|(pipeline, layout)| {
+            unsafe { self.device.destroy_pipeline(*pipeline, None) };
+            unsafe { self.device.destroy_pipeline_layout(*layout, None) };
+        });
+        self.data.pipelines.clear();
+
+        let mut graphics_shaders = self.data.graphics_shaders.clone();
+        graphics_shaders.items_mut().iter_mut().for_each(|s| s.destroy(&self.device));
+        self.data.graphics_shaders.clear();
+
+        self.data.descriptor_pool.destroy(&self.device);
+        self.data.descriptor_layout_cache.destroy(&self.device);
         
         let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
-        swapchain_loader.destroy_swapchain(self.data.swapchain, None);
+        unsafe { swapchain_loader.destroy_swapchain(self.data.swapchain, None) };
         self.data
             .command_pools
             .iter()
-            .for_each(|p| self.device.destroy_command_pool(*p, None));
+            .for_each(|p| unsafe { self.device.destroy_command_pool(*p, None) });
 
-        self.device
-            .destroy_command_pool(self.data.command_pool, None);
-
-        let mut objects = self.data.objects.clone();
-        objects
-            .iter_mut()
-            .for_each(|o| o.destroy(&self.device));
-        self.data.objects = objects;
+        unsafe { self.device
+                    .destroy_command_pool(self.data.command_pool, None) };
 
         self.data
-            .shaders
+            .render_fences
             .iter()
-            .for_each(|s| s.destroy(&self.device));
+            .for_each(|f| unsafe { self.device.destroy_fence(*f, None) });
 
         self.data
-            .textures
+            .render_semaphores
             .iter()
-            .for_each(|t| t.destroy(&self.device));
+            .for_each(|s| unsafe { self.device.destroy_semaphore(*s, None) });
 
         self.data
-            .cameras
+            .swapchain_semaphores
             .iter()
-            .for_each(|c| c.destroy(&self.device));
-
-        self.data.other_descriptors.iter().for_each(|d| d.destroy(&self.device));
-
-        self.data.global_descriptor_pools.destroy(&self.device);
-        self.data.global_layout_cache.destroy(&self.device);
-
-        self.data
-            .in_flight_fences
-            .iter()
-            .for_each(|f| self.device.destroy_fence(*f, None));
-
-        self.data
-            .render_finished_semaphores
-            .iter()
-            .for_each(|s| self.device.destroy_semaphore(*s, None));
-
-        self.data
-            .image_available_semaphores
-            .iter()
-            .for_each(|s| self.device.destroy_semaphore(*s, None));
-
-        self.device.destroy_device(None);
+            .for_each(|s| unsafe { self.device.destroy_semaphore(*s, None) });
 
         let surface_loader = surface::Instance::new(&self._entry, &self.instance);
-        surface_loader.destroy_surface(self.data.surface, None);
-
+        unsafe { surface_loader.destroy_surface(self.data.surface, None) };
+        
         if VALIDATION_ENABLED {
             let debug_utils_loader = debug_utils::Instance::new(&self._entry, &self.instance);
-            debug_utils_loader.destroy_debug_utils_messenger(self.data.messenger, None);
+            unsafe { debug_utils_loader.destroy_debug_utils_messenger(self.data.messenger, None) };
         }
 
-        self.instance.destroy_instance(None);
-    }
-}
+        unsafe { ManuallyDrop::drop(&mut self.data) };
 
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        unsafe { self.destroy() };
+        unsafe { self.device.destroy_device(None) };
+        
+        unsafe { self.instance.destroy_instance(None) };
     }
 }
 
 /// The Vulkan handles and associated properties used by the Vulkan app.
-#[derive(Default, Clone)]
-pub struct RendererData {
+// #[derive(Default)]
+pub struct RendererData<'a> {
     // Debug
     pub messenger: vk::DebugUtilsMessengerEXT,
 
@@ -420,12 +414,10 @@ pub struct RendererData {
     // Swapchain
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
+    pub swapchain_rect: vk::Rect2D,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
-
-    // Pipeline
-    pub render_passes: Vec<RenderPass>,
 
     // Command Buffers
     pub command_pool: vk::CommandPool,
@@ -433,42 +425,100 @@ pub struct RendererData {
     pub command_buffers: Vec<vk::CommandBuffer>,
     pub secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
 
-    // objects
-    pub shaders: Record<Box<dyn Shader>>,
-    pub textures: Record<Image>,
-    pub point_light_data: Record<PointLight>,
-
-    pub objects: Record<Mesh>,
-    pub materials: Record<Box<dyn Material>>,
-    pub cameras: Record<Box<dyn Camera>>,
-    pub other_descriptors: Record<Box<dyn DescriptorSet>>,
-
-    pub global_descriptor_pools: DescriptorAllocator,
-    pub global_layout_cache: DescriptorLayoutCache,
-
     // Semaphores
-    pub image_available_semaphores: Vec<vk::Semaphore>,
-    pub render_finished_semaphores: Vec<vk::Semaphore>,
+    pub swapchain_semaphores: Vec<vk::Semaphore>,
+    pub render_semaphores: Vec<vk::Semaphore>,
 
     // Fences
-    pub in_flight_fences: Vec<vk::Fence>,
-    pub images_in_flight: Vec<vk::Fence>,
+    pub render_fences: Vec<vk::Fence>,
 
     // MSAA
     pub msaa_samples: vk::SampleCountFlags,
 
+    // Draw Data
+    pub objects: Collection<'a, Object<'a>>,
+    pub pipelines: Collection<'a, (vk::Pipeline, vk::PipelineLayout)>,
+    pub graphics_shaders: Collection<'a, GraphicsProgram<'a>>,
+    pub compute_shaders: Collection<'a, ComputeProgram<'a>>,
+
+    pub descriptor_pool: DescriptorAllocator,
+    pub descriptor_layout_cache: DescriptorLayoutCache,
+    pub descriptors: Collection<'a, (vk::DescriptorSet, CollectionHandle)>,
+    pub layouts: NamedVec<'a, vk::DescriptorSetLayout>,
+
+    pub image_index: usize,
+    pub task_graph: TaskGraph<'a>,
+
+    // egui
+    pub egui_renderer: Option<egui_ash_renderer::Renderer>,
+    pub egui_context: egui::Context,
+    pub egui_winit: Option<egui_winit::State>,
+    pub clipped_primitives: Vec<egui::ClippedPrimitive>,
+    pub pixels_per_point: f32,
+
     pub recreated: bool,
 }
 
-#[allow(dead_code)]
+impl<'a> Default for RendererData<'a> {
+    fn default() -> Self {
+        Self {
+            messenger: Default::default(),
+            surface: Default::default(),
+            physical_device: Default::default(),
+            graphics_queue: Default::default(),
+            present_queue: Default::default(),
+            swapchain_format: Default::default(),
+            swapchain_extent: Default::default(),
+            swapchain_rect: Default::default(),
+            swapchain: Default::default(),
+            swapchain_images: Default::default(),
+            swapchain_image_views: Default::default(),
+            command_pool: Default::default(),
+            command_pools: Default::default(),
+            command_buffers: Default::default(),
+            secondary_command_buffers: Default::default(),
+            swapchain_semaphores: Default::default(),
+            render_semaphores: Default::default(),
+            render_fences: Default::default(),
+            msaa_samples: Default::default(),
+
+            objects: Collection::new(),
+            pipelines: Collection::new(),
+            graphics_shaders: Collection::new(),
+            compute_shaders: Collection::new(),
+
+            descriptor_pool: DescriptorAllocator::new(),
+            descriptor_layout_cache: DescriptorLayoutCache::new(),
+            descriptors: Collection::new(),
+            layouts: NamedVec::new(),
+
+            image_index: Default::default(),
+            task_graph: TaskGraph::new(),
+
+            egui_renderer: Default::default(),
+            egui_context: Default::default(),
+            egui_winit: Default::default(),
+            clipped_primitives: Default::default(),
+            pixels_per_point: Default::default(),
+
+            recreated: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RenderStats {
-    start: Instant,
+    pub start: Instant,
 
-    delta: Duration,
-    delda_start: Instant,
+    pub delta: Duration,
+    delta_start: Instant,
 
-    frame: u64,
+    pub cmd_buf_record_time: Duration,
+    cmd_buf_record_start: Instant,
+
+    pub draw_calls: u64,
+
+    pub frame: u64,
 }
 
 pub fn align_string(string: &str) -> [i8; 256] {
@@ -690,13 +740,23 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
         .fill_mode_non_solid(true)
         .wide_lines(true);
 
+    let mut features1_2 = vk::PhysicalDeviceVulkan12Features::default()
+        .buffer_device_address(true)
+        .descriptor_indexing(true);
+
+    let mut features1_3 = vk::PhysicalDeviceVulkan13Features::default()
+        .dynamic_rendering(true)
+        .synchronization2(true);
+
     // Create
 
     let info = vk::DeviceCreateInfo::default()
+        .push_next(&mut features1_2)
+        .push_next(&mut features1_3)
         .queue_create_infos(&queue_infos)
         .enabled_extension_names(&extensions)
         .enabled_features(&features);
-
+    
     let device = instance.create_device(data.physical_device, &info, None)?;
 
     // Queues
@@ -766,46 +826,41 @@ unsafe fn create_sync_objects(
     instance: &Instance,
     device: &Device,
     data: &mut RendererData,
+    image_count: u32,
 ) -> Result<()> {
     let semaphore_info = vk::SemaphoreCreateInfo::default();
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
-    for i in 0..MAX_FRAMES_IN_FLIGHT {
-        let image_available_semaphor = device.create_semaphore(&semaphore_info, None)?;
+    for i in 0..image_count {
+        let swapchain_semaphore = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
             instance,
             device,
             &format!("Image Available Semaphore {}", i),
-            image_available_semaphor,
+            swapchain_semaphore,
         )?;
-        data.image_available_semaphores
-            .push(image_available_semaphor);
+        data.swapchain_semaphores
+            .push(swapchain_semaphore);
 
-        let render_finished_semaphor = device.create_semaphore(&semaphore_info, None)?;
+        let render_semaphore = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
             instance,
             device,
             &format!("Render Finished Semaphore {}", i),
-            render_finished_semaphor,
+            render_semaphore,
         )?;
-        data.render_finished_semaphores
-            .push(render_finished_semaphor);
+        data.render_semaphores
+            .push(render_semaphore);
 
-        let in_flight_fence = device.create_fence(&fence_info, None)?;
+        let render_fence = device.create_fence(&fence_info, None)?;
         set_object_name(
             instance,
             device,
             &format!("In Flight Fence {}", i),
-            in_flight_fence,
+            render_fence,
         )?;
-        data.in_flight_fences.push(in_flight_fence);
+        data.render_fences.push(render_fence);
     }
-
-    data.images_in_flight = data
-        .swapchain_images
-        .iter()
-        .map(|_| vk::Fence::null())
-        .collect();
 
     Ok(())
 }
@@ -882,6 +937,11 @@ impl SwapchainSupport {
     }
 }
 
+
+// --------------------- //
+// ----- Debugging ----- //
+// --------------------- //
+
 unsafe extern "system" fn debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     _message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -941,7 +1001,7 @@ fn set_object_name(
     Ok(())
 }
 
-fn begin_command_label(
+pub fn begin_command_label(
     instance: &Instance,
     device: &Device,
     command_buffer: vk::CommandBuffer,
@@ -950,7 +1010,7 @@ fn begin_command_label(
 ) {
     if VALIDATION_ENABLED {
         let name_string = name.to_owned() + "\0";
-        let name_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(name_string.as_bytes()) };
+        let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
             .color(colour);
@@ -960,7 +1020,7 @@ fn begin_command_label(
     }
 }
 
-fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer) {
+pub fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer) {
     if VALIDATION_ENABLED {
         let debug_device = debug_utils::Device::new(instance, device);
         unsafe { debug_device.cmd_end_debug_utils_label(command_buffer) }
@@ -969,7 +1029,7 @@ fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::C
 
 /// This will place a label for debbuging applications to display at that point
 /// If all the values in the `colour` array are 0.0 the colour wil be ignored
-fn insert_command_label(
+pub fn insert_command_label(
     instance: &Instance,
     device: &Device,
     command_buffer: vk::CommandBuffer,
@@ -978,7 +1038,7 @@ fn insert_command_label(
 ) {
     if VALIDATION_ENABLED {
         let name_string = name.to_owned() + "\0";
-        let name_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(name_string.as_bytes()) };
+        let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
             .color(colour);
@@ -1009,223 +1069,7 @@ where
     }
 }
 
-mod record {
-    use std::{ops::{Index, IndexMut}, slice::{Iter, IterMut}, vec::IntoIter};
-
-    use thiserror::Error;
-
-    pub trait Loadable {
-        fn is_loaded(&self) -> bool;
-    }
-
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct Record<T>(Vec<T>);
-
-    impl<T> Record<T>
-        where T: Loadable
-    {
-        pub fn new() -> Self {
-            Record(vec![])
-        }
-
-        pub fn from_vec(vec: Vec<T>) -> Self {
-            Record(vec)
-        }
-
-        pub fn get_loaded(&self, index: usize) -> Result<&T, RecordGetError> {
-            match self.0.get(index) {
-                Some(value) => {
-                    match value.is_loaded() {
-                        true => Ok(value),
-                        false => Err(RecordGetError::NotLoaded(index)),
-                    }
-                },
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn get_mut_loaded(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
-            match self.0.get_mut(index) {
-                Some(value) => {
-                    match value.is_loaded() {
-                        true => Ok(value),
-                        false => Err(RecordGetError::NotLoaded(index)),
-                    }
-                },
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn get(&self, index: usize) -> Result<&T, RecordGetError> {
-            match self.0.get(index) {
-                Some(value) => Ok(value),
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn get_mut(&mut self, index: usize) -> Result<&mut T, RecordGetError> {
-            match self.0.get_mut(index) {
-                Some(value) => Ok(value),
-                None => Err(RecordGetError::NotInRecord(index)),
-            }
-        }
-
-        pub fn push(&mut self, value: T) -> usize {
-            let index = self.0.len();
-            self.0.push(value);
-            index
-        }
-
-        pub fn len(&self) -> usize {
-            self.0.len()
-        }
-
-        pub fn iter(&self) -> Iter<T> {
-            self.0.iter()
-        }
-
-        pub fn iter_mut(&mut self) -> IterMut<T> {
-            self.0.iter_mut()
-        }
-    }
-
-    impl<T> Index<usize> for Record<T> 
-    where T: Loadable
-    {
-        type Output = T;
-    
-        fn index(&self, index: usize) -> &Self::Output {
-            self.get_loaded(index).unwrap()
-        }
-    }
-
-    impl<T> IndexMut<usize> for Record<T>
-    where T: Loadable
-    {
-        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-            self.get_mut_loaded(index).unwrap()
-        }
-    }
-
-    impl<T> Default for Record<T>
-    where T: Loadable
-    {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
-    impl<T> IntoIterator for Record<T> {
-        type Item = T;
-    
-        type IntoIter = IntoIter<T>;
-    
-        fn into_iter(self) -> Self::IntoIter {
-            self.0.into_iter()
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-    pub enum RecordGetError {
-        #[error("Element with index {0} is not in record")]
-        NotInRecord(usize),
-        #[error("Element with index {0} is not loaded")]
-        NotLoaded(usize),
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use crate::record::RecordGetError;
-
-        use super::{Loadable, Record};
-
-        #[derive(Debug, PartialEq)]
-        struct Value(bool);
-
-        impl Loadable for Value {
-            fn is_loaded(&self) -> bool {
-                self.0
-            }
-        }
-
-        #[test]
-        fn empty() {
-            let record: Record<Value> = Record::new();
-            assert_eq!(record, Record::<Value>(vec![]))
-        }
-
-        #[test]
-        fn push_multiple() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record, Record::<Value>(vec![
-                Value(true),
-                Value(false),
-                Value(true),
-                Value(false),
-                Value(true),
-            ]));
-        }
-
-        #[test]
-        fn get() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get_loaded(0), Result::Ok(&Value(true)));
-            assert_eq!(record.get_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
-        }
-
-        #[test]
-        fn get_mut() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get_mut_loaded(0), Result::Ok(&mut Value(true)));
-            assert_eq!(record.get_mut_loaded(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_mut_loaded(1), Result::Err(RecordGetError::NotLoaded(1)));
-        }
-
-        #[test]
-        fn get_no_check() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get(0), Result::Ok(&Value(true)));
-            assert_eq!(record.get(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get(1), Result::Ok(&Value(false)));
-        }
-
-        #[test]
-        fn get_mut_no_check() {
-            let mut record: Record<Value> = Record::new();
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-            record.push(Value(false));
-            record.push(Value(true));
-
-            assert_eq!(record.get_mut(0), Result::Ok(&mut Value(true)));
-            assert_eq!(record.get_mut(5), Result::Err(RecordGetError::NotInRecord(5)));
-            assert_eq!(record.get_mut(1), Result::Ok(&mut Value(false)));
-        }
-    }
+pub trait Vertex {
+    fn binding_descriptions() -> Vec<vk::VertexInputBindingDescription>;
+    fn attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription>;
 }

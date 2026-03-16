@@ -1,69 +1,10 @@
+use ash::vk;
+use ash::{Device, Instance};
+use anyhow::{Result, anyhow};
+
 use std::ptr::copy_nonoverlapping as memcpy;
 
-use ash::vk;
-use ash::Device;
-use ash::Instance;
-
-use anyhow::{anyhow, Result};
-
-use crate::{begin_command_label, end_command_label, set_object_name, RendererData};
-
-///
-/// # Safety
-/// the function `end_single_time_commands` must be called after this
-/// function is called
-pub unsafe fn begin_single_time_commands(
-    instance: &Instance,
-    device: &Device,
-    data: &RendererData,
-    name: &str,
-) -> Result<vk::CommandBuffer> {
-    let info = vk::CommandBufferAllocateInfo::default()
-        .level(vk::CommandBufferLevel::PRIMARY)
-        .command_pool(data.command_pool)
-        .command_buffer_count(1);
-
-    let command_buffer = device.allocate_command_buffers(&info)?[0];
-
-    let info =
-        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-    begin_command_label(instance, device, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
-    device.begin_command_buffer(command_buffer, &info)?;
-
-    Ok(command_buffer)
-}
-
-///
-/// # Safety
-/// this function **must** only be called after a call to `begin_single_time_commands`
-pub unsafe fn end_single_time_commands(
-    instance: &Instance,
-    device: &Device,
-    data: &RendererData,
-    command_buffer: vk::CommandBuffer,
-) -> Result<()> {
-    device.end_command_buffer(command_buffer)?;
-    end_command_label(instance, device, command_buffer);
-
-    let command_buffers = &[command_buffer];
-    let info = vk::SubmitInfo::default().command_buffers(command_buffers);
-
-    device.queue_submit(data.graphics_queue, &[info], vk::Fence::null())?;
-    device.queue_wait_idle(data.graphics_queue)?;
-
-    device.free_command_buffers(data.command_pool, &[command_buffer]);
-
-    Ok(())
-}
-
-pub fn execute_command<F>(instance: &Instance, device: &Device, data: &RendererData, name: &str, f: F)
-where F: FnOnce(vk::CommandBuffer)
-{
-    let command_buffer = unsafe { begin_single_time_commands(instance, device, data, name) }.unwrap();
-    f(command_buffer);
-    unsafe { end_single_time_commands(instance, device, data, command_buffer) }.unwrap();
-}
+use crate::{begin_single_time_commands, end_single_time_commands, set_object_name, RendererData};
 
 pub fn create_buffer(
     instance: &Instance,
@@ -73,13 +14,13 @@ pub fn create_buffer(
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
     name: &str,
-) -> Result<BufferWrapper> {
+) -> Result<Buffer> {
     let buffer_info = vk::BufferCreateInfo::default()
         .size(size)
         .usage(usage)
         .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-    let buffer = unsafe { device.create_buffer(&buffer_info, None)? };
+    let buffer = unsafe { device.create_buffer(&buffer_info, None) }?;
 
     let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
 
@@ -96,9 +37,10 @@ pub fn create_buffer(
 
     unsafe { device.bind_buffer_memory(buffer, buffer_memory, 0)? };
 
-    let wrapper = BufferWrapper {
+    let wrapper = Buffer {
         buffer,
         memory: buffer_memory,
+        size
     };
 
     set_object_name(
@@ -139,13 +81,12 @@ pub unsafe fn get_memory_type_index(
 }
 
 /// Copies the contents of one buffer into another buffer
-pub fn copy_buffer(
+pub fn copy_buffer_immediate(
     instance: &Instance,
     device: &Device,
-    source: vk::Buffer,
-    destination: vk::Buffer,
-    size: vk::DeviceSize,
     data: &RendererData,
+    src: &Buffer,
+    dst: &Buffer,
 ) -> Result<()> {
     unsafe {
         let command_buffer =
@@ -154,8 +95,8 @@ pub fn copy_buffer(
         let regions = vk::BufferCopy::default()
             .src_offset(0)
             .dst_offset(0)
-            .size(size);
-        device.cmd_copy_buffer(command_buffer, source, destination, &[regions]);
+            .size(src.size());
+        device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[regions]);
 
         end_single_time_commands(instance, device, data, command_buffer)?;
     }
@@ -163,16 +104,27 @@ pub fn copy_buffer(
     Ok(())
 }
 
+pub fn copy_buffer(device: &Device, command_buffer: vk::CommandBuffer, src: Buffer, dst: Buffer) {
+    let region = vk::BufferCopy::default()
+        .src_offset(0)
+        .dst_offset(0)
+        .size(src.size());
+
+    unsafe { device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[region]) };
+}
+
+/// Creates a [device local](vk::MemoryPropertyFlags::DEVICE_LOCAL) buffer and fills it with `contents`
 pub fn create_and_stage_buffer<T>(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
-    size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     name: &str,
-    bytes: &[T],
-) -> Result<BufferWrapper> {
-    let staging_buffer = create_buffer(
+    contents: &[T],
+) -> Result<Buffer> {
+    let size = size_of_val(contents) as u64;
+
+    let mut staging_buffer = create_buffer(
         instance,
         device,
         data,
@@ -180,10 +132,9 @@ pub fn create_and_stage_buffer<T>(
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
         "",
-    )
-    .unwrap();
+    )?;
 
-    staging_buffer.copy_vec_into_buffer(device, bytes);
+    staging_buffer.copy_vec_into_buffer(device, contents);
 
     let buffer = create_buffer(
         instance,
@@ -193,16 +144,14 @@ pub fn create_and_stage_buffer<T>(
         vk::BufferUsageFlags::TRANSFER_DST | usage,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
         name,
-    )
-    .unwrap();
+    )?;
 
-    copy_buffer(
+    copy_buffer_immediate(
         instance,
         device,
-        staging_buffer.buffer,
-        buffer.buffer,
-        size,
         data,
+        &staging_buffer,
+        &buffer,
     )?;
 
     staging_buffer.destroy(device);
@@ -211,20 +160,82 @@ pub fn create_and_stage_buffer<T>(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct BufferWrapper {
-    pub buffer: vk::Buffer,
-    pub memory: vk::DeviceMemory,
+pub struct Buffer {
+    buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    size: vk::DeviceSize,
 }
 
-impl BufferWrapper {
-    pub fn destroy(&self, device: &Device) {
-        unsafe {
-            device.destroy_buffer(self.buffer, None);
-            device.free_memory(self.memory, None);
-        }
+impl Buffer {
+    pub fn new(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+        name: &str
+    ) -> Self {
+        create_buffer(instance, device, data, size, usage, properties, name).unwrap()
     }
 
-    /// Copies data into the buffer, if you are trying to copy a vec use `copy_vec_into_buffer`
+    pub fn create_and_load<T>(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        contents: &[T],
+        usage: vk::BufferUsageFlags,
+        name: &str
+    ) -> Self {
+        let buffer = create_buffer(
+            instance,
+            device,
+            data,
+            size_of_val(contents) as u64,
+            usage,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            name
+        ).unwrap();
+
+        buffer.copy_vec_into_buffer(device, contents);
+
+        buffer
+    }
+
+    pub fn create_and_stage<T>(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        contents: &[T],
+        usage: vk::BufferUsageFlags,
+        name: &str
+    ) -> Self {
+        create_and_stage_buffer(instance, device, data, usage, name, contents).unwrap()
+    }
+
+    pub fn buffer(&self) -> vk::Buffer {
+        self.buffer
+    }
+
+    pub fn memory(&self) -> vk::DeviceMemory {
+        self.memory
+    }
+
+    pub fn size(&self) -> vk::DeviceSize {
+        self.size
+    }
+
+    pub fn destroy(&mut self, device: &Device) {
+        unsafe { device.destroy_buffer(self.buffer, None) };
+
+        unsafe { device.free_memory(self.memory, None) };
+
+        self.buffer = vk::Buffer::null();
+        self.memory = vk::DeviceMemory::null();
+        self.size = 0;
+    }
+
+    /// Copies data into the buffer, if you are trying to copy a vec use [`copy_vec_into_buffer()`](Buffer::copy_vec_into_buffer)
     pub fn copy_data_into_buffer<T>(&self, device: &Device, data: &T) {
         let buffer_mem =
             unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
@@ -235,7 +246,7 @@ impl BufferWrapper {
         unsafe { device.unmap_memory(self.memory) };
     }
 
-    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use `copy_vec_into_buffer_with_offset`
+    /// Copies data into the buffer with an offset in the buffer, if you are trying to copy a vec use [`copy_vec_into_buffer_with_offset()`](Buffer::copy_vec_into_buffer_with_offset)
     pub fn copy_data_into_buffer_with_offset<T>(
         &self,
         device: &Device,
@@ -276,5 +287,29 @@ impl BufferWrapper {
         unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
 
         unsafe { device.unmap_memory(self.memory) };
+    }
+
+    pub fn copy_to_buffer(&self, device: &Device, command_buffer: vk::CommandBuffer, dst: &Buffer) {
+        let region = vk::BufferCopy::default()
+            .src_offset(0)
+            .dst_offset(0)
+            .size(self.size);
+
+        unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
+    }
+
+    pub fn copy_to_buffer_immediate(&self, instance: &Instance, device: &Device, data: &RendererData, dst: &Buffer) -> Result<()> {
+        let command_buffer = unsafe { begin_single_time_commands(instance, device, data, "Copy Buffer") }?;
+        
+        let region = vk::BufferCopy::default()
+            .src_offset(0)
+            .dst_offset(0)
+            .size(self.size);
+
+        unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
+
+        unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
+
+        Ok(())
     }
 }

@@ -9,9 +9,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.92"
-glam = "0.29.0"
 ash = "0.38.0"
-shaderc = "0.8.3"
 thiserror = "1.0.67"
 tobj = { version = "4.0.2", features = ["log"] }
 tracing = "0.1.40"
@@ -20,6 +18,12 @@ image = "0.25.4"
 electrum_engine_macros = { path = "electrum_engine_macros"}
 ash-window = "0.13.0"
 raw-window-handle = "0.6.2"
+winit = "0.30.5"
+egui-winit = "0.33.0"
+egui = "0.33.0"
+egui_extras = { version = "0.33.0", features = ["all_loaders"] }
+egui-ash-renderer = { version = "0.10.0", features = ["dynamic-rendering"] }
+glam = "0.29.0"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"

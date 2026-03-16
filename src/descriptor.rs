@@ -5,33 +5,10 @@ use thiserror::Error;
 use ash::vk;
 use ash::Device;
 
-use crate::{BufferWrapper, Loadable};
+use crate::RendererData;
 
-pub trait DescriptorSet{
-    fn descriptor_sets(&self) -> Vec<vk::DescriptorSet>;
-    fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout;
-    fn buffers(&mut self) -> Vec<BufferWrapper>;
 
-    fn destroy(&self, device: &Device);
-
-    fn clone_dyn(&self) -> Box<dyn DescriptorSet>;
-
-    fn loaded(&self) -> bool;
-}
-
-impl Clone for Box<dyn DescriptorSet> {
-    fn clone(&self) -> Self {
-        self.clone_dyn()
-    }
-}
-
-impl Loadable for Box<dyn DescriptorSet> {
-    fn is_loaded(&self) -> bool {
-        self.loaded()
-    }
-}
-
-const STANDARD_SIZES: [(vk::DescriptorType, u32); 11] = [
+const STANDARD_SIZES: [(vk::DescriptorType, u32); 10] = [
     (vk::DescriptorType::SAMPLER, 1),
     (vk::DescriptorType::COMBINED_IMAGE_SAMPLER, 50),
     (vk::DescriptorType::SAMPLED_IMAGE, 1),
@@ -42,7 +19,6 @@ const STANDARD_SIZES: [(vk::DescriptorType, u32); 11] = [
     (vk::DescriptorType::STORAGE_BUFFER, 50),
     (vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC, 1),
     (vk::DescriptorType::STORAGE_BUFFER_DYNAMIC, 1),
-    (vk::DescriptorType::INPUT_ATTACHMENT, 1),
 ];
 
 #[derive(Debug, Clone)]
@@ -290,10 +266,43 @@ impl<'a> DescriptorBuilder<'a> {
 
         Ok((set, layout))
     }
+
+    pub fn build_data(&'a mut self, device: &Device, data: &mut RendererData) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
+        let layout = data.descriptor_layout_cache.create_descriptor_set_layout(device, &self.bindings);
+        let set = data.descriptor_pool.allocate(device, &layout)?;
+
+        for write in self.writes.iter_mut() {
+            write.dst_set = set;
+        }
+
+        unsafe { device.update_descriptor_sets(&self.writes, &[]) };
+
+        Ok((set, layout))
+    }
 }
 
 impl<'a> Default for DescriptorBuilder<'a> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub fn update_image_binding(device: &Device, image_info: &[vk::DescriptorImageInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
+    let write = vk::WriteDescriptorSet::default()
+        .dst_set(set)
+        .dst_binding(binding)
+        .descriptor_type(descriptor_type)
+        .image_info(image_info);
+
+    unsafe { device.update_descriptor_sets(&[write], &[]) };
+}
+
+pub fn update_buffer_binding(device: &Device, buffer_info: &[vk::DescriptorBufferInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
+    let write = vk::WriteDescriptorSet::default()
+        .dst_set(set)
+        .dst_binding(binding)
+        .descriptor_type(descriptor_type)
+        .buffer_info(buffer_info);
+
+    unsafe { device.update_descriptor_sets(&[write], &[]) };
 }
