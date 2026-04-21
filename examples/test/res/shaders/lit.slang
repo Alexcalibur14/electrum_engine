@@ -1,4 +1,3 @@
-
 struct VertexIn {
     float3 position;
     float3 normal;

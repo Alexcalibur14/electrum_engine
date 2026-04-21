@@ -31,11 +31,9 @@ use electrum_engine::model::OBJVertex;
 use electrum_engine::model::Object;
 use electrum_engine::model::basic_obj_loader;
 use electrum_engine::shader::DepthStencilData;
-use electrum_engine::shader::GraphicsProgram;
 use electrum_engine::shader::MultisampleData;
 use electrum_engine::shader::RasterizationData;
 use electrum_engine::shader::SlangShader;
-use electrum_engine::shader::create_basic_graphics_pipeline;
 use electrum_engine::shader::create_basic_slang_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
@@ -274,10 +272,10 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipelines.push(pipeline, &["main"]);
 
 
-        let mut shadow_shader = GraphicsProgram::new("Shadow", "examples/test/res/shaders/test_shadow.vert.spv");
-        shadow_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+        let mut shadow_shader = SlangShader::new("shadow", Path::new("examples/test/res/shaders/shadow.slang"));
+        shadow_shader.load_and_compile(&renderer.device);
 
-        let (shadow_pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
+        let (shadow_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
             &renderer.device,
             &shadow_shader,
@@ -307,14 +305,13 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::PrimitiveTopology::TRIANGLE_LIST,
         );
 
-        renderer.data.graphics_shaders.push(shadow_shader, &["shadow"]);
+        renderer.data.slang_shaders.push(shadow_shader, &["shadow"]);
         renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
 
-        let mut debug_shader = GraphicsProgram::new("Debug", "examples/test/res/shaders/debug.vert.spv");
-        debug_shader.set_fragment_path("examples/test/res/shaders/debug.frag.spv");
-        debug_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+        let mut debug_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/debug.slang"));
+        debug_shader.load_and_compile(&renderer.device);
 
-        let (debug_pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
+        let (debug_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
             &renderer.device,
             &debug_shader,
@@ -344,12 +341,11 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::PrimitiveTopology::LINE_LIST,
         );
 
-        renderer.data.graphics_shaders.push(debug_shader, &["debug"]);
+        renderer.data.slang_shaders.push(debug_shader, &["debug"]);
         renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
 
-        let mut cc_shader = GraphicsProgram::new("Colour Correction", "examples/test/res/shaders/colour_correction.vert.spv");
-        cc_shader.set_fragment_path("examples/test/res/shaders/colour_correction.frag.spv");
-        cc_shader.load_shader_modules_spirv(&renderer.instance, &renderer.device);
+        let mut cc_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/color_correction.slang"));
+        cc_shader.load_and_compile(&renderer.device);
 
         let levels = Levels {
             in_black: 0.0,
@@ -398,7 +394,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         cc_object.add_descriptor_set(cc_image_descriptor, "colour_correction_images");
 
-        let (cc_pipeline, layout) = create_basic_graphics_pipeline::<NullVertex>(
+        let (cc_pipeline, layout) = create_basic_slang_graphics_pipeline::<NullVertex>(
             &renderer.instance,
             &renderer.device,
             &cc_shader,
@@ -429,7 +425,7 @@ impl<'a> ApplicationHandler for App<'a> {
         );
 
         renderer.data.objects.push(cc_object, &["colour_correction"]);
-        renderer.data.graphics_shaders.push(cc_shader, &["colour_correction"]);
+        renderer.data.slang_shaders.push(cc_shader, &["colour_correction"]);
         renderer.data.pipelines.push((cc_pipeline, layout), &["colour_correction"]);
 
         self.window = Some(window);
