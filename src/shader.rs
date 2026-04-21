@@ -1,6 +1,7 @@
-use std::fs;
+use std::{ffi::CString, fs, io::Cursor, path::Path};
 
 use ash::{Device, Instance, util::read_spv, vk};
+use slang_rs::{convert::get_shader_stage, enums::CompileTarget, interfaces::{AsComponentType, GlobalSession}, structs::{SessionDesc, TargetDesc}};
 
 use crate::{Vertex, set_object_name};
 
@@ -415,6 +416,195 @@ pub fn create_compute_pipeline(
         .layout(layout);
 
     let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
+    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+
+    (pipeline, layout)
+}
+
+
+#[derive(Debug, Clone)]
+pub struct SlangShader<'a> {
+    name: &'a str,
+    path: &'a Path,
+    program: Vec<vk::PipelineShaderStageCreateInfo<'a>>,
+}
+
+impl<'a> SlangShader<'a> {
+    pub fn new(name: &'a str, path: &'a Path) -> Self {
+        SlangShader {
+            name,
+            path,
+            program: vec![],
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name
+    }
+
+    pub fn path(&self) -> &Path {
+        self.path
+    }
+
+    pub fn program(&self) -> &[vk::PipelineShaderStageCreateInfo<'a>] {
+        &self.program
+    }
+
+    pub fn load_and_compile(&mut self, device: &Device) {
+        let global_session = GlobalSession::new().expect("failed to create a global session");
+
+        let spriv_profile = global_session.find_profile("spirv_1_5");
+
+        let target = TargetDesc::default()
+            .format(CompileTarget::SPIRV)
+            .profile(spriv_profile);
+
+        let targets = [target.into()];
+        let cstring = CString::new(self.path.parent().unwrap().to_str().unwrap()).unwrap();
+        let paths = [cstring.as_ptr()];
+        let session_desc = SessionDesc::default()
+            .targets(&targets)
+            .search_paths(&paths)
+            .compiler_option_entries(&[]);
+            // .default_matrix_layout_mode(slang_rs::enums::MatrixLayoutMode::ColumnMajor);
+
+        let session = global_session.create_session(&session_desc.into()).expect("could not create session");
+
+        let module = session.load_module(self.path.file_name().unwrap().to_str().unwrap()).unwrap();
+
+        let entry_point_count = module.get_defined_entry_point_count();
+        let entry_points = (0..entry_point_count).into_iter().map(|i| module.get_defined_entry_point(i).unwrap()).collect::<Vec<_>>();
+
+        let mut components = vec![Box::new(module) as _];
+
+        entry_points.into_iter().for_each(|e| components.push(Box::new(e) as _));
+
+        let program = session.create_composite_component_type(&components).unwrap();
+
+        let linked_module = program.link().unwrap();
+
+        let program_layout = linked_module.get_layout(0).unwrap();
+        
+        let program = (0..entry_point_count).into_iter().map(|i| {
+            let ep_layout = program_layout.get_entry_point_by_index(i);
+            let stage = get_shader_stage(&ep_layout.get_stage()).unwrap();
+            
+            let blob = linked_module.get_entry_point_code(i, 0).unwrap();
+            let code = blob.as_bytes();
+
+            let mut cursor = Cursor::new(code);
+
+            let bytecode = read_spv(&mut cursor).unwrap();
+
+            let create_info = vk::ShaderModuleCreateInfo::default()
+                .code(&bytecode);
+
+            let module = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
+
+
+            vk::PipelineShaderStageCreateInfo::default()
+                .module(module)
+                .name(c"main")
+                .stage(stage)
+        }).collect::<Vec<_>>();
+
+        self.program = program;
+    }
+
+    pub fn destroy(&mut self, device: &Device) {
+        self.program.iter().for_each(|s| unsafe { device.destroy_shader_module(s.module, None) });
+        self.program.clear();
+    }
+}
+
+pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
+    instance: &Instance,
+    device: &Device,
+    program: &SlangShader,
+    rasterization_data: RasterizationData,
+    multisample_data: MultisampleData,
+    depth_stencil_data: DepthStencilData,
+    patch_control_points: u32,
+    attachment_blends: &[vk::PipelineColorBlendAttachmentState],
+    color_attachment_formats: &[vk::Format],
+    depth_attachment_format: vk::Format,
+    stencil_attachment_format: vk::Format,
+    push_constant_ranges: &[vk::PushConstantRange],
+    set_layouts: &[vk::DescriptorSetLayout],
+    topology: vk::PrimitiveTopology,
+) -> (vk::Pipeline, vk::PipelineLayout) {
+    let attribute_descriptions = V::attribute_descriptions();
+    let binding_descriptions = V::binding_descriptions();
+    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_attribute_descriptions(&attribute_descriptions)
+        .vertex_binding_descriptions(&binding_descriptions);
+
+    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
+        .primitive_restart_enable(false)
+        .topology(topology);
+
+    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
+        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
+
+    let tessellation_state = vk::PipelineTessellationStateCreateInfo::default()
+        .patch_control_points(patch_control_points);
+
+    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+        .scissor_count(1)
+        .viewport_count(1);
+
+    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
+        .depth_bias_enable(false)
+        .depth_clamp_enable(false)
+        .cull_mode(rasterization_data.cull_mode)
+        .front_face(rasterization_data.front_face)
+        .line_width(rasterization_data.line_width)
+        .polygon_mode(rasterization_data.polygon_mode)
+        .rasterizer_discard_enable(false);
+
+    let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(multisample_data.samples)
+        .sample_shading_enable(multisample_data.sample_shading_enable);
+
+    let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
+        .depth_test_enable(depth_stencil_data.depth_test_enable)
+        .depth_write_enable(depth_stencil_data.depth_write_enable)
+        .stencil_test_enable(depth_stencil_data.stencil_test_enable)
+        .depth_compare_op(depth_stencil_data.compare_op);
+
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+        .logic_op_enable(false)
+        .attachments(attachment_blends);
+
+    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
+        .push_constant_ranges(&push_constant_ranges)
+        .set_layouts(&set_layouts);
+
+    let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
+
+    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+
+    let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
+        .color_attachment_formats(color_attachment_formats)
+        .depth_attachment_format(depth_attachment_format)
+        .stencil_attachment_format(stencil_attachment_format);
+
+    let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
+        .stages(program.program())
+        .vertex_input_state(&vertex_input_state)
+        .input_assembly_state(&input_assembly_state)
+        .tessellation_state(&tessellation_state)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterization_state)
+        .multisample_state(&multisample_state)
+        .depth_stencil_state(&depth_stencil_state)
+        .color_blend_state(&color_blend_state)
+        .dynamic_state(&dynamic_state)
+        .layout(layout)
+        .push_next(&mut pipeline_info2);
+
+    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
+
     set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
 
     (pipeline, layout)

@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::ops::RangeInclusive;
+use std::path::Path;
 
 use ash::Device;
 use ash::Instance;
@@ -33,7 +34,9 @@ use electrum_engine::shader::DepthStencilData;
 use electrum_engine::shader::GraphicsProgram;
 use electrum_engine::shader::MultisampleData;
 use electrum_engine::shader::RasterizationData;
+use electrum_engine::shader::SlangShader;
 use electrum_engine::shader::create_basic_graphics_pipeline;
+use electrum_engine::shader::create_basic_slang_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
 use electrum_engine::Vertex;
@@ -87,16 +90,15 @@ impl<'a> ApplicationHandler for App<'a> {
 
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
+        let mut main_shader = SlangShader::new("lit", Path::new("examples/test/res/shaders/lit.slang"));
+        main_shader.load_and_compile(&renderer.device);
+
         let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
 
         let view = Mat4::look_at_rh(vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
         let camera = SimpleCamera::new_view(&renderer.instance, &renderer.device, &mut renderer.data, view, projection);
 
         self.camera = camera;
-
-        let mut program = GraphicsProgram::new("test", "examples/test/res/shaders/test.vert.spv");
-        program.set_fragment_path("examples/test/res/shaders/test.frag.spv");
-        program.load_shader_modules_spirv(&renderer.instance, &renderer.device);
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.5, 0.0));
         let model_data = ModelData {
@@ -238,10 +240,10 @@ impl<'a> ApplicationHandler for App<'a> {
         light_object.add_descriptor_set(light_camera_descriptor, "camera_data");
 
 
-        let (pipeline, layout) = create_basic_graphics_pipeline::<OBJVertex>(
+        let pipeline = create_basic_slang_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
             &renderer.device,
-            &program,
+            &main_shader,
             RasterizationData {
                 cull_mode: vk::CullModeFlags::BACK,
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -264,12 +266,12 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[*renderer.data.layouts.get("main_camera"), object_layout, material_layout, *renderer.data.layouts.get("light_data"), shadow_map_layout, light_camera_layout],
+            &[shadow_map_layout, *renderer.data.layouts.get("main_camera"), object_layout, light_camera_layout, *renderer.data.layouts.get("light_data"), material_layout],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
-        renderer.data.graphics_shaders.push(program, &["main"]);
-        renderer.data.pipelines.push((pipeline, layout), &["main"]);
+        renderer.data.slang_shaders.push(main_shader, &["main"]);
+        renderer.data.pipelines.push(pipeline, &["main"]);
 
 
         let mut shadow_shader = GraphicsProgram::new("Shadow", "examples/test/res/shaders/test_shadow.vert.spv");
@@ -813,16 +815,16 @@ impl Task for MainDraw {
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
 
         let camera = data.objects.get_with_tag("main_camera")[0];
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*camera.get_descriptor_set("camera_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*camera.get_descriptor_set("camera_data")], &[]) };
 
         let light = data.objects.get_with_tag("light")[0];
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 3, &[*light.get_descriptor_set("light_data")], &[]) };
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 4, &[*light.get_descriptor_set("shadow_map")], &[]) };
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 5, &[*light.get_descriptor_set("camera_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*light.get_descriptor_set("shadow_map")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 3, &[*light.get_descriptor_set("camera_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 4, &[*light.get_descriptor_set("light_data")], &[]) };
 
         data.objects.get_with_tag("main").iter().for_each(|object| {
-            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
-            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 2, &[*object.get_descriptor_set("material")], &[]) };
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 2, &[*object.get_descriptor_set("mvp")], &[]) };
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 5, &[*object.get_descriptor_set("material")], &[]) };
             
             object.mesh_data().bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };

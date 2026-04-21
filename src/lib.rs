@@ -43,7 +43,7 @@ use resources::Handle as CollectionHandle;
 use crate::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
 use crate::model::Object;
 use crate::resources::{Collection, NamedVec};
-use crate::shader::{ComputeProgram, GraphicsProgram};
+use crate::shader::{ComputeProgram, GraphicsProgram, SlangShader};
 
 /// Whether the validation layers should be enabled.
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -353,6 +353,10 @@ impl<'a> Drop for Renderer<'a> {
         graphics_shaders.items_mut().iter_mut().for_each(|s| s.destroy(&self.device));
         self.data.graphics_shaders.clear();
 
+        let mut slang_shaders = self.data.slang_shaders.clone();
+        slang_shaders.items_mut().iter_mut().for_each(|s| s.destroy(&self.device));
+        self.data.slang_shaders.clear();
+
         self.data.descriptor_pool.destroy(&self.device);
         self.data.descriptor_layout_cache.destroy(&self.device);
         
@@ -441,6 +445,8 @@ pub struct RendererData<'a> {
     pub graphics_shaders: Collection<'a, GraphicsProgram<'a>>,
     pub compute_shaders: Collection<'a, ComputeProgram<'a>>,
 
+    pub slang_shaders: Collection<'a, SlangShader<'a>>,
+
     pub descriptor_pool: DescriptorAllocator,
     pub descriptor_layout_cache: DescriptorLayoutCache,
     pub descriptors: Collection<'a, (vk::DescriptorSet, CollectionHandle)>,
@@ -486,6 +492,8 @@ impl<'a> Default for RendererData<'a> {
             pipelines: Collection::new(),
             graphics_shaders: Collection::new(),
             compute_shaders: Collection::new(),
+
+            slang_shaders: Collection::new(),
 
             descriptor_pool: DescriptorAllocator::new(),
             descriptor_layout_cache: DescriptorLayoutCache::new(),
