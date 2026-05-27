@@ -4,7 +4,7 @@ struct VertexOut {
 }
 
 [shader("vertex")]
-VertexOut main(uint vertex_id: SV_VulkanVertexID) {
+VertexOut frag(uint vertex_id: SV_VulkanVertexID) {
     static const float2 positions[3] = float2[](
         float2(-1.0, -1.0),
         float2(-1.0, 3.0),
@@ -31,14 +31,18 @@ struct ColorCorrectionData {
     float hue_shift;
 }
 
+struct InTexture {
+    Sampler2D<float4> in_texture;
+}
+
 [shader("fragment")]
-float4 main(
+float4 frag(
     VertexOut vs_out,
     ParameterBlock<ColorCorrectionData> color_correction_data,
-    Sampler2D<float4> in_texture,
+    ParameterBlock<InTexture> in_texture,
 ) : SV_Target {
     float2 uv = (vs_out.frag_position + 1.0) / 2.0;
-    float3 in_color = in_texture.Sample(uv).rgb;
+    float3 in_color = in_texture.in_texture.Sample(uv).rgb;
 
     float3 mapped = claculate_levels(in_color, color_correction_data.levels);
 

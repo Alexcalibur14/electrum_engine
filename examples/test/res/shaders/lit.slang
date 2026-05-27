@@ -51,7 +51,7 @@ struct ShadowMap {
 ParameterBlock<CameraData> camera_data;
 
 [shader("vertex")]
-VertexOut main(
+VertexOut vert(
     VertexIn vs_in,
     ParameterBlock<ObjectData> object_data,
     ParameterBlock<LightCameraData> light_camera,
@@ -72,7 +72,7 @@ VertexOut main(
 
 
 [shader("fragment")]
-float4 main(
+float4 frag(
     VertexOut frag_in,
     ParameterBlock<LightData> light,
     ParameterBlock<MaterialData> material,

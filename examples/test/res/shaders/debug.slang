@@ -21,14 +21,22 @@ struct ObjectData {
     float4x4 normal;
 }
 
+ParameterBlock<CameraData> camera_data;
+
 [shader("vertex")]
-VertexOut main(
+VertexOut vert(
     VertexIn vs_in,
-    ParameterBlock<CameraData> camera_data,
     ParameterBlock<ObjectData> object_data,
 ) {
     VertexOut vs_out;
     vs_out.position = mul(mul(mul(float4(vs_in.position, 1.0), object_data.model), camera_data.view), camera_data.projection);
     vs_out.color = vs_in.color;
     return vs_out;
+}
+
+[shader("fragment")]
+float4 frag(
+    VertexOut frag_in,
+) : SV_Target {
+    return float4(frag_in.color, 1.0);
 }

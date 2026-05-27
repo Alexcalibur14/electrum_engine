@@ -17,10 +17,10 @@ struct ObjectData {
 }
 
 [shader("vertex")]
-float4 main(
+float4 vert(
     VertexIn vs_in,
-    ParameterBlock<CameraData> camera_data,
+    ParameterBlock<CameraData> light_camera_data,
     ParameterBlock<ObjectData> object_data,
 ) : SV_Position {
-    return mul(mul(mul(float4(vs_in.position, 1.0), object_data.model), camera_data.view), camera_data.projection);
+    return mul(mul(mul(float4(vs_in.position, 1.0), object_data.model), light_camera_data.view), light_camera_data.projection);
 }

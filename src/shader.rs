@@ -1,9 +1,9 @@
 use std::{ffi::CString, fs, io::Cursor, path::Path};
 
 use ash::{Device, Instance, util::read_spv, vk};
-use slang_rs::{convert::get_shader_stage, enums::CompileTarget, interfaces::{AsComponentType, GlobalSession}, structs::{SessionDesc, TargetDesc}};
+use slang_rs::{convert::{get_descriptor_type, get_shader_stage}, enums::{CompileTarget, TypeKind}, interfaces::{AsComponentType, GlobalSession}, structs::{SessionDesc, TargetDesc}};
 
-use crate::{Vertex, set_object_name};
+use crate::{RendererData, Vertex, set_object_name};
 
 #[derive(Debug, Clone)]
 pub struct GraphicsProgram<'a> {
@@ -427,6 +427,7 @@ pub struct SlangShader<'a> {
     name: &'a str,
     path: &'a Path,
     program: Vec<vk::PipelineShaderStageCreateInfo<'a>>,
+    set_layouts: Vec<vk::DescriptorSetLayout>,
 }
 
 impl<'a> SlangShader<'a> {
@@ -435,6 +436,7 @@ impl<'a> SlangShader<'a> {
             name,
             path,
             program: vec![],
+            set_layouts: vec![],
         }
     }
 
@@ -450,7 +452,11 @@ impl<'a> SlangShader<'a> {
         &self.program
     }
 
-    pub fn load_and_compile(&mut self, device: &Device) {
+    pub fn layout(&self) -> &[vk::DescriptorSetLayout] {
+        &self.set_layouts
+    }
+
+    pub fn load_and_compile(&mut self, device: &Device, data: &mut RendererData) {
         let global_session = GlobalSession::new().expect("failed to create a global session");
 
         let spriv_profile = global_session.find_profile("spirv_1_5");
@@ -466,7 +472,6 @@ impl<'a> SlangShader<'a> {
             .targets(&targets)
             .search_paths(&paths)
             .compiler_option_entries(&[]);
-            // .default_matrix_layout_mode(slang_rs::enums::MatrixLayoutMode::ColumnMajor);
 
         let session = global_session.create_session(&session_desc.into()).expect("could not create session");
 
@@ -484,10 +489,14 @@ impl<'a> SlangShader<'a> {
         let linked_module = program.link().unwrap();
 
         let program_layout = linked_module.get_layout(0).unwrap();
+
+        // let mut stages = vk::ShaderStageFlags::empty();
         
         let program = (0..entry_point_count).into_iter().map(|i| {
             let ep_layout = program_layout.get_entry_point_by_index(i);
             let stage = get_shader_stage(&ep_layout.get_stage()).unwrap();
+
+            // stages |= stage;
             
             let blob = linked_module.get_entry_point_code(i, 0).unwrap();
             let code = blob.as_bytes();
@@ -508,7 +517,96 @@ impl<'a> SlangShader<'a> {
                 .stage(stage)
         }).collect::<Vec<_>>();
 
+        let mut layouts = vec![];
+
+        for global_index in 0..program_layout.get_parameter_count() {
+            let param_type_layout = program_layout.get_parameter_by_index(global_index).get_type_layout();
+            let element_type_layout = param_type_layout.get_element_type_layout();
+
+            let descriptor_type = get_descriptor_type(&element_type_layout.get_type()).unwrap();
+
+            let binding = vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(descriptor_type)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::ALL_GRAPHICS);
+
+            layouts.push(data.descriptor_layout_cache.create_descriptor_set_layout(device, &[binding]));
+        }
+
+        for entry_point_index in 0..program_layout.get_entry_point_count() {
+            let entry_point = program_layout.get_entry_point_by_index(entry_point_index);
+            
+            let stage = get_shader_stage(&entry_point.get_stage()).unwrap();
+
+            let param_count = entry_point.get_parameter_count();
+
+            for p in 0..param_count {
+                let param = entry_point.get_parameter_by_index(p);
+                let param_type_layout = param.get_type_layout();
+
+                if param_type_layout.get_kind() != TypeKind::ParameterBlock {
+                    continue;
+                }
+
+                let element_type_layout = param_type_layout.get_element_type_layout();
+
+                let mut bindings = vec![];
+
+                if element_type_layout.get_kind() == TypeKind::Struct {
+                    let field_count = element_type_layout.get_field_count();
+                    let mut is_prev_regular = false;
+
+                    let mut binding = 0;
+
+                    for field in 0..field_count {
+                        let field_var_layout = element_type_layout.get_field_by_index(field);
+        
+                        let kind = field_var_layout.get_type_layout().get_kind();
+                        let type_refl = field_var_layout.get_type_layout().get_type();
+        
+                        let descriptor_type = get_descriptor_type(&type_refl).unwrap();
+
+                        if kind != TypeKind::Resource && !is_prev_regular {
+                            bindings.push(
+                                vk::DescriptorSetLayoutBinding::default()
+                                    .binding(binding)
+                                    .descriptor_type(descriptor_type)
+                                    .descriptor_count(1)
+                                    .stage_flags(stage)
+                            );
+                            is_prev_regular = true;
+                            binding += 1;
+                        } else if kind == TypeKind::Resource {
+                            bindings.push(
+                                vk::DescriptorSetLayoutBinding::default()
+                                    .binding(binding)
+                                    .descriptor_type(descriptor_type)
+                                    .descriptor_count(1)
+                                    .stage_flags(stage)
+                            );
+                            is_prev_regular = false;
+                            binding += 1;
+                        }
+                    }
+                } else {
+                    let descriptor_type = get_descriptor_type(&element_type_layout.get_type()).unwrap();
+
+                    bindings.push(
+                        vk::DescriptorSetLayoutBinding::default()
+                            .binding(0)
+                            .descriptor_type(descriptor_type)
+                            .descriptor_count(1)
+                            .stage_flags(stage)
+                    );
+                }
+
+                layouts.push(data.descriptor_layout_cache.create_descriptor_set_layout(device, &bindings));
+            }
+        }
+
         self.program = program;
+        self.set_layouts = layouts;
     }
 
     pub fn destroy(&mut self, device: &Device) {
@@ -530,7 +628,6 @@ pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
     depth_attachment_format: vk::Format,
     stencil_attachment_format: vk::Format,
     push_constant_ranges: &[vk::PushConstantRange],
-    set_layouts: &[vk::DescriptorSetLayout],
     topology: vk::PrimitiveTopology,
 ) -> (vk::Pipeline, vk::PipelineLayout) {
     let attribute_descriptions = V::attribute_descriptions();
@@ -578,7 +675,7 @@ pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
 
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
         .push_constant_ranges(&push_constant_ranges)
-        .set_layouts(&set_layouts);
+        .set_layouts(program.layout());
 
     let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
 

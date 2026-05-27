@@ -89,7 +89,7 @@ impl<'a> ApplicationHandler for App<'a> {
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
         let mut main_shader = SlangShader::new("lit", Path::new("examples/test/res/shaders/lit.slang"));
-        main_shader.load_and_compile(&renderer.device);
+        main_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
 
@@ -159,7 +159,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .range(object_buffer.size())
         ];
 
-        let (object_descriptor, object_layout) = DescriptorBuilder::new()
+        let (object_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
@@ -177,7 +177,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .range(material_buffer.size())
         ];
 
-        let (material_descriptor, material_layout) = DescriptorBuilder::new()
+        let (material_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
@@ -209,7 +209,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .image_view(depth_image.image().view())
                 .sampler(depth_image.image().sampler().unwrap())
         ];
-        let (shadow_map_descriptor, shadow_map_layout) = DescriptorBuilder::new()
+        let (shadow_map_descriptor, _) = DescriptorBuilder::new()
             .bind_image(0, 1, image_info, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
         
@@ -229,7 +229,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .offset(0)
                 .range(light_camera_buffer.size())
         ];
-        let (light_camera_descriptor, light_camera_layout) = DescriptorBuilder::new()
+        let (light_camera_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
@@ -264,7 +264,6 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[*renderer.data.layouts.get("main_camera"), object_layout, light_camera_layout, *renderer.data.layouts.get("light_data"), material_layout, shadow_map_layout],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
@@ -272,7 +271,7 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipelines.push(pipeline, &["main"]);
 
         let mut shadow_shader = SlangShader::new("shadow", Path::new("examples/test/res/shaders/shadow.slang"));
-        shadow_shader.load_and_compile(&renderer.device);
+        shadow_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let (shadow_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
@@ -300,7 +299,6 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[light_camera_layout, object_layout],
             vk::PrimitiveTopology::TRIANGLE_LIST,
         );
 
@@ -308,7 +306,7 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
 
         let mut debug_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/debug.slang"));
-        debug_shader.load_and_compile(&renderer.device);
+        debug_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let (debug_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
             &renderer.instance,
@@ -336,7 +334,6 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::UNDEFINED,
             vk::Format::UNDEFINED,
             &[],
-            &[*renderer.data.layouts.get("main_camera"), object_layout],
             vk::PrimitiveTopology::LINE_LIST,
         );
 
@@ -344,7 +341,7 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
 
         let mut cc_shader = SlangShader::new("color_correction", Path::new("examples/test/res/shaders/color_correction.slang"));
-        cc_shader.load_and_compile(&renderer.device);
+        cc_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let levels = Levels {
             in_black: 0.0,
@@ -366,7 +363,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .offset(0)
                 .range(cc_buffer.size())
         ];
-        let (cc_descriptor, cc_layout) = DescriptorBuilder::new()
+        let (cc_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
@@ -376,7 +373,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let (main_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "color_attachment").unwrap();
 
-        let (cc_image_descriptor, cc_image_layout) = DescriptorBuilder::new()
+        let (cc_image_descriptor, _) = DescriptorBuilder::new()
             .bind_image(
                 0,
                 1,
@@ -419,7 +416,6 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::UNDEFINED,
             vk::Format::UNDEFINED,
             &[],
-            &[cc_image_layout, cc_layout],
             vk::PrimitiveTopology::TRIANGLE_LIST,
         );
 
@@ -892,8 +888,8 @@ impl Task for ColourCorrectionPass {
                 *pipeline_layout,
                 0,
                 &[
+                    *object.get_descriptor_set("colour_correction_data"),
                     *object.get_descriptor_set("colour_correction_images"),
-                    *object.get_descriptor_set("colour_correction_data")
                 ],
                 &[],
             ) 
