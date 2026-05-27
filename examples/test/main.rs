@@ -264,13 +264,12 @@ impl<'a> ApplicationHandler for App<'a> {
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
             &[],
-            &[shadow_map_layout, *renderer.data.layouts.get("main_camera"), object_layout, light_camera_layout, *renderer.data.layouts.get("light_data"), material_layout],
+            &[*renderer.data.layouts.get("main_camera"), object_layout, light_camera_layout, *renderer.data.layouts.get("light_data"), material_layout, shadow_map_layout],
             vk::PrimitiveTopology::TRIANGLE_LIST
         );
 
         renderer.data.slang_shaders.push(main_shader, &["main"]);
         renderer.data.pipelines.push(pipeline, &["main"]);
-
 
         let mut shadow_shader = SlangShader::new("shadow", Path::new("examples/test/res/shaders/shadow.slang"));
         shadow_shader.load_and_compile(&renderer.device);
@@ -344,7 +343,7 @@ impl<'a> ApplicationHandler for App<'a> {
         renderer.data.slang_shaders.push(debug_shader, &["debug"]);
         renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
 
-        let mut cc_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/color_correction.slang"));
+        let mut cc_shader = SlangShader::new("color_correction", Path::new("examples/test/res/shaders/color_correction.slang"));
         cc_shader.load_and_compile(&renderer.device);
 
         let levels = Levels {
@@ -811,16 +810,16 @@ impl Task for MainDraw {
         unsafe { device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline) };
 
         let camera = data.objects.get_with_tag("main_camera")[0];
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*camera.get_descriptor_set("camera_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*camera.get_descriptor_set("camera_data")], &[]) };
 
         let light = data.objects.get_with_tag("light")[0];
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 0, &[*light.get_descriptor_set("shadow_map")], &[]) };
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 3, &[*light.get_descriptor_set("camera_data")], &[]) };
-        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 4, &[*light.get_descriptor_set("light_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 5, &[*light.get_descriptor_set("shadow_map")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 2, &[*light.get_descriptor_set("camera_data")], &[]) };
+        unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 3, &[*light.get_descriptor_set("light_data")], &[]) };
 
         data.objects.get_with_tag("main").iter().for_each(|object| {
-            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 2, &[*object.get_descriptor_set("mvp")], &[]) };
-            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 5, &[*object.get_descriptor_set("material")], &[]) };
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 1, &[*object.get_descriptor_set("mvp")], &[]) };
+            unsafe { device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline_layout, 4, &[*object.get_descriptor_set("material")], &[]) };
             
             object.mesh_data().bind_buffers(device, command_buffer);
             unsafe { device.cmd_draw_indexed(command_buffer, object.mesh_data().index_len(), object.mesh_data().instance_len(), 0, 0, 0) };

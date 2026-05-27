@@ -44,6 +44,10 @@ struct LightData {
     float3 color;
 }
 
+struct ShadowMap {
+    Sampler2DShadow shadow_map;
+}
+
 ParameterBlock<CameraData> camera_data;
 
 [shader("vertex")]
@@ -72,7 +76,7 @@ float4 main(
     VertexOut frag_in,
     ParameterBlock<LightData> light,
     ParameterBlock<MaterialData> material,
-    Sampler2DShadow shadow_map,
+    ParameterBlock<ShadowMap> shadow_map,
 ) : SV_Target {
     float light_distance = distance(light.position, frag_in.frag_position);
     float attenuation = 1.0 / pow(light_distance, 2.0);
@@ -91,7 +95,7 @@ float4 main(
     float specular_strength = pow(max(dot(frag_in.normal, half_dir), 0.0), 32);
     float3 specular_color = specular_strength * material.specular * light.color;
 
-    float shadow = get_shadow(shadow_map, frag_in.light_space_vert, frag_in.normal, light.direction);
+    float shadow = get_shadow(shadow_map.shadow_map, frag_in.light_space_vert, frag_in.normal, light.direction);
 
     return float4(material.color * (ambiant_color + (diffuse_color + specular_color) * shadow) * light.strength * attenuation, 1.0);
 }
