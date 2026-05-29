@@ -1,19 +1,10 @@
+import common;
+
 struct VertexIn {
     float3 position;
     float3 normal;
     float3 color;
     float2 uv;
-}
-
-struct CameraData {
-    float4x4 view;
-    float4x4 projection;
-    float3 position;
-}
-
-struct ObjectData {
-    float4x4 model;
-    float4x4 normal;
 }
 
 [shader("vertex")]

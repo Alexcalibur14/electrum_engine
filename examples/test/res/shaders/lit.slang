@@ -1,3 +1,5 @@
+import common;
+
 struct VertexIn {
     float3 position;
     float3 normal;
@@ -12,36 +14,6 @@ struct VertexOut {
     float3 color;
     float2 uv;
     float4 light_space_vert;
-}
-
-struct CameraData {
-    float4x4 view;
-    float4x4 projection;
-    float3 position;
-}
-
-struct ObjectData {
-    float4x4 model;
-    float4x4 normal;
-}
-
-struct MaterialData {
-    float3 color;
-    float specular;
-}
-
-struct LightCameraData {
-    float4x4 view;
-    float4x4 projection;
-    float3 position;
-}
-
-struct LightData {
-    float3 position;
-    float strength;
-    float3 direction;
-    int light_type;
-    float3 color;
 }
 
 struct ShadowMap {

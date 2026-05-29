@@ -1,3 +1,5 @@
+import common;
+
 struct VertexIn {
     float3 position;
     float3 normal;
@@ -8,17 +10,6 @@ struct VertexIn {
 struct VertexOut {
     float4 position : SV_Position;
     float3 color;
-}
-
-struct CameraData {
-    float4x4 view;
-    float4x4 projection;
-    float3 position;
-}
-
-struct ObjectData {
-    float4x4 model;
-    float4x4 normal;
 }
 
 ParameterBlock<CameraData> camera_data;
