@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use syn::{DeriveInput, Item, Type};
+use syn::{DeriveInput, Ident, Item, Type};
 
 #[proc_macro_derive(Vertex, attributes(vertex))]
 pub fn vertex_derive_macro(item: TokenStream) -> TokenStream {
@@ -17,7 +17,9 @@ fn vertex_derive_macro2(
 }
 
 fn impl_vertex_trait(mut ast: DeriveInput) -> proc_macro2::TokenStream {
-    let VertexStructAttributes { binding } = deluxe::extract_attributes(&mut ast).unwrap();
+    let VertexStructAttributes { binding, input_rate } = deluxe::extract_attributes(&mut ast).unwrap();
+
+    let input_rate = syn::parse_str::<Ident>(&input_rate).unwrap();
 
     let (field_bindings, field_formats) = extract_field_attributes(&mut ast);
 
@@ -55,7 +57,7 @@ fn impl_vertex_trait(mut ast: DeriveInput) -> proc_macro2::TokenStream {
                     ash::vk::VertexInputBindingDescription {
                         binding: #binding,
                         stride: std::mem::size_of::<#ident>() as u32,
-                        input_rate: ash::vk::VertexInputRate::VERTEX,
+                        input_rate: ash::vk::VertexInputRate::#input_rate,
                     }
                 ]
             }
@@ -97,6 +99,8 @@ fn extract_field_attributes(ast: &mut DeriveInput) -> (Vec<u32>, Vec<Item>) {
 struct VertexStructAttributes {
     #[deluxe(default = 0)]
     binding: u32,
+    #[deluxe(default = String::from("VERTEX"))]
+    input_rate: String,
 }
 
 #[derive(deluxe::ExtractAttributes)]

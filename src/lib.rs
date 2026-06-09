@@ -748,6 +748,9 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
         .fill_mode_non_solid(true)
         .wide_lines(true);
 
+    let mut features1_1 = vk::PhysicalDeviceVulkan11Features::default()
+        .shader_draw_parameters(true);
+
     let mut features1_2 = vk::PhysicalDeviceVulkan12Features::default()
         .buffer_device_address(true)
         .descriptor_indexing(true);
@@ -759,6 +762,7 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
     // Create
 
     let info = vk::DeviceCreateInfo::default()
+        .push_next(&mut features1_1)
         .push_next(&mut features1_2)
         .push_next(&mut features1_3)
         .queue_create_infos(&queue_infos)
