@@ -135,7 +135,7 @@ impl SimpleCamera {
     pub fn rebuild(&mut self, device: &Device, data: &RendererData) {
         let camera_object = data.objects.get(&self.object_handle).unwrap();
 
-        camera_object.buffers().get("camera_data").copy_data_into_buffer(
+        camera_object.buffers().get("camera_data").unwrap().copy_data_into_buffer(
             device,
             &CameraData {
                 view: self.view,

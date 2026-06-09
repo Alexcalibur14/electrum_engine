@@ -46,18 +46,18 @@ impl<'a, T> Collection<'a, T> {
     }
 
     pub fn get(&self, handle: &Handle) -> Option<&T> {
-        self.items.get(self.get_index_from_handle(handle).unwrap())
+        self.items.get(self.get_index_from_handle(handle)?)
     }
 
     pub fn get_mut(&mut self, handle: &Handle) -> Option<&mut T> {
-        let index = self.get_index_from_handle(handle).unwrap();
+        let index = self.get_index_from_handle(handle)?;
         self.items.get_mut(index)
     }
 
     pub fn get_with_tag(&self, tag: &str) -> Vec<&T> {
         self.tags.iter().enumerate().filter_map(|(index, tags)| {
             if tags.contains(&tag) {
-                Some(self.items.get(index).unwrap())
+                self.items.get(index)
             } else {
                 None
             }
@@ -76,7 +76,7 @@ impl<'a, T> Collection<'a, T> {
     }
 
     pub fn remove(&mut self, handle: &Handle) {
-        let index = self.get_index_from_handle(handle).unwrap();
+        let index = self.get_index_from_handle(handle).expect("could not get index");
 
         self.items.swap_remove(index);
         self.ids.swap_remove(index);
@@ -122,19 +122,19 @@ impl<'a, T> NamedVec<'a, T> {
     }
 
     pub fn remove(&mut self, name: &str) -> T {
-        let index = self.names.iter().position(|n| *n == name).unwrap();
+        let index = self.names.iter().position(|n| *n == name).expect("could not find item position");
         self.names.swap_remove(index);
         self.items.swap_remove(index)
     }
 
-    pub fn get(&self, name: &str) -> &T {
-        let index = self.names.iter().position(|n| *n == name).unwrap();
-        self.items.get(index).unwrap()
+    pub fn get(&self, name: &str) -> Option<&T> {
+        let index = self.names.iter().position(|n| *n == name)?;
+        Some(self.items.get(index)?)
     }
 
-    pub fn get_mut(&mut self, name: &str) -> &mut T {
-        let index = self.names.iter().position(|n| *n == name).unwrap();
-        self.items.get_mut(index).unwrap()
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut T> {
+        let index = self.names.iter().position(|n| *n == name)?;
+        Some(self.items.get_mut(index)?)
     }
 
     pub fn items(&self) -> &[T] {

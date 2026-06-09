@@ -300,15 +300,15 @@ impl<'a> Object<'a> {
     }
 
     pub fn get_buffer(&self, name: &'a str) -> &Buffer {
-        self.buffers.get(name)
+        self.buffers.get(name).unwrap()
     }
 
     pub fn get_image(&self, name: &'a str) -> &Image {
-        self.images.get(name)
+        self.images.get(name).unwrap()
     }
 
     pub fn get_descriptor_set(&self, name: &'a str) -> &vk::DescriptorSet {
-        self.descriptor_sets.get(name)
+        self.descriptor_sets.get(name).unwrap()
     }
 }
 
@@ -327,7 +327,7 @@ impl<'a> Object<'a> {
     }
 
     pub fn replace_descriptor_set(&mut self, descriptor_set: vk::DescriptorSet, name: &'a str) {
-        *self.descriptor_sets.get_mut(name) = descriptor_set;
+        *self.descriptor_sets.get_mut(name).unwrap() = descriptor_set;
     }
 
     pub fn create_buffer_host(&mut self, instance: &Instance, device: &Device, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
