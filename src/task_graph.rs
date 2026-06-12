@@ -628,6 +628,39 @@ impl AccessType {
         }
     }
 
+    // ----- Compute ----- //
+    pub fn compute_shader_uniform_read() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access_mask: vk::AccessFlags2::UNIFORM_READ,
+            image_layout: vk::ImageLayout::UNDEFINED,
+        }
+    }
+    
+    pub fn compute_shader_sampled_read() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access_mask: vk::AccessFlags2::SHADER_SAMPLED_READ,
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        }
+    }
+    
+    pub fn compute_shader_storage_read() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access_mask: vk::AccessFlags2::SHADER_STORAGE_READ,
+            image_layout: vk::ImageLayout::GENERAL,
+        }
+    }
+    
+    pub fn compute_shader_storage_write() -> Self {
+        AccessType {
+            pipeline_stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            image_layout: vk::ImageLayout::GENERAL,
+        }
+    }
+
     /// Swapchain final layout
     pub fn present_src() -> Self {
         AccessType {
