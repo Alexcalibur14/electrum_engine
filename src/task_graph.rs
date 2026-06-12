@@ -223,6 +223,7 @@ impl<'a> TaskGraph<'a> {
                         .dst_access_mask(dst_access.access_mask)
                         .src_stage_mask(src_access.pipeline_stage)
                         .dst_stage_mask(dst_access.pipeline_stage)
+                        .size(buffer.size())
                 );
             });
 
