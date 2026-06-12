@@ -800,3 +800,27 @@ pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
     (pipeline, layout)
 }
 
+pub fn create_slang_compute_pipeline_descr(
+    instance: &Instance,
+    device: &Device,
+    program: &SlangShader,
+    push_constant_ranges: &[vk::PushConstantRange],
+    set_layouts: &[vk::DescriptorSetLayout],
+) -> (vk::Pipeline, vk::PipelineLayout) {
+
+    let layout_create_info = vk::PipelineLayoutCreateInfo::default()
+        .set_layouts(set_layouts)
+        .push_constant_ranges(push_constant_ranges);
+
+    let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
+    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+
+    let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
+        .stage(program.program()[0])
+        .layout(layout);
+
+    let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
+    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+
+    (pipeline, layout)
+}
