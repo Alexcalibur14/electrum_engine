@@ -741,12 +741,12 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
         .collect::<Vec<_>>();
 
     // Features
-
-    // change this for other features
     let features = vk::PhysicalDeviceFeatures::default()
         .sampler_anisotropy(true)
         .fill_mode_non_solid(true)
-        .wide_lines(true);
+        .wide_lines(true)
+        .tessellation_shader(true)
+        .geometry_shader(true);
 
     let mut features1_1 = vk::PhysicalDeviceVulkan11Features::default()
         .shader_draw_parameters(true);
