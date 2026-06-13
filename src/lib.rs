@@ -633,7 +633,7 @@ unsafe fn create_instance(
 
 #[derive(Debug, Error)]
 #[error("{0}")]
-pub struct SuitabilityError(pub &'static str);
+pub struct SuitabilityError(pub String);
 
 unsafe fn pick_physical_device(entry: &Entry, instance: &Instance, data: &mut RendererData) -> Result<()> {
     for physical_device in instance.enumerate_physical_devices()? {
@@ -667,12 +667,12 @@ unsafe fn check_physical_device(
 
     let support = SwapchainSupport::get(entry, instance, data, physical_device)?;
     if support.formats.is_empty() || support.present_modes.is_empty() {
-        return Err(anyhow!(SuitabilityError("Insufficient swapchain support.")));
+        return Err(anyhow!(SuitabilityError("Insufficient swapchain support.".into())));
     }
 
     let features = instance.get_physical_device_features(physical_device);
     if features.sampler_anisotropy != vk::TRUE {
-        return Err(anyhow!(SuitabilityError("No sampler anisotropy.")));
+        return Err(anyhow!(SuitabilityError("No sampler anisotropy.".into())));
     }
 
     Ok(())
@@ -685,13 +685,23 @@ unsafe fn check_physical_device_extensions(
     let extensions = instance
         .enumerate_device_extension_properties(physical_device)?
         .iter()
-        .map(|e| e.extension_name)
+        .map(|e| CStr::from_ptr(e.extension_name.as_ptr()) )
         .collect::<HashSet<_>>();
-    if DEVICE_EXTENSIONS.iter().all(|e| extensions.contains(&align_string(e.to_str().unwrap()))) {
+
+    let tests = DEVICE_EXTENSIONS.iter().filter(|extension| !extensions.contains(**extension)).collect::<Vec<_>>();
+
+    if tests.len() == 0 {
         Ok(())
     } else {
+        let mut err = String::from("[");
+        tests.iter().for_each(|e| {
+            err += e.to_str().unwrap();
+            err += ", ";
+        });
+        err += "]";
+
         Err(anyhow!(SuitabilityError(
-            "Missing required device extensions."
+            format!("Missing required device extensions: {err}")
         )))
     }
 }
@@ -915,7 +925,7 @@ impl QueueFamilyIndices {
             Ok(Self { graphics, present })
         } else {
             Err(anyhow!(SuitabilityError(
-                "Missing required queue families."
+                "Missing required queue families.".into()
             )))
         }
     }
