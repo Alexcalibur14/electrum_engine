@@ -46,7 +46,7 @@ use crate::resources::{Collection, NamedVec};
 use crate::shader::{ComputeProgram, GraphicsProgram, SlangShader};
 
 /// Whether the validation layers should be enabled.
-const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
+static mut VALIDATION_ENABLED: bool = true;
 
 /// The required device extensions.
 const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME, ash::khr::dynamic_rendering::NAME];
@@ -68,7 +68,9 @@ pub struct Renderer<'a> {
 
 impl<'a> Renderer<'a> {
     /// Creates the Vulkan Renderer.
-    pub fn new(window: &Window) -> Result<Self> {
+    pub fn new(window: &Window, validation: bool) -> Result<Self> {
+        unsafe { VALIDATION_ENABLED = validation };
+        
         let entry = unsafe { Entry::load()? };
 
         let mut data = RendererData::default();
@@ -388,7 +390,7 @@ impl<'a> Drop for Renderer<'a> {
         let surface_loader = surface::Instance::new(&self._entry, &self.instance);
         unsafe { surface_loader.destroy_surface(self.data.surface, None) };
         
-        if VALIDATION_ENABLED {
+        if unsafe { VALIDATION_ENABLED } {
             let debug_utils_loader = debug_utils::Instance::new(&self._entry, &self.instance);
             unsafe { debug_utils_loader.destroy_debug_utils_messenger(self.data.messenger, None) };
         }
@@ -1009,7 +1011,7 @@ fn set_object_name(
     name: &str,
     object_handle: impl Handle,
 ) -> Result<()> {
-    if VALIDATION_ENABLED {
+    if unsafe { VALIDATION_ENABLED } {
         let name_string = name.to_owned() + "\0";
         let name_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(name_string.as_bytes()) };
         let name_info = vk::DebugUtilsObjectNameInfoEXT::default()
@@ -1030,7 +1032,7 @@ pub fn begin_command_label(
     name: &str,
     colour: [f32; 4],
 ) {
-    if VALIDATION_ENABLED {
+    if unsafe { VALIDATION_ENABLED } {
         let name_string = name.to_owned() + "\0";
         let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
@@ -1043,7 +1045,7 @@ pub fn begin_command_label(
 }
 
 pub fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer) {
-    if VALIDATION_ENABLED {
+    if unsafe { VALIDATION_ENABLED } {
         let debug_device = debug_utils::Device::new(instance, device);
         unsafe { debug_device.cmd_end_debug_utils_label(command_buffer) }
     }
@@ -1058,7 +1060,7 @@ pub fn insert_command_label(
     name: &str,
     colour: [f32; 4],
 ) {
-    if VALIDATION_ENABLED {
+    if unsafe { VALIDATION_ENABLED } {
         let name_string = name.to_owned() + "\0";
         let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()

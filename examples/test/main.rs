@@ -84,7 +84,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .with_resizable(true)
         ).unwrap();
 
-        let mut renderer = Renderer::new(&window).unwrap();
+        let mut renderer = Renderer::new(&window, false).unwrap();
 
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
