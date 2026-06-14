@@ -43,6 +43,7 @@ use glam::Mat4;
 use glam::Quat;
 use glam::Vec3;
 use glam::vec3;
+use glam::vec4;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use winit::event::KeyEvent;
@@ -99,10 +100,7 @@ impl<'a> ApplicationHandler for App<'a> {
         self.camera = camera;
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.5, 0.0));
-        let model_data = ModelData {
-            model: model_matrix,
-            normal: model_matrix.inverse().transpose(),
-        };
+        let model_data = ModelData::new(model_matrix);
         let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
 
         let (object_descriptor, _) = DescriptorBuilder::new()
@@ -110,7 +108,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let monkey_material = MaterialData {
-            colour: [1.0, 0.5, 0.31],
+            colour: vec3(1.0, 0.5, 0.31),
             specular: 0.5,
         };
 
@@ -132,10 +130,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
-        let model_data = ModelData {
-            model: model_matrix,
-            normal: model_matrix.inverse().transpose(),
-        };
+        let model_data = ModelData::new(model_matrix);
         let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
 
         let (object_descriptor, _) = DescriptorBuilder::new()
@@ -143,7 +138,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let plane_material = MaterialData {
-            colour: [1.0, 0.5, 0.31],
+            colour: vec3(1.0, 0.5, 0.31),
             specular: 0.3,
         };
 
@@ -165,20 +160,20 @@ impl<'a> ApplicationHandler for App<'a> {
         let light_target = Vec3::ZERO;
         let light_direction = (light_position - light_target).normalize();
         let light_data = LightData {
-            position: light_position.to_array(),
-            direction: light_direction.to_array(),
-            colour: [1.0, 1.0, 1.0],
+            position: light_position,
+            direction: light_direction,
+            colour: vec3(1.0, 1.0, 1.0),
             strength: 1.0,
             light_type: LightType::Directional,
         };
         self.light = Light::new(&renderer.instance, &renderer.device, &mut renderer.data, light_data);
-        
+
         let (depth_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "shadow_map").unwrap();
-        
+
         let (shadow_map_descriptor, _) = DescriptorBuilder::new()
             .bind_image(0, 1, &[depth_image.image().descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
-        
+
         let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
         light_object.add_descriptor_set(shadow_map_descriptor, "shadow_map");
 
@@ -310,7 +305,7 @@ impl<'a> ApplicationHandler for App<'a> {
             out_white: 1.0,
             gamma: 1.0,
         };
-        
+
         let colour_correction_data = ColourCorrection {
             levels,
             hue_shift: 0.0,
@@ -640,7 +635,7 @@ struct ShadowPass;
 
 impl Task for ShadowPass {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Shadow Pass", [0.0, 0.6, 0.2, 1.0]);
+        begin_command_label(instance, device, command_buffer, "Shadow Pass", vec4(0.0, 0.6, 0.2, 1.0));
         
         let depth_attachment = vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 }  })
@@ -707,7 +702,7 @@ struct MainDraw;
 
 impl Task for MainDraw {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Main Draw", [0.0, 0.6, 0.2, 1.0]);
+        begin_command_label(instance, device, command_buffer, "Main Draw", vec4(0.0, 0.6, 0.2, 1.0));
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -789,7 +784,7 @@ struct ColourCorrectionPass;
 
 impl Task for ColourCorrectionPass {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Colour Correction", [0.0, 0.5, 0.5, 1.0]);
+        begin_command_label(instance, device, command_buffer, "Colour Correction", vec4(0.0, 0.5, 0.5, 1.0));
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -884,7 +879,7 @@ impl Task for EguiDraw {
 
         if !enable { return; }
 
-        begin_command_label(instance, device, command_buffer, "Egui Draw", [0.4, 0.5, 0.7, 1.0]);
+        begin_command_label(instance, device, command_buffer, "Egui Draw", vec4(0.4, 0.5, 0.7, 1.0));
         
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -922,7 +917,7 @@ struct DebugDraw;
 
 impl Task for DebugDraw {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Debug Draw", [0.0, 0.6, 0.2, 1.0]);
+        begin_command_label(instance, device, command_buffer, "Debug Draw", vec4(0.0, 0.6, 0.2, 1.0));
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -990,7 +985,7 @@ struct Present;
 
 impl Task for Present {
     fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Present", [0.7, 0.0, 0.7, 1.0]);
+        begin_command_label(instance, device, command_buffer, "Present", vec4(0.7, 0.0, 0.7, 1.0));
         
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
 
@@ -1007,7 +1002,7 @@ impl Task for Present {
 
 #[repr(C)]
 struct MaterialData {
-    colour: [f32; 3],
+    colour: Vec3,
     specular: f32,
 }
 

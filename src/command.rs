@@ -1,5 +1,6 @@
 use ash::vk;
 use ash::{Entry, Device, Instance};
+use glam::vec4;
 
 use crate::{begin_command_label, end_command_label, QueueFamilyIndices, RendererData};
 use anyhow::Result;
@@ -78,7 +79,7 @@ pub unsafe fn begin_single_time_commands(
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
     device.begin_command_buffer(command_buffer, &info)?;
-    begin_command_label(instance, device, command_buffer, name, [1.0, 0.0, 1.0, 1.0]);
+    begin_command_label(instance, device, command_buffer, name, vec4(1.0, 0.0, 1.0, 1.0));
 
     Ok(command_buffer)
 }

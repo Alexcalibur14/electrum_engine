@@ -2,6 +2,7 @@ use core::fmt;
 use std::path::Path;
 
 use ash::{Device, Instance, vk};
+use glam::{Vec2, Vec3};
 
 use crate::{RendererData, Vertex, buffer::Buffer, image::Image, resources::NamedVec};
 
@@ -217,10 +218,10 @@ pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device
         let mut vertices = vec![];
 
         for i in 0..positions.len() {
-            let position = positions[i];
-            let normal = if normals.len() > 0 { normals[i] } else { [0.0, 0.0, 0.0] };
-            let colour = if colours.len() > 0 { colours[i] } else { [0.0, 0.0, 0.0] };
-            let uv = if uvs.len() > 0 { uvs[i] } else { [0.0, 0.0] };
+            let position = positions[i].into();
+            let normal = if normals.len() > 0 { normals[i] } else { [0.0, 0.0, 0.0] }.into();
+            let colour = if colours.len() > 0 { colours[i] } else { [0.0, 0.0, 0.0] }.into();
+            let uv = if uvs.len() > 0 { uvs[i] } else { [0.0, 0.0] }.into();
 
             vertices.push(
                 OBJVertex {
@@ -246,13 +247,13 @@ pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device
 #[derive(Debug, Vertex)]
 pub struct OBJVertex {
     #[vertex(format = "R32G32B32_SFLOAT")]
-    pub position: [f32; 3],
+    pub position: Vec3,
     #[vertex(format = "R32G32B32_SFLOAT")]
-    pub normal: [f32; 3],
+    pub normal: Vec3,
     #[vertex(format = "R32G32B32_SFLOAT")]
-    pub colour: [f32; 3],
+    pub colour: Vec3,
     #[vertex(format = "R32G32_SFLOAT")]
-    pub uv: [f32; 2],
+    pub uv: Vec2,
 }
 
 #[derive(Clone, Default)]

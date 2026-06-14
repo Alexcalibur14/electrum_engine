@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use ash::{Device, Instance, vk};
-use glam::{Mat4, Quat, Vec3, vec3, vec4};
+use glam::{Mat4, Quat, Vec3, vec2, vec3, vec4};
 
 use crate::{RendererData, buffer::Buffer, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
 
@@ -205,7 +205,7 @@ impl Plane {
                 let x_percent = lerp(0.0, 1.0, x_i as f32 / x_subdivisions as f32);
                 let x = lerp(neg_x, pos_x, x_percent);
 
-                vertices.push(OBJVertex { position: [x, 0.0, z], normal: [0.0, 1.0, 0.0], colour: [0.0, 0.0, 0.0], uv: [x_percent, z_percent] });
+                vertices.push(OBJVertex { position: vec3(x, 0.0, z), normal: vec3(0.0, 1.0, 0.0), colour: vec3(0.0, 0.0, 0.0), uv: vec2(x_percent, z_percent) });
 
                 if z_i == z_subdivisions || x_i == x_subdivisions {
                     continue;
@@ -297,11 +297,11 @@ impl Light {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct LightData {
-    pub position: [f32; 3],
+    pub position: Vec3,
     pub strength: f32,
-    pub direction: [f32; 3],
+    pub direction: Vec3,
     pub light_type: LightType,
-    pub colour: [f32; 3],
+    pub colour: Vec3,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -336,12 +336,12 @@ pub fn create_debug_axes_object(instance: &Instance, device: &Device, data: &mut
 
     *debug_axes.mesh_data_mut() = MeshData::new("axes");
     debug_axes.mesh_data_mut().build_vertex_staged(instance, device, data, &[
-        OBJVertex { position: [0.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], colour: [1.0, 0.0, 0.0], uv: [0.0, 0.0] },
-        OBJVertex { position: [1.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], colour: [1.0, 0.0, 0.0], uv: [0.0, 0.0] },
-        OBJVertex { position: [0.0, 0.0, 0.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 1.0, 0.0], uv: [0.0, 0.0] },
-        OBJVertex { position: [0.0, 1.0, 0.0], normal: [0.0, 1.0, 0.0], colour: [0.0, 1.0, 0.0], uv: [0.0, 0.0] },
-        OBJVertex { position: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], colour: [0.0, 0.0, 1.0], uv: [0.0, 0.0] },
-        OBJVertex { position: [0.0, 0.0, 1.0], normal: [0.0, 0.0, 1.0], colour: [0.0, 0.0, 1.0], uv: [0.0, 0.0] },
+        OBJVertex { position: vec3(0.0, 0.0, 0.0), normal: vec3(1.0, 0.0, 0.0), colour: vec3(1.0, 0.0, 0.0), uv: vec2(0.0, 0.0) },
+        OBJVertex { position: vec3(1.0, 0.0, 0.0), normal: vec3(1.0, 0.0, 0.0), colour: vec3(1.0, 0.0, 0.0), uv: vec2(0.0, 0.0) },
+        OBJVertex { position: vec3(0.0, 0.0, 0.0), normal: vec3(0.0, 1.0, 0.0), colour: vec3(0.0, 1.0, 0.0), uv: vec2(0.0, 0.0) },
+        OBJVertex { position: vec3(0.0, 1.0, 0.0), normal: vec3(0.0, 1.0, 0.0), colour: vec3(0.0, 1.0, 0.0), uv: vec2(0.0, 0.0) },
+        OBJVertex { position: vec3(0.0, 0.0, 0.0), normal: vec3(0.0, 0.0, 1.0), colour: vec3(0.0, 0.0, 1.0), uv: vec2(0.0, 0.0) },
+        OBJVertex { position: vec3(0.0, 0.0, 1.0), normal: vec3(0.0, 0.0, 1.0), colour: vec3(0.0, 0.0, 1.0), uv: vec2(0.0, 0.0) },
     ]);
 
     data.objects.push(debug_axes, &["debug"])
@@ -431,4 +431,13 @@ pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
 pub struct ModelData {
     pub model: Mat4,
     pub normal: Mat4,
+}
+
+impl ModelData {
+    pub fn new(model_matrix: Mat4) -> ModelData {
+        ModelData {
+            model: model_matrix,
+            normal: model_matrix.inverse().transpose(),
+        }
+    }
 }

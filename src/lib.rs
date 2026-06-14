@@ -6,6 +6,7 @@ use ash::khr::{surface, swapchain};
 use ash_window;
 
 use electrum_engine_macros::Vertex;
+use glam::Vec4;
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 
 use anyhow::{anyhow, Result};
@@ -1030,14 +1031,14 @@ pub fn begin_command_label(
     device: &Device,
     command_buffer: vk::CommandBuffer,
     name: &str,
-    colour: [f32; 4],
+    colour: Vec4,
 ) {
     if unsafe { VALIDATION_ENABLED } {
         let name_string = name.to_owned() + "\0";
         let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
-            .color(colour);
+            .color(colour.to_array());
 
         let debug_device = debug_utils::Device::new(instance, device);
         unsafe { debug_device.cmd_begin_debug_utils_label(command_buffer, &info) }
@@ -1058,14 +1059,14 @@ pub fn insert_command_label(
     device: &Device,
     command_buffer: vk::CommandBuffer,
     name: &str,
-    colour: [f32; 4],
+    colour: Vec4,
 ) {
     if unsafe { VALIDATION_ENABLED } {
         let name_string = name.to_owned() + "\0";
         let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
-            .color(colour);
+            .color(colour.to_array());
 
         let debug_device = debug_utils::Device::new(instance, device);
 
