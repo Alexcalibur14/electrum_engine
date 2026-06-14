@@ -105,15 +105,8 @@ impl<'a> ApplicationHandler for App<'a> {
         };
         let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
 
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(object_buffer.buffer())
-                .offset(0)
-                .range(object_buffer.size())
-        ];
-
         let (object_descriptor, _) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let monkey_material = MaterialData {
@@ -123,15 +116,8 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[monkey_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material");
 
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(material_buffer.buffer())
-                .offset(0)
-                .range(material_buffer.size())
-        ];
-
         let (material_descriptor, _) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let mut monkey = Object::new("monkey");
@@ -152,15 +138,8 @@ impl<'a> ApplicationHandler for App<'a> {
         };
         let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
 
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(object_buffer.buffer())
-                .offset(0)
-                .range(object_buffer.size())
-        ];
-
         let (object_descriptor, _) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let plane_material = MaterialData {
@@ -170,15 +149,8 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material");
 
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(material_buffer.buffer())
-                .offset(0)
-                .range(material_buffer.size())
-        ];
-
         let (material_descriptor, _) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0, 10, 10, &["main", "shadow"]);
@@ -223,14 +195,8 @@ impl<'a> ApplicationHandler for App<'a> {
             position: light_position,
         };
         let light_camera_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[light_camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_camera_data");
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(light_camera_buffer.buffer())
-                .offset(0)
-                .range(light_camera_buffer.size())
-        ];
         let (light_camera_descriptor, _) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .bind_buffer(0, 1, &[light_camera_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
@@ -357,14 +323,8 @@ impl<'a> ApplicationHandler for App<'a> {
         };
         self.colour_correction = colour_correction_data;
         let cc_buffer = Buffer::create_and_load(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data");
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(cc_buffer.buffer())
-                .offset(0)
-                .range(cc_buffer.size())
-        ];
         let (cc_descriptor, _) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_buffer(0, 1, &[cc_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let mut cc_object = Object::new("colour_correction_data");

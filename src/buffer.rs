@@ -312,4 +312,11 @@ impl Buffer {
 
         Ok(())
     }
+
+    pub fn descriptor_info(&self) -> vk::DescriptorBufferInfo {
+        vk::DescriptorBufferInfo::default()
+            .buffer(self.buffer)
+            .offset(0)
+            .range(self.size)
+    }
 }
