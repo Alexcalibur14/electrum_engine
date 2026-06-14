@@ -175,14 +175,8 @@ impl<'a> ApplicationHandler for App<'a> {
         
         let (depth_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "shadow_map").unwrap();
         
-        let image_info = &[
-            vk::DescriptorImageInfo::default()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(depth_image.image().view())
-                .sampler(depth_image.image().sampler().unwrap())
-        ];
         let (shadow_map_descriptor, _) = DescriptorBuilder::new()
-            .bind_image(0, 1, image_info, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_image(0, 1, &[depth_image.image().descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
         
         let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
@@ -338,10 +332,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 0,
                 1,
                 &[
-                    vk::DescriptorImageInfo::default()
-                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                        .image_view(main_image.image().view())
-                        .sampler(main_image.image().sampler().unwrap())
+                    main_image.image().descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 ],
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 vk::ShaderStageFlags::FRAGMENT
@@ -873,10 +864,7 @@ impl Task for ColourCorrectionPass {
         update_image_binding(
             device,
             &[
-                vk::DescriptorImageInfo::default()
-                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                    .image_view(image.view())
-                    .sampler(image.sampler().unwrap())
+                image.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
             ],
             *descriptor_set,
             0,

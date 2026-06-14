@@ -363,6 +363,13 @@ impl Image {
         self.sampler = None;
         self.extent = vk::Extent3D::default();
     }
+
+    pub fn descriptor_info(&self, layout: vk::ImageLayout) -> vk::DescriptorImageInfo {
+        vk::DescriptorImageInfo::default()
+            .image_layout(layout)
+            .image_view(self.view())
+            .sampler(if let Some(sampler) = self.sampler() {sampler} else {vk::Sampler::null()})
+    }
 }
 
 pub unsafe fn create_image_1d(
