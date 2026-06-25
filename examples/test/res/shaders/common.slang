@@ -12,8 +12,8 @@ public struct ObjectData {
 }
 
 public struct MaterialData {
-    public float3 color;
     public float specular;
+    public Sampler2D<float3> albedo;
 }
 
 public struct LightCameraData {

@@ -1,7 +1,10 @@
+use std::path::Path;
+
 use ash::vk::{self, Handle};
 use ash::{Device, Instance};
 
 use anyhow::{Result, anyhow};
+use image::ImageReader;
 
 use crate::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
@@ -284,6 +287,89 @@ impl Image {
             mip_level: mips,
             sampler,
             extent: vk::Extent3D { width, height, depth }
+        }
+    }
+
+    pub fn load_from_file<P: AsRef<Path>>(
+        instance: &Instance,
+        device: &Device,
+        data: &RendererData,
+        path: P,
+        mip_levels: MipLevels,
+        sampler: Option<(Filter, AddressMode)>,
+    ) -> Image {
+        let img = ImageReader::open(path).unwrap().decode().unwrap();
+        let bytes = img.as_bytes();
+
+        let width = img.width();
+        let height = img.height();
+
+        let (bpc, format) = match (img.color(), img.color_space().primaries) {
+            (image::ColorType::L8, image::metadata::CicpColorPrimaries::SRgb) => (1, vk::Format::R8_SRGB),
+            (image::ColorType::L8, _) => (1, vk::Format::R8_UNORM),
+            (image::ColorType::La8, image::metadata::CicpColorPrimaries::SRgb) => (2, vk::Format::R8G8_SRGB),
+            (image::ColorType::La8, _) => (2, vk::Format::R8G8_UNORM),
+            (image::ColorType::Rgb8, image::metadata::CicpColorPrimaries::SRgb) => (3, vk::Format::R8G8B8_SRGB),
+            (image::ColorType::Rgb8, _) => (3, vk::Format::R8G8B8_UNORM),
+            (image::ColorType::Rgba8, image::metadata::CicpColorPrimaries::SRgb) => (4, vk::Format::R8G8B8A8_SRGB),
+            (image::ColorType::Rgba8, _) => (4, vk::Format::R8G8B8A8_UNORM),
+            (image::ColorType::L16, _) => (2, vk::Format::R16_UNORM),
+            (image::ColorType::La16, _) => (4, vk::Format::R16G16_UNORM),
+            (image::ColorType::Rgb16, _) => (6, vk::Format::R16G16B16_UNORM),
+            (image::ColorType::Rgba16, _) => (8, vk::Format::R16G16B16A16_UNORM),
+            (image::ColorType::Rgb32F, _) => (12, vk::Format::R32G32B32_SFLOAT),
+            (image::ColorType::Rgba32F, _) => (16, vk::Format::R32G32B32A32_SFLOAT),
+            (color, space) => panic!("unknown ColorType-ColorSpace combination: {:?}, {:?}", color, space),
+        };
+
+        let size = (width * height * bpc) as u64;
+
+        let mips = mip_levels.mips_2d(width, height);
+
+        let (image, image_memory) = unsafe {
+            create_texture_image(
+                instance,
+                device,
+                data,
+                size,
+                bytes,
+                width,
+                height,
+                mips,
+                format
+            )
+        }.unwrap();
+
+        let view = unsafe {
+            create_image_view(
+                device,
+                image,
+                format,
+                vk::ImageAspectFlags::COLOR,
+                vk::ImageViewType::TYPE_2D,
+                mips,
+                1,
+            )
+        }.unwrap();
+
+        let sampler = sampler.map(|(filter, mode)| unsafe {
+            create_texture_sampler(
+                instance,
+                device,
+                &mips,
+                &filter,
+                &mode,
+                "name"
+            )
+        }.unwrap());
+
+        Image {
+            image,
+            memory: image_memory,
+            view,
+            mip_level: mips,
+            sampler: sampler,
+            extent: vk::Extent3D { width, height, depth: 1 },
         }
     }
 
@@ -830,8 +916,8 @@ pub unsafe fn create_texture_sampler(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Filter {
-    min: vk::Filter,
-    mag: vk::Filter,
+    pub min: vk::Filter,
+    pub mag: vk::Filter,
 }
 
 impl Filter {
@@ -866,9 +952,9 @@ impl Filter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AddressMode {
-    u: vk::SamplerAddressMode,
-    v: vk::SamplerAddressMode,
-    w: vk::SamplerAddressMode,
+    pub u: vk::SamplerAddressMode,
+    pub v: vk::SamplerAddressMode,
+    pub w: vk::SamplerAddressMode,
 }
 
 impl AddressMode {
@@ -923,6 +1009,10 @@ unsafe fn generate_mipmaps(
     height: u32,
     mip_levels: u32,
 ) -> Result<()> {
+    if mip_levels == 1 {
+        return Ok(());
+    }
+
     // Support
 
     if !instance
@@ -931,7 +1021,7 @@ unsafe fn generate_mipmaps(
         .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
     {
         return Err(anyhow!(
-            "Texture image format does not support linear blitting!"
+            "Texture image format does not support linear blitting for mipmaps"
         ));
     }
 

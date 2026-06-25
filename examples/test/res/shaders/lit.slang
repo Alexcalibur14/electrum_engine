@@ -69,7 +69,7 @@ float4 frag(
 
     float shadow = get_shadow(shadow_map.shadow_map, frag_in.light_space_vert, frag_in.normal, light.direction);
 
-    return float4(material.color * (ambiant_color + (diffuse_color + specular_color) * shadow) * light.strength * attenuation, 1.0);
+    return float4(material.albedo.Sample(frag_in.uv) * (ambiant_color + (diffuse_color + specular_color) * shadow) * light.strength * attenuation, 1.0);
 }
 
 float get_shadow(Sampler2DShadow shadow_map, float4 vert, float3 normal, float3 light_dir) {

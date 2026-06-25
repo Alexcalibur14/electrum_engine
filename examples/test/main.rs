@@ -25,6 +25,7 @@ use electrum_engine::extra::orthographic_symetric;
 use electrum_engine::extra::radians;
 use electrum_engine::image::AddressMode;
 use electrum_engine::image::Filter;
+use electrum_engine::image::Image;
 use electrum_engine::image::MipLevels;
 use electrum_engine::image::copy_image_to_image;
 use electrum_engine::model::OBJVertex;
@@ -89,6 +90,24 @@ impl<'a> ApplicationHandler for App<'a> {
 
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
+        let white_texture = Image::load_from_file(
+            &renderer.instance,
+            &renderer.device,
+            &renderer.data,
+            "examples/test/res/textures/white.png",
+            MipLevels::One,
+            Some((Filter::MIN_LINEAR, AddressMode::REPEAT))
+        );
+
+        let uv_texture = Image::load_from_file(
+            &renderer.instance,
+            &renderer.device,
+            &renderer.data,
+            "examples/test/res/textures/UV_test.png",
+            MipLevels::One,
+            Some((Filter::MIN_LINEAR, AddressMode::REPEAT))
+        );
+
         let mut main_shader = SlangShader::new("lit", Path::new("examples/test/res/shaders/lit.slang"));
         main_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
@@ -108,7 +127,6 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let monkey_material = MaterialData {
-            colour: vec3(1.0, 0.5, 0.31),
             specular: 0.5,
         };
 
@@ -116,12 +134,14 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let (material_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_image(1, 1, &[white_texture.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let mut monkey = Object::new("monkey");
         monkey.add_buffer(object_buffer, "mvp");
         monkey.add_descriptor_set(object_descriptor, "mvp");
         monkey.add_buffer(material_buffer, "material");
+        monkey.add_image(white_texture, "albedo");
         monkey.add_descriptor_set(material_descriptor, "material");
 
         *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "examples/test/res/models/MONKEY.obj")[0].clone();
@@ -138,7 +158,6 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let plane_material = MaterialData {
-            colour: vec3(1.0, 0.5, 0.31),
             specular: 0.3,
         };
 
@@ -146,6 +165,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let (material_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_image(1, 1, &[uv_texture.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0, 10, 10, &["main", "shadow"]);
@@ -153,6 +173,7 @@ impl<'a> ApplicationHandler for App<'a> {
         plane_object.add_buffer(object_buffer, "mvp");
         plane_object.add_descriptor_set(object_descriptor, "mvp");
         plane_object.add_buffer(material_buffer, "material");
+        plane_object.add_image(uv_texture, "albedo");
         plane_object.add_descriptor_set(material_descriptor, "material");
 
 
@@ -163,7 +184,7 @@ impl<'a> ApplicationHandler for App<'a> {
             position: light_position,
             direction: light_direction,
             colour: vec3(1.0, 1.0, 1.0),
-            strength: 1.0,
+            strength: 25.0,
             light_type: LightType::Directional,
         };
         self.light = Light::new(&renderer.instance, &renderer.device, &mut renderer.data, light_data);
@@ -706,7 +727,7 @@ impl Task for MainDraw {
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.01, 0.01, 0.01, 1.0]}})
+            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 1.0]}})
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -1002,7 +1023,6 @@ impl Task for Present {
 
 #[repr(C)]
 struct MaterialData {
-    colour: Vec3,
     specular: f32,
 }
 
