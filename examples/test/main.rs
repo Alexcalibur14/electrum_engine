@@ -18,7 +18,7 @@ use electrum_engine::extra::Light;
 use electrum_engine::extra::LightData;
 use electrum_engine::extra::LightType;
 use electrum_engine::extra::ModelData;
-use electrum_engine::extra::Plane;
+use electrum_engine::model::primitives::Plane;
 use electrum_engine::extra::Projection;
 use electrum_engine::extra::SimpleCamera;
 use electrum_engine::extra::orthographic_symetric;
@@ -31,6 +31,7 @@ use electrum_engine::image::copy_image_to_image;
 use electrum_engine::model::OBJVertex;
 use electrum_engine::model::Object;
 use electrum_engine::model::basic_obj_loader;
+use electrum_engine::model::primitives::UVSphere;
 use electrum_engine::shader::DepthStencilData;
 use electrum_engine::shader::MultisampleData;
 use electrum_engine::shader::RasterizationData;
@@ -86,7 +87,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .with_resizable(true)
         ).unwrap();
 
-        let mut renderer = Renderer::new(&window, false).unwrap();
+        let mut renderer = Renderer::new(&window, true).unwrap();
 
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 
@@ -113,7 +114,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
 
-        let view = Mat4::look_at_rh(vec3(0.0, 4.0, 4.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
+        let view = Mat4::look_at_rh(vec3(0.0, 3.0, 5.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
         let camera = SimpleCamera::new_view(&renderer.instance, &renderer.device, &mut renderer.data, view, projection);
 
         self.camera = camera;
@@ -168,13 +169,40 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_image(1, 1, &[uv_texture.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 4.0, 4.0, 10, 10, &["main", "shadow"]);
+        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 10.0, 10.0, 10, 10, &["main", "shadow"]);
         let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
         plane_object.add_buffer(object_buffer, "mvp");
         plane_object.add_descriptor_set(object_descriptor, "mvp");
         plane_object.add_buffer(material_buffer, "material");
         plane_object.add_image(uv_texture, "albedo");
         plane_object.add_descriptor_set(material_descriptor, "material");
+
+
+        let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(-2.0, 2.0, 0.0));
+        let model_data = ModelData::new(model_matrix);
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+
+        let (object_descriptor, _) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        let plane_material = MaterialData {
+            specular: 0.3,
+        };
+
+        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "uv_sphere_material");
+
+        let (material_descriptor, _) = DescriptorBuilder::new()
+            .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_image(1, 1, &[uv_texture.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
+            .build_data(&renderer.device, &mut renderer.data).unwrap();
+
+        let uv_sphere = UVSphere::new(&renderer.instance, &renderer.device, &mut renderer.data, 1.0, 6, 12, &["main", "shadow"]);
+        let uv_sphere_object = renderer.data.objects.get_mut(&uv_sphere.object()).unwrap();
+        uv_sphere_object.add_buffer(object_buffer, "mvp");
+        uv_sphere_object.add_descriptor_set(object_descriptor, "mvp");
+        uv_sphere_object.add_buffer(material_buffer, "material");
+        uv_sphere_object.add_descriptor_set(material_descriptor, "material");
 
 
         let light_position = vec3(3.0, 3.0, 0.0);

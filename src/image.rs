@@ -1009,10 +1009,6 @@ unsafe fn generate_mipmaps(
     height: u32,
     mip_levels: u32,
 ) -> Result<()> {
-    if mip_levels == 1 {
-        return Ok(());
-    }
-
     // Support
 
     if !instance
