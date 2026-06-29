@@ -512,24 +512,26 @@ impl<'a> ApplicationHandler for App<'a> {
                 self.camera.projection.recalculate();
                 self.camera.rebuild(&renderer.device, &renderer.data);
             }
-            WindowEvent::KeyboardInput { event: KeyEvent { physical_key, .. }, .. } => {
+            WindowEvent::KeyboardInput { event: KeyEvent { physical_key, state, .. }, .. } => {
                 match physical_key {
                     winit::keyboard::PhysicalKey::Code(key_code) => {
                         match key_code {
                             winit::keyboard::KeyCode::F11 => {
-                                unsafe { self.renderer.as_ref().unwrap().device.device_wait_idle() }.unwrap();
-
-                                let window = self.window.as_ref().unwrap();
-                                
-                                match window.fullscreen() {
-                                    Some(_) => {
-                                        window.set_fullscreen(None);
-                                        self.renderer.as_mut().unwrap().resized = true;
-                                    },
-                                    None => {
-                                        window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(window.current_monitor())));
-                                        self.renderer.as_mut().unwrap().resized = true;
-                                    },
+                                if state.is_pressed() {
+                                    unsafe { self.renderer.as_ref().unwrap().device.device_wait_idle() }.unwrap();
+    
+                                    let window = self.window.as_ref().unwrap();
+    
+                                    match window.fullscreen() {
+                                        Some(_) => {
+                                            window.set_fullscreen(None);
+                                            self.renderer.as_mut().unwrap().resized = true;
+                                        },
+                                        None => {
+                                            window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(window.current_monitor())));
+                                            self.renderer.as_mut().unwrap().resized = true;
+                                        },
+                                    }
                                 }
                             }
                             _ => {}

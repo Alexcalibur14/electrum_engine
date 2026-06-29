@@ -172,7 +172,7 @@ impl<'a> Renderer<'a> {
     pub unsafe fn render<F: FnMut(&egui::Context)>(&mut self, window: &Window, ui: &mut F) -> Result<()> {
         let render_fence = self.data.render_fences[self.frame];
 
-        self.device.wait_for_fences(&[render_fence], true, 1000000000)?;
+        self.device.wait_for_fences(&[render_fence], true, 1_000_000_000)?;
         self.device.reset_fences(&[render_fence])?;
 
         (self.width, self.height) = {
@@ -183,7 +183,7 @@ impl<'a> Renderer<'a> {
         let swapchain_loader = ash::khr::swapchain::Device::new(&self.instance, &self.device);
         let result = swapchain_loader.acquire_next_image(
             self.data.swapchain,
-            1000000000,
+            1_000_000_000,
             self.data.swapchain_semaphores[self.frame],
             vk::Fence::null(),
         );
