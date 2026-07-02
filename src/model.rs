@@ -74,7 +74,7 @@ impl MeshData {
             vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &format!("{} Vertex", self.name)
-        );
+        ).unwrap();
 
         self.vertex_buffer = Some(vertex_buffer);
     }
@@ -91,7 +91,7 @@ impl MeshData {
             indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
             &format!("{} Index", self.name)
-        ));
+        ).unwrap());
 
         self.index_type = Some(index_type)
     }
@@ -108,7 +108,7 @@ impl MeshData {
             instances,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &format!("{} Instance", self.name)
-        ));
+        ).unwrap());
     }
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
@@ -123,7 +123,7 @@ impl MeshData {
             vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &format!("{} Vertex", self.name)
-        ));
+        ).unwrap());
     }
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
@@ -138,7 +138,7 @@ impl MeshData {
             indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
             &format!("{} Index", self.name)
-        ));
+        ).unwrap());
 
         self.index_type = Some(index_type);
     }
@@ -155,7 +155,7 @@ impl MeshData {
             instances,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &format!("{} Instance", self.name)
-        ));
+        ).unwrap());
     }
 
     /// Binds the Vertex, Index, and Instance buffers (if present) \
@@ -342,7 +342,7 @@ impl<'a> Object<'a> {
             usage,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
             name
-        );
+        ).unwrap();
 
         self.buffers.push(buffer, name);
     }
@@ -356,7 +356,7 @@ impl<'a> Object<'a> {
             usage,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             name
-        );
+        ).unwrap();
 
         self.buffers.push(buffer, name);
     }
@@ -369,7 +369,7 @@ impl<'a> Object<'a> {
             contents,
             usage,
             name
-        );
+        ).unwrap();
 
         self.buffers.push(buffer, name);
     }
@@ -382,7 +382,7 @@ impl<'a> Object<'a> {
             contents,
             usage,
             name
-        );
+        ).unwrap();
 
         self.buffers.push(buffer, name);
     }

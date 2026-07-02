@@ -6,7 +6,7 @@ use std::ptr::copy_nonoverlapping as memcpy;
 
 use crate::{begin_single_time_commands, end_single_time_commands, set_object_name, RendererData};
 
-pub fn create_buffer(
+fn create_buffer(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
@@ -40,7 +40,8 @@ pub fn create_buffer(
     let wrapper = Buffer {
         buffer,
         memory: buffer_memory,
-        size
+        size,
+        offset: 0,
     };
 
     set_object_name(
@@ -93,8 +94,8 @@ pub fn copy_buffer_immediate(
             begin_single_time_commands(instance, device, data, "Copy Buffer")?;
 
         let regions = vk::BufferCopy::default()
-            .src_offset(0)
-            .dst_offset(0)
+            .src_offset(src.offset())
+            .dst_offset(dst.offset())
             .size(src.size());
         device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[regions]);
 
@@ -106,15 +107,15 @@ pub fn copy_buffer_immediate(
 
 pub fn copy_buffer(device: &Device, command_buffer: vk::CommandBuffer, src: Buffer, dst: Buffer) {
     let region = vk::BufferCopy::default()
-        .src_offset(0)
-        .dst_offset(0)
+        .src_offset(src.offset())
+        .dst_offset(dst.offset())
         .size(src.size());
 
     unsafe { device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[region]) };
 }
 
 /// Creates a [device local](vk::MemoryPropertyFlags::DEVICE_LOCAL) buffer and fills it with `contents`
-pub fn create_and_stage_buffer<T>(
+fn create_and_stage_buffer<T>(
     instance: &Instance,
     device: &Device,
     data: &RendererData,
@@ -122,7 +123,7 @@ pub fn create_and_stage_buffer<T>(
     name: &str,
     contents: &[T],
 ) -> Result<Buffer> {
-    let size = size_of_val(contents) as u64;
+    let size = size_of_val(contents) as vk::DeviceSize;
 
     let mut staging_buffer = create_buffer(
         instance,
@@ -159,11 +160,14 @@ pub fn create_and_stage_buffer<T>(
     Ok(buffer)
 }
 
+// TODO: Add buffer operation error type
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Buffer {
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
+    offset: vk::DeviceSize,
 }
 
 impl Buffer {
@@ -175,8 +179,8 @@ impl Buffer {
         usage: vk::BufferUsageFlags,
         properties: vk::MemoryPropertyFlags,
         name: &str
-    ) -> Self {
-        create_buffer(instance, device, data, size, usage, properties, name).unwrap()
+    ) -> Result<Self> {
+        create_buffer(instance, device, data, size, usage, properties, name)
     }
 
     pub fn create_and_load<T>(
@@ -186,20 +190,20 @@ impl Buffer {
         contents: &[T],
         usage: vk::BufferUsageFlags,
         name: &str
-    ) -> Self {
+    ) -> Result<Self> {
         let buffer = create_buffer(
             instance,
             device,
             data,
-            size_of_val(contents) as u64,
+            size_of_val(contents) as vk::DeviceSize,
             usage,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
             name
-        ).unwrap();
+        )?;
 
         buffer.copy_vec_into_buffer(device, contents);
 
-        buffer
+        Ok(buffer)
     }
 
     pub fn create_and_stage<T>(
@@ -209,8 +213,8 @@ impl Buffer {
         contents: &[T],
         usage: vk::BufferUsageFlags,
         name: &str
-    ) -> Self {
-        create_and_stage_buffer(instance, device, data, usage, name, contents).unwrap()
+    ) -> Result<Self> {
+        create_and_stage_buffer(instance, device, data, usage, name, contents)
     }
 
     pub fn buffer(&self) -> vk::Buffer {
@@ -225,6 +229,10 @@ impl Buffer {
         self.size
     }
 
+    pub fn offset(&self) -> vk::DeviceSize {
+        self.offset
+    }
+
     pub fn destroy(&mut self, device: &Device) {
         unsafe { device.destroy_buffer(self.buffer, None) };
 
@@ -233,12 +241,13 @@ impl Buffer {
         self.buffer = vk::Buffer::null();
         self.memory = vk::DeviceMemory::null();
         self.size = 0;
+        self.offset = 0;
     }
 
     /// Copies data into the buffer, if you are trying to copy a vec use [`copy_vec_into_buffer()`](Buffer::copy_vec_into_buffer)
     pub fn copy_data_into_buffer<T>(&self, device: &Device, data: &T) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, self.offset, size_of_val(data) as vk::DeviceSize, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data, buffer_mem.cast(), 1) };
@@ -251,10 +260,10 @@ impl Buffer {
         &self,
         device: &Device,
         data: &T,
-        offset: u64,
+        offset: vk::DeviceSize,
     ) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, offset, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, self.offset + offset, size_of_val(data) as vk::DeviceSize, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data, buffer_mem.cast(), 1) };
@@ -265,7 +274,7 @@ impl Buffer {
     /// Copies a vec into the buffer
     pub fn copy_vec_into_buffer<T>(&self, device: &Device, data: &[T]) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, 0, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, self.offset, size_of_val(data) as vk::DeviceSize, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
@@ -278,10 +287,10 @@ impl Buffer {
         &self,
         device: &Device,
         data: &[T],
-        offset: u64,
+        offset: vk::DeviceSize,
     ) {
         let buffer_mem =
-            unsafe { device.map_memory(self.memory, offset, size_of_val(data) as u64, vk::MemoryMapFlags::empty()) }
+            unsafe { device.map_memory(self.memory, self.offset + offset, size_of_val(data) as vk::DeviceSize, vk::MemoryMapFlags::empty()) }
                 .unwrap();
 
         unsafe { memcpy(data.as_ptr(), buffer_mem.cast(), data.len()) };
@@ -291,8 +300,8 @@ impl Buffer {
 
     pub fn copy_to_buffer(&self, device: &Device, command_buffer: vk::CommandBuffer, dst: &Buffer) {
         let region = vk::BufferCopy::default()
-            .src_offset(0)
-            .dst_offset(0)
+            .src_offset(self.offset)
+            .dst_offset(dst.offset)
             .size(self.size);
 
         unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
@@ -302,8 +311,8 @@ impl Buffer {
         let command_buffer = unsafe { begin_single_time_commands(instance, device, data, "Copy Buffer") }?;
         
         let region = vk::BufferCopy::default()
-            .src_offset(0)
-            .dst_offset(0)
+            .src_offset(self.offset)
+            .dst_offset(dst.offset)
             .size(self.size);
 
         unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
@@ -316,7 +325,7 @@ impl Buffer {
     pub fn descriptor_info(&self) -> vk::DescriptorBufferInfo {
         vk::DescriptorBufferInfo::default()
             .buffer(self.buffer)
-            .offset(0)
+            .offset(self.offset)
             .range(self.size)
     }
 }

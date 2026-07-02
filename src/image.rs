@@ -6,7 +6,8 @@ use ash::{Device, Instance};
 use anyhow::{Result, anyhow};
 use image::ImageReader;
 
-use crate::{begin_single_time_commands, create_buffer, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
+use crate::buffer::Buffer;
+use crate::{begin_single_time_commands, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum MipLevels {
@@ -619,7 +620,7 @@ pub unsafe fn create_texture_image(
     mip_levels: u32,
     format: vk::Format,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
-    let mut staging_buffer = create_buffer(
+    let mut staging_buffer = Buffer::new(
         instance,
         device,
         data,

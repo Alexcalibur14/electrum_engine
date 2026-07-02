@@ -121,7 +121,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.5, 0.0));
         let model_data = ModelData::new(model_matrix);
-        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix").unwrap();
 
         let (object_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
@@ -131,7 +131,7 @@ impl<'a> ApplicationHandler for App<'a> {
             specular: 0.5,
         };
 
-        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[monkey_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material");
+        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[monkey_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material").unwrap();
 
         let (material_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
@@ -152,7 +152,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
         let model_data = ModelData::new(model_matrix);
-        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix").unwrap();
 
         let (object_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
@@ -162,7 +162,7 @@ impl<'a> ApplicationHandler for App<'a> {
             specular: 0.3,
         };
 
-        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material");
+        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "plane_material").unwrap();
 
         let (material_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
@@ -180,7 +180,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(-2.0, 2.0, 0.0));
         let model_data = ModelData::new(model_matrix);
-        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
+        let object_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix").unwrap();
 
         let (object_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
@@ -190,7 +190,7 @@ impl<'a> ApplicationHandler for App<'a> {
             specular: 0.3,
         };
 
-        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "uv_sphere_material");
+        let material_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[plane_material], vk::BufferUsageFlags::UNIFORM_BUFFER, "uv_sphere_material").unwrap();
 
         let (material_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[material_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
@@ -232,7 +232,7 @@ impl<'a> ApplicationHandler for App<'a> {
             proj: orthographic_symetric(10.0, 10.0, 0.01, 10.0),
             position: light_position,
         };
-        let light_camera_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[light_camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_camera_data");
+        let light_camera_buffer = Buffer::create_and_stage(&renderer.instance, &renderer.device, &renderer.data, &[light_camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_camera_data").unwrap();
         let (light_camera_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[light_camera_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
@@ -360,7 +360,7 @@ impl<'a> ApplicationHandler for App<'a> {
             hue_shift: 0.0,
         };
         self.colour_correction = colour_correction_data;
-        let cc_buffer = Buffer::create_and_load(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data");
+        let cc_buffer = Buffer::create_and_load(&renderer.instance, &renderer.device, &renderer.data, &[colour_correction_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "colour_correction_data").unwrap();
         let (cc_descriptor, _) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[cc_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();

@@ -49,15 +49,8 @@ impl SimpleCamera {
 
         let camera_data_buffer = camera_object.buffers().items()[0];
 
-        let buffer_info = [
-            vk::DescriptorBufferInfo::default()
-                .buffer(camera_data_buffer.buffer())
-                .offset(0)
-                .range(camera_data_buffer.size())
-        ];
-
         let (descriptor_set, layout) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, &buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+            .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(device, data).unwrap();
 
         camera_object.add_descriptor_set(descriptor_set, "camera_data");
@@ -96,15 +89,8 @@ impl SimpleCamera {
 
         let camera_data_buffer = camera_object.buffers().items()[0];
 
-        let buffer_info = [
-            vk::DescriptorBufferInfo::default()
-                .buffer(camera_data_buffer.buffer())
-                .offset(0)
-                .range(camera_data_buffer.size())
-        ];
-
         let (descriptor_set, layout) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, &buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL_GRAPHICS)
+            .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL_GRAPHICS)
             .build_data(device, data).unwrap();
 
         camera_object.add_descriptor_set(descriptor_set, "camera_data");
@@ -189,17 +175,10 @@ pub struct Light {
 
 impl Light {
     pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, light_data: LightData) -> Self {
-        let light_buffer = Buffer::create_and_stage(instance, device, data, &[light_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_data");
+        let light_buffer = Buffer::create_and_stage(instance, device, data, &[light_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_data").unwrap();
         
-        let buffer_info = &[
-            vk::DescriptorBufferInfo::default()
-                .buffer(light_buffer.buffer())
-                .offset(0)
-                .range(light_buffer.size())
-        ];
-
         let (light_descriptor, layout) = DescriptorBuilder::new()
-            .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
+            .bind_buffer(0, 1, &[light_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(device, data).unwrap();
 
         let mut light_object = Object::new("light");
@@ -247,17 +226,10 @@ pub fn create_debug_axes_object(instance: &Instance, device: &Device, data: &mut
         model,
         normal: model.inverse().transpose(),
     };
-    let object_buffer = Buffer::create_and_stage(instance, device, data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix");
-
-    let buffer_info = &[
-        vk::DescriptorBufferInfo::default()
-            .buffer(object_buffer.buffer())
-            .offset(0)
-            .range(object_buffer.size())
-    ];
+    let object_buffer = Buffer::create_and_stage(instance, device, data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix").unwrap();
 
     let (object_descriptor, _) = DescriptorBuilder::new()
-        .bind_buffer(0, 1, buffer_info, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
+        .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
         .build_data(device, data).unwrap();
 
     let mut debug_axes = Object::new("axes");
