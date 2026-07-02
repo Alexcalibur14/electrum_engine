@@ -45,14 +45,13 @@ impl SimpleCamera {
             position,
         };
 
-        camera_object.create_and_load_buffer_host(instance, device, data, &[camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "camera_data");
-
-        let camera_data_buffer = camera_object.buffers().items()[0];
+        let camera_data_buffer = Buffer::create_and_load(instance, device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocalStaged, &[camera_data], "camera_data").unwrap();
 
         let (descriptor_set, layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(device, data).unwrap();
 
+        camera_object.add_buffer(camera_data_buffer, "camera_data");
         camera_object.add_descriptor_set(descriptor_set, "camera_data");
         data.layouts.push(layout, "main_camera");
 
@@ -118,17 +117,19 @@ impl SimpleCamera {
         self.position = self.view.to_scale_rotation_translation().2;
     }
 
-    pub fn rebuild(&mut self, device: &Device, data: &RendererData) {
+    pub fn rebuild(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
         let camera_object = data.objects.get(&self.object_handle).unwrap();
 
         camera_object.buffers().get("camera_data").unwrap().copy_data_into_buffer(
+            instance,
             device,
+            data,
             &CameraData {
                 view: self.view,
                 proj: self.projection.proj,
                 position: self.position,
             }
-        );
+        ).unwrap();
     }
 }
 

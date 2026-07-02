@@ -632,7 +632,7 @@ pub unsafe fn create_texture_image(
 
     // Copy (staging)
 
-    staging_buffer.copy_array_into_buffer(device, pixels);
+    staging_buffer.copy_array_into_buffer(instance, device, data, pixels)?;
 
     // Create (image)
 

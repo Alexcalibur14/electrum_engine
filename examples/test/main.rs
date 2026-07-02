@@ -422,7 +422,7 @@ impl<'a> ApplicationHandler for App<'a> {
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
-            BufferType::HostLocal,
+            BufferType::DeviceLocalStaged,
             &[colour_correction_data],
             "colour_correction_data"
         ).unwrap();
@@ -513,7 +513,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
                 let cc_object = renderer.data.objects.get_with_tag("colour_correction")[0];
                 let cc_buffer = cc_object.get_buffer("colour_correction_data");
-                cc_buffer.copy_data_into_buffer(&renderer.device, &self.colour_correction);
+                cc_buffer.copy_data_into_buffer(&renderer.instance, &renderer.device, &renderer.data, &self.colour_correction).unwrap();
 
                 unsafe { renderer.render(window, &mut |ctx| {
                     ctx.style_mut(|style| style.visuals.window_shadow = egui::epaint::Shadow::NONE);
@@ -575,7 +575,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
                 self.camera.projection.aspect_ratio = new_size.width as f32 / new_size.height as f32;
                 self.camera.projection.recalculate();
-                self.camera.rebuild(&renderer.device, &renderer.data);
+                self.camera.rebuild(&renderer.instance, &renderer.device, &renderer.data);
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key, state, .. }, .. } => {
                 match physical_key {
