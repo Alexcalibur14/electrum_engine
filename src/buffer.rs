@@ -42,6 +42,7 @@ fn create_buffer(
         memory: buffer_memory,
         size,
         offset: 0,
+        staging: None,
     };
 
     set_object_name(
@@ -114,53 +115,15 @@ pub fn copy_buffer(device: &Device, command_buffer: vk::CommandBuffer, src: Buff
     unsafe { device.cmd_copy_buffer(command_buffer, src.buffer(), dst.buffer(), &[region]) };
 }
 
-/// Creates a [device local](vk::MemoryPropertyFlags::DEVICE_LOCAL) buffer and fills it with `contents`
-fn create_and_stage_buffer<T>(
-    instance: &Instance,
-    device: &Device,
-    data: &RendererData,
-    usage: vk::BufferUsageFlags,
-    name: &str,
-    contents: &[T],
-) -> Result<Buffer> {
-    let size = size_of_val(contents) as vk::DeviceSize;
-
-    let mut staging_buffer = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-        "",
-    )?;
-
-    staging_buffer.copy_vec_into_buffer(device, contents);
-
-    let buffer = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_DST | usage,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        name,
-    )?;
-
-    copy_buffer_immediate(
-        instance,
-        device,
-        data,
-        &staging_buffer,
-        &buffer,
-    )?;
-
-    staging_buffer.destroy(device);
-
-    Ok(buffer)
+/// Decides where the buffer will be allocated
+pub enum BufferType {
+    /// Allocates the buffer in Host memory (Main Memory) 
+    HostLocal,
+    /// Allocates the buffer in Device (GPU) memory
+    DeviceLocal,
+    /// Allocates a buffer in both Host and Device memory
+    DeviceLocalStaged,
 }
-
-// TODO: Add buffer operation error type
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Buffer {
@@ -168,6 +131,7 @@ pub struct Buffer {
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
     offset: vk::DeviceSize,
+    staging: Option<(vk::Buffer, vk::DeviceMemory)>,
 }
 
 impl Buffer {
@@ -177,44 +141,62 @@ impl Buffer {
         data: &RendererData,
         size: vk::DeviceSize,
         usage: vk::BufferUsageFlags,
-        properties: vk::MemoryPropertyFlags,
+        buffer_type: BufferType,
         name: &str
     ) -> Result<Self> {
-        create_buffer(instance, device, data, size, usage, properties, name)
+        match buffer_type {
+            BufferType::HostLocal => {
+                create_buffer(instance, device, data, size, usage, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)
+            },
+            BufferType::DeviceLocal => {
+                create_buffer(instance, device, data, size, usage, vk::MemoryPropertyFlags::DEVICE_LOCAL, name)
+            },
+            BufferType::DeviceLocalStaged => {
+                let mut buffer = create_buffer(instance, device, data, size, usage | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::DEVICE_LOCAL, name)?;
+                let staging = create_buffer(instance, device, data, size, vk::BufferUsageFlags::TRANSFER_SRC, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)?;
+
+                buffer.staging = Some((staging.buffer, staging.memory));
+                Ok(buffer)
+            },
+        }
     }
 
     pub fn create_and_load<T>(
         instance: &Instance,
         device: &Device,
         data: &RendererData,
-        contents: &[T],
         usage: vk::BufferUsageFlags,
-        name: &str
-    ) -> Result<Self> {
-        let buffer = create_buffer(
-            instance,
-            device,
-            data,
-            size_of_val(contents) as vk::DeviceSize,
-            usage,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            name
-        )?;
-
-        buffer.copy_vec_into_buffer(device, contents);
-
-        Ok(buffer)
-    }
-
-    pub fn create_and_stage<T>(
-        instance: &Instance,
-        device: &Device,
-        data: &RendererData,
+        buffer_type: BufferType,
         contents: &[T],
-        usage: vk::BufferUsageFlags,
         name: &str
-    ) -> Result<Self> {
-        create_and_stage_buffer(instance, device, data, usage, name, contents)
+    ) -> Result<Buffer> {
+        match buffer_type {
+            BufferType::HostLocal => {
+                let buffer = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize, usage, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)?;
+                buffer.copy_array_into_buffer(device, contents);
+
+                Ok(buffer)
+            },
+            BufferType::DeviceLocal => {
+                let buffer = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize, usage | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::DEVICE_LOCAL, name)?;
+                let mut staging = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize, vk::BufferUsageFlags::TRANSFER_SRC, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)?;
+                staging.copy_array_into_buffer(device, contents);
+                staging.copy_to_buffer_immediate(instance, device, data, &buffer)?;
+
+                staging.destroy(device);
+
+                Ok(buffer)
+            },
+            BufferType::DeviceLocalStaged => {
+                let mut buffer = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize, usage  | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::DEVICE_LOCAL, name)?;
+                let staging = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize,  vk::BufferUsageFlags::TRANSFER_SRC, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)?;
+                staging.copy_array_into_buffer(device, contents);
+                staging.copy_to_buffer_immediate(instance, device, data, &buffer)?;
+
+                buffer.staging = Some((staging.buffer, staging.memory));
+                Ok(buffer)
+            },
+        }
     }
 
     pub fn buffer(&self) -> vk::Buffer {
@@ -272,7 +254,7 @@ impl Buffer {
     }
 
     /// Copies a vec into the buffer
-    pub fn copy_vec_into_buffer<T>(&self, device: &Device, data: &[T]) {
+    pub fn copy_array_into_buffer<T>(&self, device: &Device, data: &[T]) {
         let buffer_mem =
             unsafe { device.map_memory(self.memory, self.offset, size_of_val(data) as vk::DeviceSize, vk::MemoryMapFlags::empty()) }
                 .unwrap();
@@ -283,7 +265,7 @@ impl Buffer {
     }
 
     /// Copies a vec into the buffer with an offset of `offset` in the buffer
-    pub fn copy_vec_into_buffer_with_offset<T>(
+    pub fn copy_array_into_buffer_with_offset<T>(
         &self,
         device: &Device,
         data: &[T],

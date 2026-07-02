@@ -6,7 +6,7 @@ use std::path::Path;
 use ash::{Device, Instance, vk};
 use glam::{Vec2, Vec3};
 
-use crate::{RendererData, Vertex, buffer::Buffer, image::Image, resources::NamedVec};
+use crate::{RendererData, Vertex, buffer::{Buffer, BufferType}, image::Image, resources::NamedVec};
 
 #[derive(Debug, Clone, Default)]
 pub struct MeshData {
@@ -71,8 +71,9 @@ impl MeshData {
             instance,
             device,
             data,
-            vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
+            BufferType::HostLocal,
+            vertices,
             &format!("{} Vertex", self.name)
         ).unwrap();
 
@@ -88,8 +89,9 @@ impl MeshData {
             instance,
             device,
             data,
-            indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
+            BufferType::HostLocal,
+            indices,
             &format!("{} Index", self.name)
         ).unwrap());
 
@@ -105,8 +107,9 @@ impl MeshData {
             instance,
             device,
             data,
-            instances,
             vk::BufferUsageFlags::VERTEX_BUFFER,
+            BufferType::HostLocal,
+            instances,
             &format!("{} Instance", self.name)
         ).unwrap());
     }
@@ -116,12 +119,13 @@ impl MeshData {
     pub fn build_vertex_staged<V: Vertex>(&mut self, instance: &Instance, device: &Device, data: &RendererData, vertices: &[V]) {
         self.vertex_len = vertices.len() as u32;
 
-        self.vertex_buffer = Some(Buffer::create_and_stage(
+        self.vertex_buffer = Some(Buffer::create_and_load(
             instance,
             device,
             data,
-            vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
+            BufferType::DeviceLocal,
+            vertices,
             &format!("{} Vertex", self.name)
         ).unwrap());
     }
@@ -131,12 +135,13 @@ impl MeshData {
     pub fn build_index_staged<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
         self.index_len = indices.len() as u32;
         
-        self.index_buffer = Some(Buffer::create_and_stage(
+        self.index_buffer = Some(Buffer::create_and_load(
             instance,
             device,
             data,
-            indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
+            BufferType::DeviceLocal,
+            indices,
             &format!("{} Index", self.name)
         ).unwrap());
 
@@ -148,12 +153,13 @@ impl MeshData {
     pub fn build_instance_staged<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, instances: &[I]) {
         self.instance_len = instances.len() as u32;
         
-        self.instance_buffer = Some(Buffer::create_and_stage(
+        self.instance_buffer = Some(Buffer::create_and_load(
             instance,
             device,
             data,
-            instances,
             vk::BufferUsageFlags::VERTEX_BUFFER,
+            BufferType::DeviceLocal,
+            instances,
             &format!("{} Instance", self.name)
         ).unwrap());
     }
@@ -340,7 +346,7 @@ impl<'a> Object<'a> {
             data,
             size,
             usage,
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            BufferType::HostLocal,
             name
         ).unwrap();
 
@@ -354,7 +360,7 @@ impl<'a> Object<'a> {
             data,
             size,
             usage,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            BufferType::DeviceLocal,
             name
         ).unwrap();
 
@@ -366,8 +372,9 @@ impl<'a> Object<'a> {
             instance,
             device,
             data,
-            contents,
             usage,
+            BufferType::HostLocal,
+            contents,
             name
         ).unwrap();
 
@@ -375,12 +382,13 @@ impl<'a> Object<'a> {
     }
 
     pub fn create_and_load_buffer_device<T>(&mut self, instance: &Instance, device: &Device, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
-        let buffer = Buffer::create_and_stage(
+        let buffer = Buffer::create_and_load(
             instance,
             device,
             data,
-            contents,
             usage,
+            BufferType::DeviceLocal,
+            contents,
             name
         ).unwrap();
 

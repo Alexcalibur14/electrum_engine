@@ -6,7 +6,7 @@ use ash::{Device, Instance};
 use anyhow::{Result, anyhow};
 use image::ImageReader;
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, BufferType};
 use crate::{begin_single_time_commands, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -626,13 +626,13 @@ pub unsafe fn create_texture_image(
         data,
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        BufferType::HostLocal,
         "Image staging buffer",
     )?;
 
     // Copy (staging)
 
-    staging_buffer.copy_vec_into_buffer(device, pixels);
+    staging_buffer.copy_array_into_buffer(device, pixels);
 
     // Create (image)
 

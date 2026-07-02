@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use ash::{Device, Instance, vk};
 use glam::{Mat4, Quat, Vec3, vec2, vec3, vec4};
 
-use crate::{RendererData, buffer::Buffer, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
+use crate::{RendererData, buffer::{Buffer, BufferType}, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
 
 
 #[repr(C)]
@@ -175,7 +175,7 @@ pub struct Light {
 
 impl Light {
     pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, light_data: LightData) -> Self {
-        let light_buffer = Buffer::create_and_stage(instance, device, data, &[light_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "light_data").unwrap();
+        let light_buffer = Buffer::create_and_load(instance, device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocal, &[light_data], "light_data").unwrap();
         
         let (light_descriptor, layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[light_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
@@ -226,7 +226,7 @@ pub fn create_debug_axes_object(instance: &Instance, device: &Device, data: &mut
         model,
         normal: model.inverse().transpose(),
     };
-    let object_buffer = Buffer::create_and_stage(instance, device, data, &[model_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "object_matrix").unwrap();
+    let object_buffer = Buffer::create_and_load(instance, device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocal, &[model_data], "object_matrix").unwrap();
 
     let (object_descriptor, _) = DescriptorBuilder::new()
         .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
