@@ -2,7 +2,7 @@ use ash::vk;
 use ash::{Device, Instance};
 use anyhow::{Result, anyhow};
 
-use std::ptr::copy_nonoverlapping as memcpy;
+use std::ptr::{copy_nonoverlapping as memcpy, read};
 
 use crate::{begin_single_time_commands, end_single_time_commands, set_object_name, RendererData};
 
@@ -161,7 +161,7 @@ impl Buffer {
             },
             BufferType::DeviceLocalStaged => {
                 let mut buffer = create_buffer(instance, device, data, size, usage | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::DEVICE_LOCAL, name)?;
-                let staging = create_buffer(instance, device, data, size, vk::BufferUsageFlags::TRANSFER_SRC, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)?;
+                let staging = create_buffer(instance, device, data, size, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, &format!("{} Staging", name))?;
 
                 buffer.staging = Some((staging.buffer, staging.memory));
                 buffer.buffer_type = buffer_type;
@@ -201,7 +201,7 @@ impl Buffer {
             },
             BufferType::DeviceLocalStaged => {
                 let mut buffer = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize, usage  | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::DEVICE_LOCAL, name)?;
-                let staging = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize,  vk::BufferUsageFlags::TRANSFER_SRC, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, name)?;
+                let staging = create_buffer(instance, device, data, size_of_val(contents) as vk::DeviceSize,  vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, &format!("{} Staging", name))?;
                 staging.copy_array_into_buffer(instance, device, data, contents)?;
                 staging.copy_to_buffer_immediate(instance, device, data, &buffer)?;
 
@@ -269,7 +269,7 @@ impl Buffer {
                 unsafe { device.unmap_memory(self.memory) };
             },
             BufferType::DeviceLocal => {
-                let staging = create_buffer(
+                let mut staging = create_buffer(
                     instance,
                     device,
                     data,
@@ -293,6 +293,8 @@ impl Buffer {
                 unsafe { device.unmap_memory(staging.memory) };
 
                 staging.copy_to_buffer_immediate(instance, device, data, self)?;
+
+                staging.destroy(device);
             },
             BufferType::DeviceLocalStaged => {
                 // staging is guarateed to be some if the DeviceType is DeviceLocalStaged.
@@ -343,7 +345,7 @@ impl Buffer {
                 unsafe { device.unmap_memory(self.memory) };
             },
             BufferType::DeviceLocal => {
-                let staging = create_buffer(
+                let mut staging = create_buffer(
                     instance,
                     device,
                     data,
@@ -367,6 +369,8 @@ impl Buffer {
                 unsafe { device.unmap_memory(staging.memory) };
 
                 staging.copy_to_buffer_immediate_offset(instance, device, data, self, 0, offset)?;
+
+                staging.destroy(device);
             },
             BufferType::DeviceLocalStaged => {
                 // staging is guarateed to be some if the DeviceType is DeviceLocalStaged.
@@ -416,7 +420,7 @@ impl Buffer {
                 unsafe { device.unmap_memory(self.memory) };
             },
             BufferType::DeviceLocal => {
-                let staging = create_buffer(
+                let mut staging = create_buffer(
                     instance,
                     device,
                     data,
@@ -440,6 +444,8 @@ impl Buffer {
                 unsafe { device.unmap_memory(staging.memory) };
 
                 staging.copy_to_buffer_immediate(instance, device, data, self)?;
+
+                staging.destroy(device);
             },
             BufferType::DeviceLocalStaged => {
                 // staging is guarateed to be some if the DeviceType is DeviceLocalStaged.
@@ -490,7 +496,7 @@ impl Buffer {
                 unsafe { device.unmap_memory(self.memory) };
             },
             BufferType::DeviceLocal => {
-                let staging = create_buffer(
+                let mut staging = create_buffer(
                     instance,
                     device,
                     data,
@@ -514,6 +520,8 @@ impl Buffer {
                 unsafe { device.unmap_memory(staging.memory) };
 
                 staging.copy_to_buffer_immediate_offset(instance, device, data, self, 0, offset)?;
+
+                staging.destroy(device);
             },
             BufferType::DeviceLocalStaged => {
                 // staging is guarateed to be some if the DeviceType is DeviceLocalStaged.
@@ -548,7 +556,7 @@ impl Buffer {
         unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, dst.buffer(), &[region]) };
     }
 
-    pub fn copy_to_buffer_offset(&self, device: &Device, command_buffer: vk::CommandBuffer, dst: &Buffer, src_offset: vk::DeviceSize, dst_offset: vk::DeviceSize, ) {
+    pub fn copy_to_buffer_offset(&self, device: &Device, command_buffer: vk::CommandBuffer, dst: &Buffer, src_offset: vk::DeviceSize, dst_offset: vk::DeviceSize) {
         let region = vk::BufferCopy::default()
             .src_offset(self.offset + src_offset)
             .dst_offset(dst.offset + dst_offset)
@@ -587,6 +595,289 @@ impl Buffer {
         Ok(())
     }
 
+    pub fn read_from_buffer<T>(&self, instance: &Instance, device: &Device, data: &RendererData) -> Result<T> {
+        match self.buffer_type {
+            BufferType::HostLocal => {
+                let buffer_mem = unsafe {
+                    device.map_memory(
+                        self.memory,
+                        self.offset,
+                        size_of::<T>() as vk::DeviceSize,
+                        vk::MemoryMapFlags::empty(),
+                    )
+                }?;
+
+                let out = unsafe { read::<T>(buffer_mem as *const T) };
+
+                unsafe { device.unmap_memory(self.memory) };
+
+                Ok(out)
+            },
+            BufferType::DeviceLocal => {
+                let mut staging = create_buffer(
+                    instance,
+                    device,
+                    data,
+                    size_of::<T>() as vk::DeviceSize,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    "staging",
+                )?;
+
+                self.copy_to_buffer_immediate(instance, device, data, &staging)?;
+
+                let staging_mem = unsafe { device.map_memory(staging.memory, 0, size_of::<T>() as vk::DeviceSize, vk::MemoryMapFlags::empty()) }?;
+
+                let out = unsafe { read::<T>(staging_mem as *const T) };
+
+                unsafe { device.unmap_memory(staging.memory) };
+
+                staging.destroy(device);
+
+                Ok(out)
+            },
+            BufferType::DeviceLocalStaged => {
+                self.transfer_to_host_immediate(instance, device, data)?;
+
+                let (_, staging_memory) = self.staging.unwrap();
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging_memory,
+                    0,
+                    size_of::<T>() as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let out = unsafe { read(staging_mem as *const T) };
+
+                unsafe { device.unmap_memory(staging_memory) };
+
+                Ok(out)
+            },
+        }
+    }
+
+    pub fn read_from_buffer_offset<T>(&self, instance: &Instance, device: &Device, data: &RendererData, offset: vk::DeviceSize) -> Result<T> {
+        match self.buffer_type {
+            BufferType::HostLocal => {
+                let buffer_mem = unsafe {
+                    device.map_memory(
+                        self.memory,
+                        self.offset + offset,
+                        size_of::<T>() as vk::DeviceSize,
+                        vk::MemoryMapFlags::empty(),
+                    )
+                }?;
+
+                let out = unsafe { read::<T>(buffer_mem as *const T) };
+
+                unsafe { device.unmap_memory(self.memory) };
+
+                Ok(out)
+            },
+            BufferType::DeviceLocal => {
+                let mut staging = create_buffer(
+                    instance,
+                    device,
+                    data,
+                    size_of::<T>() as vk::DeviceSize,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    "staging",
+                )?;
+
+                self.copy_to_buffer_immediate(instance, device, data, &staging)?;
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging.memory,
+                    offset,
+                    size_of::<T>() as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let out = unsafe { read::<T>(staging_mem as *const T) };
+
+                unsafe { device.unmap_memory(staging.memory) };
+
+                staging.destroy(device);
+
+                Ok(out)
+            },
+            BufferType::DeviceLocalStaged => {
+                self.transfer_to_host_immediate_offset(instance, device, data, offset)?;
+
+                let (_, staging_memory) = self.staging.unwrap();
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging_memory,
+                    offset,
+                    size_of::<T>() as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let out = unsafe { read(staging_mem as *const T) };
+
+                unsafe { device.unmap_memory(staging_memory) };
+
+                Ok(out)
+            },
+        }
+    }
+
+    pub fn read_into_vec<T>(&self, instance: &Instance, device: &Device, data: &RendererData, count: usize) -> Result<Vec<T>> {
+        match self.buffer_type {
+            BufferType::HostLocal => {
+                let staging_mem = unsafe { device.map_memory(
+                    self.memory,
+                    0,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let mut out: Vec<T> = Vec::with_capacity(count);
+
+                for i in 0..count as isize {
+                    out.push(unsafe { read(staging_mem.offset(i) as *const T) });
+                }
+
+                unsafe { device.unmap_memory(self.memory) };
+
+                Ok(out)
+            },
+            BufferType::DeviceLocal => {
+                let mut staging = create_buffer(
+                    instance,
+                    device,
+                    data,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    "staging",
+                )?;
+
+                self.copy_to_buffer_immediate(instance, device, data, &staging)?;
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging.memory,
+                    0,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let mut out: Vec<T> = Vec::with_capacity(count);
+
+                for i in 0..count as isize {
+                    out.push(unsafe { read(staging_mem.offset(i) as *const T) });
+                }
+
+                unsafe { device.unmap_memory(self.memory) };
+
+                staging.destroy(device);
+
+                Ok(out)
+            },
+            BufferType::DeviceLocalStaged => {
+                self.transfer_to_host_immediate(instance, device, data)?;
+
+                let (_, staging_memory) = self.staging.unwrap();
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging_memory,
+                    0,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let mut out: Vec<T> = Vec::with_capacity(count);
+
+                for i in 0..count as isize {
+                    out.push(unsafe { read(staging_mem.offset(i) as *const T) });
+                }
+
+                unsafe { device.unmap_memory(staging_memory) };
+
+                Ok(out)
+            },
+        }
+    }
+
+    pub fn read_into_vec_offset<T>(&self, instance: &Instance, device: &Device, data: &RendererData, count: usize, offset: vk::DeviceSize) -> Result<Vec<T>> {
+        match self.buffer_type {
+            BufferType::HostLocal => {
+                let staging_mem = unsafe { device.map_memory(
+                    self.memory,
+                    self.offset + offset,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let mut out: Vec<T> = Vec::with_capacity(count);
+
+                for i in 0..count as isize {
+                    out.push(unsafe { read(staging_mem.offset(i) as *const T) });
+                }
+
+                unsafe { device.unmap_memory(self.memory) };
+
+                Ok(out)
+            },
+            BufferType::DeviceLocal => {
+                let mut staging = create_buffer(
+                    instance,
+                    device,
+                    data,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    "staging",
+                )?;
+
+                self.copy_to_buffer_immediate_offset(instance, device, data, &staging, offset, 0)?;
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging.memory,
+                    0,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let mut out: Vec<T> = Vec::with_capacity(count);
+
+                for i in 0..count as isize {
+                    out.push(unsafe { read(staging_mem.offset(i) as *const T) });
+                }
+
+                unsafe { device.unmap_memory(self.memory) };
+
+                staging.destroy(device);
+
+                Ok(out)
+            },
+            BufferType::DeviceLocalStaged => {
+                self.transfer_to_host_immediate_offset(instance, device, data, offset)?;
+
+                let (_, staging_memory) = self.staging.unwrap();
+
+                let staging_mem = unsafe { device.map_memory(
+                    staging_memory,
+                    offset,
+                    (size_of::<T>() * count) as vk::DeviceSize,
+                    vk::MemoryMapFlags::empty()
+                ) }?;
+
+                let mut out: Vec<T> = Vec::with_capacity(count);
+
+                for i in 0..count as isize {
+                    out.push(unsafe { read(staging_mem.offset(i) as *const T) });
+                }
+
+                unsafe { device.unmap_memory(staging_memory) };
+
+                Ok(out)
+            },
+        }
+    }
+
     pub fn descriptor_info(&self) -> vk::DescriptorBufferInfo {
         vk::DescriptorBufferInfo::default()
             .buffer(self.buffer)
@@ -619,8 +910,8 @@ impl Buffer {
 
     fn transfer_to_device_immediate_offset(&self, instance: &Instance, device: &Device, data: &RendererData, offset: vk::DeviceSize) -> Result<()> {
         match self.buffer_type {
-            BufferType::HostLocal => panic!("transfer_to_device_immediate() is not supported for Host Local Buffers"),
-            BufferType::DeviceLocal => panic!("transfer_to_device_immediate() is not supported for Device Local Buffers"),
+            BufferType::HostLocal => panic!("transfer_to_device_immediate_offset() is not supported for Host Local Buffers"),
+            BufferType::DeviceLocal => panic!("transfer_to_device_immediate_offset() is not supported for Device Local Buffers"),
             BufferType::DeviceLocalStaged => {},
         }
 
@@ -637,6 +928,52 @@ impl Buffer {
 
         unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
         
+        Ok(())
+    }
+
+    fn transfer_to_host_immediate(&self, instance: &Instance, device: &Device, data: &RendererData) -> Result<()> {
+        match self.buffer_type {
+            BufferType::HostLocal => panic!("transfer_to_host_immediate() is not supported for Host Local Buffers"),
+            BufferType::DeviceLocal => panic!("transfer_to_host_immediate() is not supported for Device Local Buffers"),
+            BufferType::DeviceLocalStaged => {},
+        }
+
+        let (staging_buffer, _) = self.staging.unwrap();
+
+        let command_buffer =
+            unsafe { begin_single_time_commands(instance, device, data, "Copy Buffer") }?;
+
+        let regions = vk::BufferCopy::default()
+            .src_offset(self.offset())
+            .dst_offset(0)
+            .size(self.size());
+        unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, staging_buffer, &[regions]) };
+
+        unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
+
+        Ok(())
+    }
+
+    fn transfer_to_host_immediate_offset(&self, instance: &Instance, device: &Device, data: &RendererData, offset: vk::DeviceSize) -> Result<()> {
+        match self.buffer_type {
+            BufferType::HostLocal => panic!("transfer_to_host_immediate_offset() is not supported for Host Local Buffers"),
+            BufferType::DeviceLocal => panic!("transfer_to_host_immediate_offset() is not supported for Device Local Buffers"),
+            BufferType::DeviceLocalStaged => {},
+        }
+
+        let (staging_buffer, _) = self.staging.unwrap();
+
+        let command_buffer =
+            unsafe { begin_single_time_commands(instance, device, data, "Copy Buffer") }?;
+
+        let regions = vk::BufferCopy::default()
+            .src_offset(self.offset() + offset)
+            .dst_offset(offset)
+            .size(self.size() - offset);
+        unsafe { device.cmd_copy_buffer(command_buffer, self.buffer, staging_buffer, &[regions]) };
+
+        unsafe { end_single_time_commands(instance, device, data, command_buffer) }?;
+
         Ok(())
     }
 }

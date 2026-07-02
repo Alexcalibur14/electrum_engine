@@ -421,7 +421,7 @@ impl<'a> ApplicationHandler for App<'a> {
             &renderer.instance,
             &renderer.device,
             &renderer.data,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::BufferUsageFlags::UNIFORM_BUFFER |vk::BufferUsageFlags::TRANSFER_SRC,
             BufferType::DeviceLocalStaged,
             &[colour_correction_data],
             "colour_correction_data"
@@ -597,6 +597,15 @@ impl<'a> ApplicationHandler for App<'a> {
                                             self.renderer.as_mut().unwrap().resized = true;
                                         },
                                     }
+                                }
+                            }
+                            winit::keyboard::KeyCode::KeyP => {
+                                if state.is_pressed() {
+                                    let cc_object = renderer.data.objects.get_with_tag("colour_correction")[0];
+                                    let cc_buffer = cc_object.get_buffer("colour_correction_data");
+                                    let cc = cc_buffer.read_from_buffer::<ColourCorrection>(&renderer.instance, &renderer.device, &renderer.data).unwrap();
+
+                                    println!("{:?}", cc);
                                 }
                             }
                             _ => {}
