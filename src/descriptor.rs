@@ -184,6 +184,7 @@ impl DescriptorLayoutCache {
             b.descriptor_type.hash(&mut hasher);
             b.descriptor_count.hash(&mut hasher);
             b.stage_flags.hash(&mut hasher);
+            b.p_immutable_samplers.hash(&mut hasher);
         });
         hasher.finish()
     }
