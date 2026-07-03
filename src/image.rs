@@ -894,10 +894,10 @@ pub unsafe fn create_texture_sampler(
         .address_mode_w(address_mode.w)
         .anisotropy_enable(true)
         .max_anisotropy(16.0)
-        .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+        .border_color(address_mode.border_color)
         .unnormalized_coordinates(false)
-        .compare_enable(false)
-        .compare_op(vk::CompareOp::ALWAYS)
+        .compare_enable(true)
+        .compare_op(vk::CompareOp::GREATER_OR_EQUAL)
         .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
         .min_lod(0.0)
         .max_lod(*mip_level as f32)
@@ -909,8 +909,7 @@ pub unsafe fn create_texture_sampler(
         device,
         &format!("{} Texture Sampler", name),
         texture_sampler,
-    )
-    .unwrap();
+    )?;
 
     Ok(texture_sampler)
 }
@@ -956,6 +955,7 @@ pub struct AddressMode {
     pub u: vk::SamplerAddressMode,
     pub v: vk::SamplerAddressMode,
     pub w: vk::SamplerAddressMode,
+    pub border_color: vk::BorderColor,
 }
 
 impl AddressMode {
@@ -964,6 +964,7 @@ impl AddressMode {
             u: vk::SamplerAddressMode::REPEAT,
             v: vk::SamplerAddressMode::REPEAT,
             w: vk::SamplerAddressMode::REPEAT,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
         }
     };
 
@@ -972,6 +973,7 @@ impl AddressMode {
             u: vk::SamplerAddressMode::MIRRORED_REPEAT,
             v: vk::SamplerAddressMode::MIRRORED_REPEAT,
             w: vk::SamplerAddressMode::MIRRORED_REPEAT,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
         }
     };
 
@@ -980,22 +982,25 @@ impl AddressMode {
             u: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
             v: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
             w: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
         }
     };
     
-    pub const CLAMP_TO_BORDER: Self = {
+    pub const fn clamp_to_border(border_color: vk::BorderColor) -> Self {
         AddressMode {
             u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
             v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
             w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            border_color,
         }
-    };
+    }
     
     pub const CLAMP_TO_EDGE: Self = {
         AddressMode {
             u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
             v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
             w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
         }
     };
 }

@@ -75,11 +75,7 @@ float4 frag(
 float get_shadow(Sampler2DShadow shadow_map, float4 vert, float3 normal, float3 light_dir) {
     float3 proj_coords = vert.xyz / vert.w;
     float2 uv = proj_coords.xy * 0.5 + 0.5;
-
-    float closest_depth = shadow_map.Sample(uv);
-    float current_depth = proj_coords.z;
-
-    float shadow = closest_depth > current_depth ? 0.0 : 1.0;
+    float shadow = shadow_map.SampleCmp(uv, proj_coords.z);
 
     return shadow;
 }
