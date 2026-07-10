@@ -1,13 +1,12 @@
 use std::path::Path;
 
 use ash::vk::{self, Handle};
-use ash::{Device, Instance};
 
 use anyhow::{Result, anyhow};
 use image::ImageReader;
 
 use crate::buffer::{Buffer, BufferType};
-use crate::{begin_single_time_commands, end_single_time_commands, get_memory_type_index, set_object_name, RendererData};
+use crate::{RendererData, RenderingDevice, begin_single_time_commands, end_single_time_commands, get_memory_type_index, set_object_name};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum MipLevels {
@@ -55,8 +54,7 @@ pub struct Image {
 
 impl Image {
     pub fn new_1d(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &RendererData,
         width: u32,
         mip_levels: MipLevels,
@@ -75,7 +73,6 @@ impl Image {
 
         let (image, memory) = unsafe {
             create_image_1d(
-                instance,
                 device,
                 data,
                 width,
@@ -90,8 +87,8 @@ impl Image {
         }
         .unwrap();
 
-        set_object_name(instance, device, name, image).unwrap();
-        set_object_name(instance, device, &format!("{name}_memory"), memory).unwrap();
+        set_object_name(device, name, image).unwrap();
+        set_object_name(device, &format!("{name}_memory"), memory).unwrap();
 
         let view = unsafe { create_image_view(
             device,
@@ -103,19 +100,18 @@ impl Image {
             layer_count,
         ) }.unwrap();
 
-        set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
+        set_object_name(device, &format!("{name}_view"), view).unwrap();
 
         let sampler = match sampler {
             Some((filter, address_mode)) => {
                 let sampler = unsafe { create_texture_sampler(
-                    instance,
                     device,
                     &mips,
                     &filter,
                     &address_mode,
                     ""
                 ) }.unwrap();
-                set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+                set_object_name(device, &format!("{name}_sampler"), sampler).unwrap();
                 Some(sampler)
             },
             None => None,
@@ -132,8 +128,7 @@ impl Image {
     }
 
     pub fn new_2d(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &RendererData,
         width: u32,
         height: u32,
@@ -153,7 +148,6 @@ impl Image {
 
         let (image, memory) = unsafe {
             create_image_2d(
-                instance,
                 device,
                 data,
                 width,
@@ -169,8 +163,8 @@ impl Image {
         }
         .unwrap();
 
-        set_object_name(instance, device, name, image).unwrap();
-        set_object_name(instance, device, &format!("{name}_memory"), memory).unwrap();
+        set_object_name(device, name, image).unwrap();
+        set_object_name(device, &format!("{name}_memory"), memory).unwrap();
 
         let view = unsafe { create_image_view(
             device,
@@ -182,19 +176,18 @@ impl Image {
             layer_count,
         ) }.unwrap();
 
-        set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
+        set_object_name(device, &format!("{name}_view"), view).unwrap();
 
         let sampler = match sampler {
             Some((filter, address_mode)) => {
                 let sampler = unsafe { create_texture_sampler(
-                    instance,
                     device,
                     &mips,
                     &filter,
                     &address_mode,
                     ""
                 ) }.unwrap();
-                set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+                set_object_name(device, &format!("{name}_sampler"), sampler).unwrap();
                 Some(sampler)
             },
             None => None,
@@ -211,8 +204,7 @@ impl Image {
     }
 
     pub fn new_3d(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &RendererData,
         width: u32,
         height: u32,
@@ -233,7 +225,6 @@ impl Image {
 
         let (image, memory) = unsafe {
             create_image_3d(
-                instance,
                 device,
                 data,
                 width,
@@ -250,8 +241,8 @@ impl Image {
         }
         .unwrap();
 
-        set_object_name(instance, device, name, image).unwrap();
-        set_object_name(instance, device, &format!("{name}_memory"), memory).unwrap();
+        set_object_name(device, name, image).unwrap();
+        set_object_name(device, &format!("{name}_memory"), memory).unwrap();
 
         let view = unsafe { create_image_view(
             device,
@@ -263,19 +254,18 @@ impl Image {
             layer_count,
         ) }.unwrap();
 
-        set_object_name(instance, device, &format!("{name}_view"), view).unwrap();
+        set_object_name(device, &format!("{name}_view"), view).unwrap();
 
         let sampler = match sampler {
             Some((filter, address_mode)) => {
                 let sampler = unsafe { create_texture_sampler(
-                    instance,
                     device,
                     &mips,
                     &filter,
                     &address_mode,
                     ""
                 ) }.unwrap();
-                set_object_name(instance, device, &format!("{name}_sampler"), sampler).unwrap();
+                set_object_name(device, &format!("{name}_sampler"), sampler).unwrap();
                 Some(sampler)
             },
             None => None,
@@ -292,8 +282,7 @@ impl Image {
     }
 
     pub fn load_from_file<P: AsRef<Path>>(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &RendererData,
         path: P,
         mip_levels: MipLevels,
@@ -329,7 +318,6 @@ impl Image {
 
         let (image, image_memory) = unsafe {
             create_texture_image(
-                instance,
                 device,
                 data,
                 size,
@@ -355,7 +343,6 @@ impl Image {
 
         let sampler = sampler.map(|(filter, mode)| unsafe {
             create_texture_sampler(
-                instance,
                 device,
                 &mips,
                 &filter,
@@ -428,7 +415,7 @@ impl Image {
         self.extent
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         if let Some(sampler) = self.sampler {
             if !sampler.is_null() {
                 unsafe { device.destroy_sampler(sampler, None) };
@@ -460,8 +447,7 @@ impl Image {
 }
 
 pub unsafe fn create_image_1d(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     width: u32,
     mip_levels: u32,
@@ -495,7 +481,7 @@ pub unsafe fn create_image_1d(
     let info = vk::MemoryAllocateInfo::default()
         .allocation_size(requirements.size)
         .memory_type_index(get_memory_type_index(
-            instance,
+            &device.instance,
             data,
             properties,
             requirements,
@@ -509,8 +495,7 @@ pub unsafe fn create_image_1d(
 }
 
 pub unsafe fn create_image_2d(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     width: u32,
     height: u32,
@@ -545,7 +530,7 @@ pub unsafe fn create_image_2d(
     let info = vk::MemoryAllocateInfo::default()
         .allocation_size(requirements.size)
         .memory_type_index(get_memory_type_index(
-            instance,
+            &device.instance,
             data,
             properties,
             requirements,
@@ -559,8 +544,7 @@ pub unsafe fn create_image_2d(
 }
 
 pub unsafe fn create_image_3d(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     width: u32,
     height: u32,
@@ -596,7 +580,7 @@ pub unsafe fn create_image_3d(
     let info = vk::MemoryAllocateInfo::default()
         .allocation_size(requirements.size)
         .memory_type_index(get_memory_type_index(
-            instance,
+            &device.instance,
             data,
             properties,
             requirements,
@@ -610,8 +594,7 @@ pub unsafe fn create_image_3d(
 }
 
 pub unsafe fn create_texture_image(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     size: vk::DeviceSize,
     pixels: &[u8],
@@ -621,7 +604,6 @@ pub unsafe fn create_texture_image(
     format: vk::Format,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
     let mut staging_buffer = Buffer::new(
-        instance,
         device,
         data,
         size,
@@ -632,12 +614,11 @@ pub unsafe fn create_texture_image(
 
     // Copy (staging)
 
-    staging_buffer.copy_array_into_buffer(instance, device, data, pixels)?;
+    staging_buffer.copy_array_into_buffer(device, data, pixels)?;
 
     // Create (image)
 
     let (texture_image, texture_image_memory) = create_image_2d(
-        instance,
         device,
         data,
         width,
@@ -656,7 +637,6 @@ pub unsafe fn create_texture_image(
     // Transition + Copy (image)
 
     transition_image_layout(
-        instance,
         device,
         data,
         texture_image,
@@ -666,7 +646,6 @@ pub unsafe fn create_texture_image(
     )?;
 
     copy_buffer_to_image(
-        instance,
         device,
         data,
         staging_buffer.buffer(),
@@ -682,7 +661,6 @@ pub unsafe fn create_texture_image(
     // Mipmaps
 
     generate_mipmaps(
-        instance,
         device,
         data,
         texture_image,
@@ -698,8 +676,7 @@ pub unsafe fn create_texture_image(
 /// Transitions image layout  \
 /// Creates its own one time use command buffers so do not use when drawing
 unsafe fn transition_image_layout(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     image: vk::Image,
     old_layout: vk::ImageLayout,
@@ -724,7 +701,6 @@ unsafe fn transition_image_layout(
         };
 
     let command_buffer = begin_single_time_commands(
-        instance,
         device,
         data,
         "Transition Image Layout",
@@ -757,14 +733,13 @@ unsafe fn transition_image_layout(
         &[barrier],
     );
 
-    end_single_time_commands(instance, device, data, command_buffer)?;
+    end_single_time_commands(device, data, command_buffer)?;
 
     Ok(())
 }
 
 unsafe fn copy_buffer_to_image(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     buffer: vk::Buffer,
     image: vk::Image,
@@ -772,7 +747,7 @@ unsafe fn copy_buffer_to_image(
     height: u32,
 ) -> Result<()> {
     let command_buffer =
-        begin_single_time_commands(instance, device, data, "Copy Buffer To Image")?;
+        begin_single_time_commands(device, data, "Copy Buffer To Image")?;
 
     let subresource = vk::ImageSubresourceLayers::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -800,7 +775,7 @@ unsafe fn copy_buffer_to_image(
         &[region],
     );
 
-    end_single_time_commands(instance, device, data, command_buffer)?;
+    end_single_time_commands(device, data, command_buffer)?;
 
     Ok(())
 }
@@ -808,7 +783,7 @@ unsafe fn copy_buffer_to_image(
 /// Copies one image to another
 /// - `src` image must be in [TRANSFER_SRC_OPTIMAL](vk::ImageLayout::TRANSFER_SRC_OPTIMAL) image layout
 /// - `dst` image must be in [TRANSFER_DST_OPTIMAL](vk::ImageLayout::TRANSFER_DST_OPTIMAL) image layout
-pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, src: vk::Image, dst: vk::Image, src_size: vk::Extent2D, dst_size: vk::Extent2D, filter: vk::Filter) {
+pub fn copy_image_to_image(device: &RenderingDevice, command_buffer: vk::CommandBuffer, src: vk::Image, dst: vk::Image, src_size: vk::Extent2D, dst_size: vk::Extent2D, filter: vk::Filter) {
     let regions = [
         vk::ImageBlit2::default()
             .src_offsets([
@@ -854,7 +829,7 @@ pub fn copy_image_to_image(device: &Device, command_buffer: vk::CommandBuffer, s
 }
 
 pub unsafe fn create_image_view(
-    device: &Device,
+    device: &RenderingDevice,
     image: vk::Image,
     format: vk::Format,
     aspects: vk::ImageAspectFlags,
@@ -879,8 +854,7 @@ pub unsafe fn create_image_view(
 }
 
 pub unsafe fn create_texture_sampler(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     mip_level: &u32,
     filter: &Filter,
     address_mode: &AddressMode,
@@ -905,7 +879,6 @@ pub unsafe fn create_texture_sampler(
 
     let texture_sampler = device.create_sampler(&info, None)?;
     set_object_name(
-        instance,
         device,
         &format!("{} Texture Sampler", name),
         texture_sampler,
@@ -1006,8 +979,7 @@ impl AddressMode {
 }
 
 unsafe fn generate_mipmaps(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     image: vk::Image,
     format: vk::Format,
@@ -1017,7 +989,7 @@ unsafe fn generate_mipmaps(
 ) -> Result<()> {
     // Support
 
-    if !instance
+    if !device.instance
         .get_physical_device_format_properties(data.physical_device, format)
         .optimal_tiling_features
         .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
@@ -1030,7 +1002,7 @@ unsafe fn generate_mipmaps(
     // Mipmaps
 
     let command_buffer =
-        begin_single_time_commands(instance, device, data, "Generate MipMaps")?;
+        begin_single_time_commands(device, data, "Generate MipMaps")?;
 
     let subresource = vk::ImageSubresourceRange::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -1146,7 +1118,7 @@ unsafe fn generate_mipmaps(
         &[barrier],
     );
 
-    end_single_time_commands(instance, device, data, command_buffer)?;
+    end_single_time_commands(device, data, command_buffer)?;
 
     Ok(())
 }

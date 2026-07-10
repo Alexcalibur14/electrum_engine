@@ -1,9 +1,9 @@
 use std::f32::consts::PI;
 
-use ash::{Device, Instance, vk};
+use ash::vk;
 use glam::{vec2, vec3};
 
-use crate::{RendererData, extra::lerp, model::{MeshData, OBJVertex, Object}, resources::Handle};
+use crate::{RendererData, RenderingDevice, extra::lerp, model::{MeshData, OBJVertex, Object}, resources::Handle};
 
 pub struct Plane {
     width: f32,
@@ -13,8 +13,7 @@ pub struct Plane {
 
 impl Plane {
     pub fn new(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &mut RendererData,
         width: f32,
         height: f32,
@@ -57,8 +56,8 @@ impl Plane {
         
 
         let mut mesh_data = MeshData::new("Plane");
-        mesh_data.build_vertex_staged(instance, device, data, &vertices);
-        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
+        mesh_data.build_vertex_staged(device, data, &vertices);
+        mesh_data.build_index_staged(device, data, &indices, vk::IndexType::UINT32);
 
         let mut plane_object = Object::new("Plane");
         *plane_object.mesh_data_mut() = mesh_data;
@@ -92,8 +91,7 @@ pub struct UVSphere {
 
 impl UVSphere {
     pub fn new(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &mut RendererData,
         radius: f32,
         h_subdivisions: u32,
@@ -155,8 +153,8 @@ impl UVSphere {
         }
 
         let mut mesh_data = MeshData::new("Plane");
-        mesh_data.build_vertex_staged(instance, device, data, &vertices);
-        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
+        mesh_data.build_vertex_staged(device, data, &vertices);
+        mesh_data.build_index_staged(device, data, &indices, vk::IndexType::UINT32);
 
         let mut plane_object = Object::new("Plane");
         *plane_object.mesh_data_mut() = mesh_data;

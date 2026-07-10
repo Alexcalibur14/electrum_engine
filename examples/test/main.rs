@@ -4,12 +4,11 @@ use std::ffi::CString;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
-use ash::Device;
-use ash::Instance;
 use ash::vk;
 
 use anyhow::Result;
 use electrum_engine::CreationSettings;
+use electrum_engine::RenderingDevice;
 use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::buffer::BufferType;
@@ -98,10 +97,9 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let mut renderer = Renderer::new(&window, &settings).unwrap();
 
-        setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
+        setup_render_graph(&renderer.device, &mut renderer.data);
 
         let white_texture = Image::load_from_file(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             "examples/test/res/textures/white.png",
@@ -110,7 +108,6 @@ impl<'a> ApplicationHandler for App<'a> {
         );
 
         let uv_texture = Image::load_from_file(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             "examples/test/res/textures/UV_test.png",
@@ -124,14 +121,13 @@ impl<'a> ApplicationHandler for App<'a> {
         let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
 
         let view = Mat4::look_at_rh(vec3(0.0, 3.0, 5.0), vec3(0.0, 0.0, 0.0), Vec3::Y);
-        let camera = SimpleCamera::new_view(&renderer.instance, &renderer.device, &mut renderer.data, view, projection);
+        let camera = SimpleCamera::new_view(&renderer.device, &mut renderer.data, view, projection);
 
         self.camera = camera;
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.5, 0.0));
         let model_data = ModelData::new(model_matrix);
         let object_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -149,7 +145,6 @@ impl<'a> ApplicationHandler for App<'a> {
         };
 
         let material_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -170,7 +165,7 @@ impl<'a> ApplicationHandler for App<'a> {
         monkey.add_image(white_texture, "albedo");
         monkey.add_descriptor_set(material_descriptor, "material");
 
-        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.instance, &renderer.device, &renderer.data, "examples/test/res/models/MONKEY.obj")[0].clone();
+        *monkey.mesh_data_mut() = basic_obj_loader(&renderer.device, &renderer.data, "examples/test/res/models/MONKEY.obj")[0].clone();
 
         renderer.data.objects.push(monkey, &["main", "shadow"]);
 
@@ -178,7 +173,6 @@ impl<'a> ApplicationHandler for App<'a> {
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(0.0, 0.0, 0.0));
         let model_data = ModelData::new(model_matrix);
         let object_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -196,7 +190,6 @@ impl<'a> ApplicationHandler for App<'a> {
         };
 
         let material_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -210,7 +203,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_image(1, 1, &[uv_texture.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let plane = Plane::new(&renderer.instance, &renderer.device, &mut renderer.data, 10.0, 10.0, 10, 10, &["main", "shadow"]);
+        let plane = Plane::new(&renderer.device, &mut renderer.data, 10.0, 10.0, 10, 10, &["main", "shadow"]);
         let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
         plane_object.add_buffer(object_buffer, "mvp");
         plane_object.add_descriptor_set(object_descriptor, "mvp");
@@ -222,7 +215,6 @@ impl<'a> ApplicationHandler for App<'a> {
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(-2.0, 2.0, 0.0));
         let model_data = ModelData::new(model_matrix);
         let object_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -240,7 +232,6 @@ impl<'a> ApplicationHandler for App<'a> {
         };
 
         let material_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -254,7 +245,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .bind_image(1, 1, &[uv_texture.descriptor_info(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)], vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT)
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        let uv_sphere = UVSphere::new(&renderer.instance, &renderer.device, &mut renderer.data, 1.0, 6, 12, &["main", "shadow"]);
+        let uv_sphere = UVSphere::new(&renderer.device, &mut renderer.data, 1.0, 6, 12, &["main", "shadow"]);
         let uv_sphere_object = renderer.data.objects.get_mut(&uv_sphere.object()).unwrap();
         uv_sphere_object.add_buffer(object_buffer, "mvp");
         uv_sphere_object.add_descriptor_set(object_descriptor, "mvp");
@@ -272,7 +263,7 @@ impl<'a> ApplicationHandler for App<'a> {
             strength: 25.0,
             light_type: LightType::Directional,
         };
-        self.light = Light::new(&renderer.instance, &renderer.device, &mut renderer.data, light_data);
+        self.light = Light::new(&renderer.device, &mut renderer.data, light_data);
 
         let (depth_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "shadow_map").unwrap();
 
@@ -290,7 +281,6 @@ impl<'a> ApplicationHandler for App<'a> {
             position: light_position,
         };
         let light_camera_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -308,7 +298,6 @@ impl<'a> ApplicationHandler for App<'a> {
 
 
         let pipeline = create_basic_slang_graphics_pipeline::<OBJVertex>(
-            &renderer.instance,
             &renderer.device,
             &main_shader,
             RasterizationData {
@@ -343,7 +332,6 @@ impl<'a> ApplicationHandler for App<'a> {
         shadow_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let (shadow_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
-            &renderer.instance,
             &renderer.device,
             &shadow_shader,
             RasterizationData {
@@ -378,7 +366,6 @@ impl<'a> ApplicationHandler for App<'a> {
         debug_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let (debug_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
-            &renderer.instance,
             &renderer.device,
             &debug_shader,
             RasterizationData {
@@ -426,7 +413,6 @@ impl<'a> ApplicationHandler for App<'a> {
         };
         self.colour_correction = colour_correction_data;
         let cc_buffer = Buffer::create_and_load(
-            &renderer.instance,
             &renderer.device,
             &renderer.data,
             vk::BufferUsageFlags::UNIFORM_BUFFER |vk::BufferUsageFlags::TRANSFER_SRC,
@@ -459,7 +445,6 @@ impl<'a> ApplicationHandler for App<'a> {
         cc_object.add_descriptor_set(cc_image_descriptor, "colour_correction_images");
 
         let (cc_pipeline, layout) = create_basic_slang_graphics_pipeline::<NullVertex>(
-            &renderer.instance,
             &renderer.device,
             &cc_shader,
             RasterizationData {
@@ -521,7 +506,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
                 let cc_object = renderer.data.objects.get_with_tag("colour_correction")[0];
                 let cc_buffer = cc_object.get_buffer("colour_correction_data");
-                cc_buffer.copy_data_into_buffer(&renderer.instance, &renderer.device, &renderer.data, &self.colour_correction).unwrap();
+                cc_buffer.copy_data_into_buffer(&renderer.device, &renderer.data, &self.colour_correction).unwrap();
 
                 unsafe { renderer.render(window, &mut |ctx| {
                     ctx.style_mut(|style| style.visuals.window_shadow = egui::epaint::Shadow::NONE);
@@ -583,7 +568,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
                 self.camera.projection.aspect_ratio = new_size.width as f32 / new_size.height as f32;
                 self.camera.projection.recalculate();
-                self.camera.rebuild(&renderer.instance, &renderer.device, &renderer.data);
+                self.camera.rebuild(&renderer.device, &renderer.data);
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key, state, .. }, .. } => {
                 match physical_key {
@@ -611,7 +596,7 @@ impl<'a> ApplicationHandler for App<'a> {
                                 if state.is_pressed() {
                                     let cc_object = renderer.data.objects.get_with_tag("colour_correction")[0];
                                     let cc_buffer = cc_object.get_buffer("colour_correction_data");
-                                    let cc = cc_buffer.read_from_buffer::<ColourCorrection>(&renderer.instance, &renderer.device, &renderer.data).unwrap();
+                                    let cc = cc_buffer.read_from_buffer::<ColourCorrection>(&renderer.device, &renderer.data).unwrap();
 
                                     println!("{:?}", cc);
                                 }
@@ -627,7 +612,7 @@ impl<'a> ApplicationHandler for App<'a> {
     }
 }
 
-fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererData) {
+fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
     let mut task_graph = TaskGraph::new();
 
         let image = ImageData::new(
@@ -720,7 +705,7 @@ fn setup_render_graph(instance: &Instance, device: &Device, data: &mut RendererD
         present_node.set_task(Box::new(Present));
         task_graph.add_node(present_node);
 
-        task_graph.create_images(instance, device, data);
+        task_graph.create_images(device, data);
         data.task_graph = task_graph;
 }
 
@@ -767,8 +752,8 @@ impl EguiData {
 struct ShadowPass;
 
 impl Task for ShadowPass {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Shadow Pass", vec4(0.0, 0.6, 0.2, 1.0));
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(device, command_buffer, "Shadow Pass", vec4(0.0, 0.6, 0.2, 1.0));
         
         let depth_attachment = vk::RenderingAttachmentInfo::default()
             .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 }  })
@@ -822,20 +807,20 @@ impl Task for ShadowPass {
 
         unsafe { device.cmd_end_rendering(command_buffer) };
         
-        end_command_label(instance, device, command_buffer);
+        end_command_label(device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
+    fn recreate_swapchain(&mut self, _: &RenderingDevice, _: &mut RendererData, _: &DrawData) {}
 
-    fn destroy(&mut self, _: &Device) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[derive(Debug, Clone, Copy)]
 struct MainDraw;
 
 impl Task for MainDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Main Draw", vec4(0.0, 0.6, 0.2, 1.0));
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(device, command_buffer, "Main Draw", vec4(0.0, 0.6, 0.2, 1.0));
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -904,20 +889,20 @@ impl Task for MainDraw {
 
         unsafe { device.cmd_end_rendering(command_buffer) };
 
-        end_command_label(instance, device, command_buffer);
+        end_command_label(device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
+    fn recreate_swapchain(&mut self, _: &RenderingDevice, _: &mut RendererData, _: &DrawData) {}
 
-    fn destroy(&mut self, _: &Device) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[derive(Debug, Clone, Copy)]
 struct ColourCorrectionPass;
 
 impl Task for ColourCorrectionPass {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Colour Correction", vec4(0.0, 0.5, 0.5, 1.0));
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(device, command_buffer, "Colour Correction", vec4(0.0, 0.5, 0.5, 1.0));
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -980,10 +965,10 @@ impl Task for ColourCorrectionPass {
 
         unsafe { device.cmd_end_rendering(command_buffer) };
 
-        end_command_label(instance, device, command_buffer);
+        end_command_label(device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData) {
+    fn recreate_swapchain(&mut self, device: &RenderingDevice, data: &mut RendererData, draw_data: &DrawData) {
         let image = draw_data.internal_images[0];
 
         let cc_objects = data.objects.get_mut_with_tag("colour_correction");
@@ -1000,19 +985,19 @@ impl Task for ColourCorrectionPass {
         );
     }
 
-    fn destroy(&mut self, _: &Device) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[derive(Debug, Clone, Copy)]
 struct EguiDraw;
 
 impl Task for EguiDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
         let enable = true;
 
         if !enable { return; }
 
-        begin_command_label(instance, device, command_buffer, "Egui Draw", vec4(0.4, 0.5, 0.7, 1.0));
+        begin_command_label(device, command_buffer, "Egui Draw", vec4(0.4, 0.5, 0.7, 1.0));
         
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -1037,20 +1022,20 @@ impl Task for EguiDraw {
 
         unsafe { device.cmd_end_rendering(command_buffer) };
 
-        end_command_label(instance, device, command_buffer);
+        end_command_label(device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
+    fn recreate_swapchain(&mut self, _: &RenderingDevice, _: &mut RendererData, _: &DrawData) {}
 
-    fn destroy(&mut self, _: &Device) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[derive(Debug, Clone, Copy)]
 struct DebugDraw;
 
 impl Task for DebugDraw {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Debug Draw", vec4(0.0, 0.6, 0.2, 1.0));
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
+        begin_command_label(device, command_buffer, "Debug Draw", vec4(0.0, 0.6, 0.2, 1.0));
 
         let attachment_infos = [
             vk::RenderingAttachmentInfo::default()
@@ -1105,32 +1090,32 @@ impl Task for DebugDraw {
 
         unsafe { device.cmd_end_rendering(command_buffer) };
 
-        end_command_label(instance, device, command_buffer);
+        end_command_label(device, command_buffer);
     }
 
-    fn recreate_swapchain(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
+    fn recreate_swapchain(&mut self, _: &RenderingDevice, _: &mut RendererData, _: &DrawData) {}
 
-    fn destroy(&mut self, _: &Device) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Present;
 
 impl Task for Present {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
-        begin_command_label(instance, device, command_buffer, "Present", vec4(0.7, 0.0, 0.7, 1.0));
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, _: &mut RenderStats) {
+        begin_command_label(device, command_buffer, "Present", vec4(0.7, 0.0, 0.7, 1.0));
         
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::UNDEFINED, AccessType::transfer_dst(), vk::ImageAspectFlags::COLOR);
 
         copy_image_to_image(device, command_buffer, draw_data.color_attachments[0].image(), data.swapchain_images[data.image_index], draw_data.color_attachments[0].extent_2d(), data.swapchain_extent, vk::Filter::NEAREST);
 
         transition_image_access(device, command_buffer, data.swapchain_images[data.image_index], AccessType::transfer_dst(), AccessType::present_src(), vk::ImageAspectFlags::COLOR);
-        end_command_label(instance, device, command_buffer);
+        end_command_label(device, command_buffer);
     }
     
-    fn recreate_swapchain(&mut self, _: &ash::Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
+    fn recreate_swapchain(&mut self, _: &RenderingDevice, _: &mut RendererData, _: &DrawData) {}
 
-    fn destroy(&mut self, _: &Device) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[repr(C)]

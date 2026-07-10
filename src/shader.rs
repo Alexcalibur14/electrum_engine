@@ -1,9 +1,9 @@
 use std::{ffi::CString, fs, io::Cursor, path::Path};
 
-use ash::{Device, Instance, util::read_spv, vk};
+use ash::{util::read_spv, vk};
 use slang_rs::{convert::{get_descriptor_type, get_shader_stage}, enums::{CompileTarget, TypeKind}, interfaces::{AsComponentType, GlobalSession}, structs::{SessionDesc, TargetDesc}};
 
-use crate::{RendererData, Vertex, set_object_name};
+use crate::{RendererData, RenderingDevice, Vertex, set_object_name};
 
 #[derive(Debug, Clone)]
 pub struct GraphicsProgram<'a> {
@@ -99,14 +99,14 @@ impl<'a> GraphicsProgram<'a> {
         self.fragment_path = Some(fragment_path)
     }
 
-    pub fn load_shader_modules_spirv(&mut self, instance: &Instance, device: &Device) {
+    pub fn load_shader_modules_spirv(&mut self, device: &RenderingDevice) {
         let bytecode = read_spv(&mut fs::File::open(self.vertex_path).unwrap()).unwrap();
         let create_info = vk::ShaderModuleCreateInfo::default()
             .code(&bytecode);
 
         let vertex = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
 
-        set_object_name(instance, device, &format!("{} Vertex Shader", self.name), vertex).unwrap();
+        set_object_name(device, &format!("{} Vertex Shader", self.name), vertex).unwrap();
 
         let vertex_module = vk::PipelineShaderStageCreateInfo::default()
             .module(vertex)
@@ -122,7 +122,7 @@ impl<'a> GraphicsProgram<'a> {
 
             let tess_ctrl = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
 
-            set_object_name(instance, device, &format!("{} Tessalation Control Shader", self.name), tess_ctrl).unwrap();
+            set_object_name(device, &format!("{} Tessalation Control Shader", self.name), tess_ctrl).unwrap();
 
             let tess_ctrl_module = vk::PipelineShaderStageCreateInfo::default()
                 .module(tess_ctrl)
@@ -139,7 +139,7 @@ impl<'a> GraphicsProgram<'a> {
 
             let tess_eval = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
 
-            set_object_name(instance, device, &format!("{} Tessalation Evaluation Shader", self.name), tess_eval).unwrap();
+            set_object_name(device, &format!("{} Tessalation Evaluation Shader", self.name), tess_eval).unwrap();
 
             let tess_eval_module = vk::PipelineShaderStageCreateInfo::default()
                 .module(tess_eval)
@@ -156,7 +156,7 @@ impl<'a> GraphicsProgram<'a> {
 
             let geometry = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
 
-            set_object_name(instance, device, &format!("{} Geometry Shader", self.name), geometry).unwrap();
+            set_object_name(device, &format!("{} Geometry Shader", self.name), geometry).unwrap();
 
             let geometry_module = vk::PipelineShaderStageCreateInfo::default()
                 .module(geometry)
@@ -173,7 +173,7 @@ impl<'a> GraphicsProgram<'a> {
 
             let fragment = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
 
-            set_object_name(instance, device, &format!("{} Fragment Shader", self.name), fragment).unwrap();
+            set_object_name(device, &format!("{} Fragment Shader", self.name), fragment).unwrap();
 
             let fragment_module = vk::PipelineShaderStageCreateInfo::default()
                 .module(fragment)
@@ -210,7 +210,7 @@ impl<'a> GraphicsProgram<'a> {
         stages
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         if let Some(vertex_module) = self.vertex_module {
             unsafe { device.destroy_shader_module(vertex_module.module, None) };
         }
@@ -239,8 +239,7 @@ impl<'a> GraphicsProgram<'a> {
 }
 
 pub fn create_basic_graphics_pipeline<'a, V: Vertex>(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     program: &GraphicsProgram,
     rasterization_data: RasterizationData,
     multisample_data: MultisampleData,
@@ -303,7 +302,7 @@ pub fn create_basic_graphics_pipeline<'a, V: Vertex>(
 
     let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
 
-    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
         .color_attachment_formats(color_attachment_formats)
@@ -327,7 +326,7 @@ pub fn create_basic_graphics_pipeline<'a, V: Vertex>(
 
     let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
 
-    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
 
     (pipeline, layout)
 }
@@ -378,14 +377,14 @@ impl<'a> ComputeProgram<'a> {
         self.compute_module
     }
 
-    pub fn load_shader_module_spirv(&mut self, instance: &Instance, device: &Device) {
+    pub fn load_shader_module_spirv(&mut self, device: &RenderingDevice) {
         let bytecode = read_spv(&mut fs::File::open(self.compute_path).unwrap()).unwrap();
         let create_info = vk::ShaderModuleCreateInfo::default()
             .code(&bytecode);
 
         let compute = unsafe { device.create_shader_module(&create_info, None) }.unwrap();
 
-        set_object_name(instance, device, &format!("{} Compute Shader", self.name), compute).unwrap();
+        set_object_name(device, &format!("{} Compute Shader", self.name), compute).unwrap();
 
         let compute_module = vk::PipelineShaderStageCreateInfo::default()
             .module(compute)
@@ -397,8 +396,7 @@ impl<'a> ComputeProgram<'a> {
 }
 
 pub fn create_compute_pipeline(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     program: &ComputeProgram,
     push_constant_ranges: &[vk::PushConstantRange],
     set_layouts: &[vk::DescriptorSetLayout],
@@ -409,14 +407,14 @@ pub fn create_compute_pipeline(
         .push_constant_ranges(push_constant_ranges);
 
     let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
-    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
 
     let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
         .stage(program.compute_module.unwrap())
         .layout(layout);
 
     let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
-    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
 
     (pipeline, layout)
 }
@@ -456,7 +454,7 @@ impl<'a> SlangShader<'a> {
         &self.set_layouts
     }
 
-    pub fn load_and_compile(&mut self, device: &Device, data: &mut RendererData) {
+    pub fn load_and_compile(&mut self, device: &RenderingDevice, data: &mut RendererData) {
         let global_session = GlobalSession::new().expect("failed to create a global session");
 
         let spriv_profile = global_session.find_profile("spirv_1_5");
@@ -609,15 +607,14 @@ impl<'a> SlangShader<'a> {
         self.set_layouts = layouts;
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         self.program.iter().for_each(|s| unsafe { device.destroy_shader_module(s.module, None) });
         self.program.clear();
     }
 }
 
 pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     program: &SlangShader,
     rasterization_data: RasterizationData,
     multisample_data: MultisampleData,
@@ -679,7 +676,7 @@ pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
 
     let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
 
-    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
         .color_attachment_formats(color_attachment_formats)
@@ -702,14 +699,13 @@ pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
 
     let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
 
-    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
 
     (pipeline, layout)
 }
 
 pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     program: &SlangShader,
     rasterization_data: RasterizationData,
     multisample_data: MultisampleData,
@@ -772,7 +768,7 @@ pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
 
     let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
 
-    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
         .color_attachment_formats(color_attachment_formats)
@@ -795,14 +791,13 @@ pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
 
     let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
 
-    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
 
     (pipeline, layout)
 }
 
 pub fn create_slang_compute_pipeline_descr(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     program: &SlangShader,
     push_constant_ranges: &[vk::PushConstantRange],
     set_layouts: &[vk::DescriptorSetLayout],
@@ -813,14 +808,14 @@ pub fn create_slang_compute_pipeline_descr(
         .push_constant_ranges(push_constant_ranges);
 
     let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
-    set_object_name(instance, device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
 
     let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
         .stage(program.program()[0])
         .layout(layout);
 
     let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
-    set_object_name(instance, device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
 
     (pipeline, layout)
 }

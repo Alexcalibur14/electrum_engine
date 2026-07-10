@@ -1,21 +1,20 @@
 use ash::vk;
-use ash::{Entry, Device, Instance};
+use ash::Entry;
 use glam::vec4;
 
-use crate::{begin_command_label, end_command_label, QueueFamilyIndices, RendererData};
+use crate::{QueueFamilyIndices, RendererData, RenderingDevice, begin_command_label, end_command_label};
 use anyhow::Result;
 
 pub(crate) unsafe fn create_command_pools(
     entry: &Entry,
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &mut RendererData,
 ) -> Result<()> {
-    data.command_pool = create_command_pool(entry, instance, device, data)?;
+    data.command_pool = create_command_pool(entry, device, data)?;
 
     let num_images = data.swapchain_images.len();
     for _ in 0..num_images {
-        let command_pool = create_command_pool(entry, instance, device, data)?;
+        let command_pool = create_command_pool(entry, device, data)?;
         data.command_pools.push(command_pool);
     }
 
@@ -24,11 +23,10 @@ pub(crate) unsafe fn create_command_pools(
 
 unsafe fn create_command_pool(
     entry: &Entry,
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &mut RendererData,
 ) -> Result<vk::CommandPool> {
-    let indices = QueueFamilyIndices::get(entry, instance, data, data.physical_device)?;
+    let indices = QueueFamilyIndices::get(entry, &device.instance, data, data.physical_device)?;
 
     let info = vk::CommandPoolCreateInfo::default()
         .flags(vk::CommandPoolCreateFlags::TRANSIENT)
@@ -38,7 +36,7 @@ unsafe fn create_command_pool(
 }
 
 pub(crate) unsafe fn create_command_buffers(
-    device: &Device,
+    device: &RenderingDevice,
     data: &mut RendererData,
 ) -> Result<()> {
     let num_images = data.swapchain_images.len();
@@ -63,8 +61,7 @@ pub(crate) unsafe fn create_command_buffers(
 /// the function `end_single_time_commands` must be called after this
 /// function is called
 pub unsafe fn begin_single_time_commands(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     name: &str,
 ) -> Result<vk::CommandBuffer> {
@@ -79,7 +76,7 @@ pub unsafe fn begin_single_time_commands(
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
     device.begin_command_buffer(command_buffer, &info)?;
-    begin_command_label(instance, device, command_buffer, name, vec4(1.0, 0.0, 1.0, 1.0));
+    begin_command_label(device, command_buffer, name, vec4(1.0, 0.0, 1.0, 1.0));
 
     Ok(command_buffer)
 }
@@ -88,12 +85,11 @@ pub unsafe fn begin_single_time_commands(
 /// # Safety
 /// this function **must** only be called after a call to `begin_single_time_commands`
 pub unsafe fn end_single_time_commands(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &RendererData,
     command_buffer: vk::CommandBuffer,
 ) -> Result<()> {
-    end_command_label(instance, device, command_buffer);
+    end_command_label(device, command_buffer);
     device.end_command_buffer(command_buffer)?;
 
     let command_buffers = &[command_buffer];
@@ -107,10 +103,10 @@ pub unsafe fn end_single_time_commands(
     Ok(())
 }
 
-pub fn execute_command<F>(instance: &Instance, device: &Device, data: &RendererData, name: &str, f: F)
+pub fn execute_command<F>(device: &RenderingDevice, data: &RendererData, name: &str, f: F)
 where F: FnOnce(vk::CommandBuffer)
 {
-    let command_buffer = unsafe { begin_single_time_commands(instance, device, data, name) }.unwrap();
+    let command_buffer = unsafe { begin_single_time_commands(device, data, name) }.unwrap();
     f(command_buffer);
-    unsafe { end_single_time_commands(instance, device, data, command_buffer) }.unwrap();
+    unsafe { end_single_time_commands(device, data, command_buffer) }.unwrap();
 }

@@ -1,24 +1,22 @@
-use ash::khr::swapchain;
 use ash::vk;
-use ash::{Entry, Instance, Device};
+use ash::Entry;
 
 use anyhow::Result;
 
-use crate::{create_image_view, QueueFamilyIndices, RendererData, SwapchainSupport};
+use crate::{QueueFamilyIndices, RendererData, RenderingDevice, SwapchainSupport, create_image_view};
 
 
 pub(crate) unsafe fn create_swapchain(
     entry: &Entry,
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &mut RendererData,
     width: u32,
     height: u32,
 ) -> Result<u32> {
     // Image
 
-    let indices = QueueFamilyIndices::get(entry, instance, data, data.physical_device)?;
-    let support = SwapchainSupport::get(entry, instance, data, data.physical_device)?;
+    let indices = QueueFamilyIndices::get(entry, &device.instance, data, data.physical_device)?;
+    let support = SwapchainSupport::get(entry, &device.instance, data, data.physical_device)?;
 
     let surface_format = get_swapchain_surface_format(&support.formats);
     let present_mode = get_swapchain_present_mode(&support.present_modes);
@@ -72,13 +70,11 @@ pub(crate) unsafe fn create_swapchain(
         .clipped(false)
         .old_swapchain(data.swapchain);
 
-    let swapchain_loader = swapchain::Device::new(&instance, &device);
-
-    data.swapchain = swapchain_loader.create_swapchain(&info, None)?;
+    data.swapchain = device.swapchain_device.create_swapchain(&info, None)?;
 
     // Images
 
-    data.swapchain_images = swapchain_loader.get_swapchain_images(data.swapchain)?;
+    data.swapchain_images = device.swapchain_device.get_swapchain_images(data.swapchain)?;
 
     Ok(image_count)
 }
@@ -103,7 +99,7 @@ fn get_swapchain_present_mode(present_modes: &[vk::PresentModeKHR]) -> vk::Prese
 }
 
 pub(crate) unsafe fn create_swapchain_image_views(
-    device: &Device,
+    device: &RenderingDevice,
     data: &mut RendererData,
 ) -> Result<()> {
     data.swapchain_image_views = data
@@ -111,7 +107,7 @@ pub(crate) unsafe fn create_swapchain_image_views(
         .iter()
         .map(|i| {
             create_image_view(
-                device,
+                &device,
                 *i,
                 data.swapchain_format,
                 vk::ImageAspectFlags::COLOR,
@@ -125,7 +121,7 @@ pub(crate) unsafe fn create_swapchain_image_views(
     Ok(())
 }
 
-pub fn transition_image(device: &Device, command_buffer: vk::CommandBuffer, image: vk::Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) {
+pub fn transition_image(device: &RenderingDevice, command_buffer: vk::CommandBuffer, image: vk::Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) {
     let (src_stage_mask, dst_stage_mask) = if new_layout == vk::ImageLayout::PRESENT_SRC_KHR {
         (vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
     } else {

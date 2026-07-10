@@ -1,9 +1,9 @@
 use std::f32::consts::PI;
 
-use ash::{Device, Instance, vk};
+use ash::vk;
 use glam::{Mat4, Quat, Vec3, vec2, vec3, vec4};
 
-use crate::{RendererData, buffer::{Buffer, BufferType}, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
+use crate::{RendererData, RenderingDevice, buffer::{Buffer, BufferType}, descriptor::DescriptorBuilder, model::{MeshData, OBJVertex, Object}, resources::Handle};
 
 
 #[repr(C)]
@@ -25,8 +25,7 @@ pub struct SimpleCamera {
 
 impl SimpleCamera {
     pub fn new(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &mut RendererData,
         position: Vec3,
         rotation: Vec3,
@@ -45,7 +44,7 @@ impl SimpleCamera {
             position,
         };
 
-        let camera_data_buffer = Buffer::create_and_load(instance, device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocalStaged, &[camera_data], "camera_data").unwrap();
+        let camera_data_buffer = Buffer::create_and_load(device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocalStaged, &[camera_data], "camera_data").unwrap();
 
         let (descriptor_set, layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
@@ -67,8 +66,7 @@ impl SimpleCamera {
     }
 
     pub fn new_view(
-        instance: &Instance,
-        device: &Device,
+        device: &RenderingDevice,
         data: &mut RendererData,
         view: Mat4,
         projection: Projection
@@ -84,7 +82,7 @@ impl SimpleCamera {
             position,
         };
 
-        camera_object.create_and_load_buffer_host(instance, device, data, &[camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "camera_data");
+        camera_object.create_and_load_buffer_host(device, data, &[camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "camera_data");
 
         let camera_data_buffer = camera_object.buffers().items()[0];
 
@@ -117,11 +115,10 @@ impl SimpleCamera {
         self.position = self.view.to_scale_rotation_translation().2;
     }
 
-    pub fn rebuild(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
+    pub fn rebuild(&mut self, device: &RenderingDevice, data: &RendererData) {
         let camera_object = data.objects.get(&self.object_handle).unwrap();
 
         camera_object.buffers().get("camera_data").unwrap().copy_data_into_buffer(
-            instance,
             device,
             data,
             &CameraData {
@@ -175,8 +172,8 @@ pub struct Light {
 }
 
 impl Light {
-    pub fn new(instance: &Instance, device: &Device, data: &mut RendererData, light_data: LightData) -> Self {
-        let light_buffer = Buffer::create_and_load(instance, device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocal, &[light_data], "light_data").unwrap();
+    pub fn new(device: &RenderingDevice, data: &mut RendererData, light_data: LightData) -> Self {
+        let light_buffer = Buffer::create_and_load(device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocal, &[light_data], "light_data").unwrap();
         
         let (light_descriptor, layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[light_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::FRAGMENT)
@@ -222,12 +219,12 @@ pub enum LightType {
     Directional
 }
 
-pub fn create_debug_axes_object(instance: &Instance, device: &Device, data: &mut RendererData, model: Mat4) -> Handle {
+pub fn create_debug_axes_object(device: &RenderingDevice, data: &mut RendererData, model: Mat4) -> Handle {
     let model_data = ModelData {
         model,
         normal: model.inverse().transpose(),
     };
-    let object_buffer = Buffer::create_and_load(instance, device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocal, &[model_data], "object_matrix").unwrap();
+    let object_buffer = Buffer::create_and_load(device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocal, &[model_data], "object_matrix").unwrap();
 
     let (object_descriptor, _) = DescriptorBuilder::new()
         .bind_buffer(0, 1, &[object_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
@@ -238,7 +235,7 @@ pub fn create_debug_axes_object(instance: &Instance, device: &Device, data: &mut
     debug_axes.add_descriptor_set(object_descriptor, "mvp");
 
     *debug_axes.mesh_data_mut() = MeshData::new("axes");
-    debug_axes.mesh_data_mut().build_vertex_staged(instance, device, data, &[
+    debug_axes.mesh_data_mut().build_vertex_staged(device, data, &[
         OBJVertex { position: vec3(0.0, 0.0, 0.0), normal: vec3(1.0, 0.0, 0.0), colour: vec3(1.0, 0.0, 0.0), uv: vec2(0.0, 0.0) },
         OBJVertex { position: vec3(1.0, 0.0, 0.0), normal: vec3(1.0, 0.0, 0.0), colour: vec3(1.0, 0.0, 0.0), uv: vec2(0.0, 0.0) },
         OBJVertex { position: vec3(0.0, 0.0, 0.0), normal: vec3(0.0, 1.0, 0.0), colour: vec3(0.0, 1.0, 0.0), uv: vec2(0.0, 0.0) },

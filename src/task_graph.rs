@@ -1,8 +1,8 @@
 use std::ops::BitOr;
 
-use ash::{Device, Instance, vk::{self}};
+use ash::vk;
 
-use crate::{RenderStats, RendererData, buffer::Buffer, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
+use crate::{RenderStats, RendererData, RenderingDevice, buffer::Buffer, image::{AddressMode, Filter, Image, MipLevels}, present::image_subresource_range};
 
 #[derive(Clone)]
 pub struct TaskGraph<'a> {
@@ -34,12 +34,12 @@ impl<'a> TaskGraph<'a> {
         self.buffers.push((name, buffer, AccessType::UNDEFINED));
     }
 
-    pub fn create_images(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
-        self.images.iter_mut().for_each(|(image_data, _)| image_data.create(instance, device, data));
+    pub fn create_images(&mut self, device: &RenderingDevice, data: &RendererData) {
+        self.images.iter_mut().for_each(|(image_data, _)| image_data.create(device, data));
         self.swapchain_extent = data.swapchain_extent;
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         self.images.iter_mut().for_each(|(image_data, access_type)| {
             image_data.destroy(device);
             *access_type = AccessType::UNDEFINED;
@@ -53,13 +53,13 @@ impl<'a> TaskGraph<'a> {
         self.swapchain_extent = vk::Extent2D::default();
     }
 
-    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &mut RendererData) {
+    pub fn recreate_swapchain(&mut self, device: &RenderingDevice, data: &mut RendererData) {
         if self.swapchain_extent == data.swapchain_extent {
             return;
         }
         
         self.images.iter_mut().for_each(|(image_data, access_type)| {
-            let resized = image_data.recreate_swapchain(instance, device, data);
+            let resized = image_data.recreate_swapchain(device, data);
             
             if resized {
                 *access_type = AccessType::UNDEFINED
@@ -114,11 +114,11 @@ impl<'a> TaskGraph<'a> {
                 external_buffers: vec![],
             };
         
-            node.recreate_swapchain(instance, device, data, &draw_data);
+            node.recreate_swapchain(device, data, &draw_data);
         });
     }
 
-    pub fn execute(&mut self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, data: &mut RendererData, stats: &mut RenderStats) {
+    pub fn execute(&mut self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, data: &mut RendererData, stats: &mut RenderStats) {
         for node in self.nodes.iter() {
             let color_attachments = node.color_attachments.iter().map(|(name, dst_access)| {
                 let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find color attachment with name: {:?}", name));
@@ -243,7 +243,7 @@ impl<'a> TaskGraph<'a> {
                 external_buffers: vec![],
             };
 
-            node.execute(instance, device, command_buffer, &draw_data, data, stats);
+            node.execute(device, command_buffer, &draw_data, data, stats);
 
             let mut images_clone = self.images.clone();
             
@@ -349,23 +349,23 @@ impl<'a> Node<'a> {
         self.task = task
     }
 
-    pub fn execute(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
-        self.task.execute(instance, device, command_buffer, draw_data, data, stats);
+    pub fn execute(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
+        self.task.execute(device, command_buffer, draw_data, data, stats);
     }
 
-    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData) {
-        self.task.recreate_swapchain(instance, device, data, draw_data);
+    pub fn recreate_swapchain(&mut self, device: &RenderingDevice, data: &mut RendererData, draw_data: &DrawData) {
+        self.task.recreate_swapchain(device, data, draw_data);
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         self.task.destroy(device);
     }
 }
 
 pub trait Task: TaskClone {
-    fn execute<'a>(&self, instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats);
-    fn recreate_swapchain<'a>(&mut self, instance: &Instance, device: &Device, data: &mut RendererData, draw_data: &DrawData);
-    fn destroy(&mut self, device: &Device);
+    fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats);
+    fn recreate_swapchain<'a>(&mut self, device: &RenderingDevice, data: &mut RendererData, draw_data: &DrawData);
+    fn destroy(&mut self, device: &RenderingDevice);
 }
 
 pub trait TaskClone {
@@ -401,9 +401,9 @@ pub struct DrawData {
 pub struct DummyTask;
 
 impl Task for DummyTask {
-    fn execute<'a>(&self, _: &Instance, _: &Device, _: vk::CommandBuffer, _: &DrawData, _: &mut RendererData, _: &mut RenderStats) {}
-    fn recreate_swapchain<'a>(&mut self, _: &Instance, _: &Device, _: &mut RendererData, _: &DrawData) {}
-    fn destroy(&mut self, _: &Device) {}
+    fn execute<'a>(&self, _: &RenderingDevice, _: vk::CommandBuffer, _: &DrawData, _: &mut RendererData, _: &mut RenderStats) {}
+    fn recreate_swapchain<'a>(&mut self, _: &RenderingDevice, _: &mut RendererData, _: &DrawData) {}
+    fn destroy(&mut self, _: &RenderingDevice) {}
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -744,11 +744,10 @@ impl<'a> ImageData<'a> {
     }
 
     /// Generates Image based on struct data
-    pub fn create(&mut self, instance: &Instance, device: &Device, data: &RendererData) {
+    pub fn create(&mut self, device: &RenderingDevice, data: &RendererData) {
         let (width, height) = self.size.size(data);
         
         self.image = Image::new_2d(
-            instance,
             device,
             data,
             width,
@@ -769,16 +768,16 @@ impl<'a> ImageData<'a> {
 
     /// Recreates image only if size is not fixed \
     /// Returns true if image was recreated
-    pub fn recreate_swapchain(&mut self, instance: &Instance, device: &Device, data: &RendererData) -> bool {
+    pub fn recreate_swapchain(&mut self, device: &RenderingDevice, data: &RendererData) -> bool {
         match self.size {
             ImageSize::Swapchain => {
                 self.destroy(device);
-                self.create(instance, device, data);
+                self.create(device, data);
                 true
             },
             ImageSize::SwapchainRelative {..} => {
                 self.destroy(device);
-                self.create(instance, device, data);
+                self.create(device, data);
                 true
             },
             ImageSize::Fixed {..} => false,
@@ -794,7 +793,7 @@ impl<'a> ImageData<'a> {
     }
 
     /// Destroys image
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         self.image.destroy(device);
     }
 }
@@ -829,7 +828,7 @@ impl ImageSize {
     }
 }
 
-pub fn transition_image_access(device: &Device, command_buffer: vk::CommandBuffer, image: vk::Image, src_access: AccessType, dst_access: AccessType, aspect: vk::ImageAspectFlags) {
+pub fn transition_image_access(device: &RenderingDevice, command_buffer: vk::CommandBuffer, image: vk::Image, src_access: AccessType, dst_access: AccessType, aspect: vk::ImageAspectFlags) {
     let image_barrier = [vk::ImageMemoryBarrier2::default()
         .src_access_mask(src_access.access_mask)
         .src_stage_mask(src_access.pipeline_stage)

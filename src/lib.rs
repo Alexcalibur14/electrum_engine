@@ -18,6 +18,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::{self, CStr, CString};
 use std::mem::ManuallyDrop;
+use std::ops::Deref;
 use std::ptr;
 use std::time::{Duration, Instant};
 
@@ -61,10 +62,24 @@ pub struct CreationSettings {
     pub validation: bool,
 }
 
-pub struct Renderer<'a> {
-    _entry: Entry,
+pub struct RenderingDevice {
     pub instance: Instance,
     pub device: Device,
+    pub debug_util_device: Option<debug_utils::Device>,
+    pub swapchain_device: swapchain::Device,
+}
+
+impl Deref for RenderingDevice {
+    type Target = Device;
+
+    fn deref(&self) -> &Self::Target {
+        &self.device
+    }
+}
+
+pub struct Renderer<'a> {
+    _entry: Entry,
+    pub device: RenderingDevice,
     pub data: ManuallyDrop<RendererData<'a>>,
     pub stats: RenderStats,
     pub width: u32,
@@ -101,15 +116,20 @@ impl<'a> Renderer<'a> {
         )}.unwrap();
 
         unsafe { pick_physical_device(&entry, &instance, &mut data)? };
-        let device = unsafe { create_logical_device(&entry, &instance, &mut data)? };
+        let mut device = unsafe { create_logical_device(&entry, instance, &mut data)? };
 
-        let image_count = unsafe { create_swapchain(&entry, &instance, &device, &mut data, width, height) }?;
+        device.debug_util_device = match settings.validation {
+            true => Some(debug_utils::Device::new(&device.instance, &device.device)),
+            false => None,
+        };
+
+        let image_count = unsafe { create_swapchain(&entry, &device, &mut data, width, height) }?;
         unsafe { create_swapchain_image_views(&device, &mut data) }?;
 
-        unsafe { create_command_pools(&entry, &instance, &device, &mut data) }.unwrap();
+        unsafe { create_command_pools(&entry, &device, &mut data) }.unwrap();
         unsafe { create_command_buffers(&device, &mut data) }.unwrap();
 
-        unsafe { create_sync_objects(&instance, &device, &mut data, image_count) }?;
+        unsafe { create_sync_objects(&device, &mut data, image_count) }?;
 
         let stats = RenderStats {
             start: Instant::now(),
@@ -146,7 +166,7 @@ impl<'a> Renderer<'a> {
             srgb_framebuffer: true,
         };
         let egui_renderer = egui_ash_renderer::Renderer::with_default_allocator(
-            &instance,
+            &device.instance,
             data.physical_device.clone(),
             device.clone(),
             dynamic_rendering,
@@ -161,9 +181,8 @@ impl<'a> Renderer<'a> {
 
         Ok(Renderer {
             _entry: entry,
-            instance,
-            data: ManuallyDrop::new(data),
             device,
+            data: ManuallyDrop::new(data),
             frame: 0,
             width,
             height,
@@ -187,8 +206,7 @@ impl<'a> Renderer<'a> {
             (inner_size.width, inner_size.height)
         };
 
-        let swapchain_loader = ash::khr::swapchain::Device::new(&self.instance, &self.device);
-        let result = swapchain_loader.acquire_next_image(
+        let result = self.device.swapchain_device.acquire_next_image(
             self.data.swapchain,
             1_000_000_000,
             self.data.swapchain_semaphores[self.frame],
@@ -257,7 +275,7 @@ impl<'a> Renderer<'a> {
             .swapchains(swapchains)
             .image_indices(image_indices);
 
-        let result = swapchain_loader.queue_present(self.data.present_queue, &present_info);
+        let result = self.device.swapchain_device.queue_present(self.data.present_queue, &present_info);
         let changed = 
             result == Ok(true)
             || result == Err(vk::Result::ERROR_OUT_OF_DATE_KHR);
@@ -297,7 +315,7 @@ impl<'a> Renderer<'a> {
         self.device.begin_command_buffer(command_buffer, &info)?;
 
         let mut task_graph = self.data.task_graph.clone();
-        task_graph.execute(&self.instance, &self.device, command_buffer, &mut self.data, &mut self.stats);
+        task_graph.execute(&self.device, command_buffer, &mut self.data, &mut self.stats);
         self.data.task_graph = task_graph;
 
         self.device.end_command_buffer(command_buffer)?;
@@ -314,17 +332,16 @@ impl<'a> Renderer<'a> {
         self.destroy_swapchain();
 
         let old_swapchain = self.data.swapchain;
-        create_swapchain(&self._entry, &self.instance, &self.device, &mut self.data, self.width, self.height)?;
+        create_swapchain(&self._entry, &self.device, &mut self.data, self.width, self.height)?;
 
-        let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
-        swapchain_loader.destroy_swapchain(old_swapchain, None);
+        self.device.swapchain_device.destroy_swapchain(old_swapchain, None);
 
         create_swapchain_image_views(&self.device, &mut self.data)?;
 
         create_command_buffers(&self.device, &mut self.data)?;
 
         let mut task_graph = self.data.task_graph.clone();
-        task_graph.recreate_swapchain(&self.instance, &self.device, &mut self.data);
+        task_graph.recreate_swapchain(&self.device, &mut self.data);
         self.data.task_graph = task_graph;
 
         Ok(())
@@ -370,8 +387,7 @@ impl<'a> Drop for Renderer<'a> {
         self.data.descriptor_pool.destroy(&self.device);
         self.data.descriptor_layout_cache.destroy(&self.device);
         
-        let swapchain_loader = swapchain::Device::new(&self.instance, &self.device);
-        unsafe { swapchain_loader.destroy_swapchain(self.data.swapchain, None) };
+        unsafe { self.device.swapchain_device.destroy_swapchain(self.data.swapchain, None) };
         self.data
             .command_pools
             .iter()
@@ -395,11 +411,11 @@ impl<'a> Drop for Renderer<'a> {
             .iter()
             .for_each(|s| unsafe { self.device.destroy_semaphore(*s, None) });
 
-        let surface_loader = surface::Instance::new(&self._entry, &self.instance);
+        let surface_loader = surface::Instance::new(&self._entry, &self.device.instance);
         unsafe { surface_loader.destroy_surface(self.data.surface, None) };
         
         if unsafe { VALIDATION_ENABLED } {
-            let debug_utils_loader = debug_utils::Instance::new(&self._entry, &self.instance);
+            let debug_utils_loader = debug_utils::Instance::new(&self._entry, &self.device.instance);
             unsafe { debug_utils_loader.destroy_debug_utils_messenger(self.data.messenger, None) };
         }
 
@@ -407,7 +423,7 @@ impl<'a> Drop for Renderer<'a> {
 
         unsafe { self.device.destroy_device(None) };
         
-        unsafe { self.instance.destroy_instance(None) };
+        unsafe { self.device.instance.destroy_instance(None) };
     }
 }
 
@@ -736,10 +752,10 @@ unsafe fn get_max_msaa_samples(instance: &Instance, data: &RendererData) -> vk::
     .unwrap_or(vk::SampleCountFlags::TYPE_1)
 }
 
-unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut RendererData) -> Result<Device> {
+unsafe fn create_logical_device(entry: &Entry, instance: Instance, data: &mut RendererData) -> Result<RenderingDevice> {
     // Queue Create Infos
 
-    let indices = QueueFamilyIndices::get(entry, instance, data, data.physical_device)?;
+    let indices = QueueFamilyIndices::get(entry, &instance, data, data.physical_device)?;
 
     let mut unique_indices = HashSet::new();
     unique_indices.insert(indices.graphics);
@@ -792,11 +808,18 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
         .enabled_features(&features);
     
     let device = instance.create_device(data.physical_device, &info, None)?;
+    let swapchain_device = swapchain::Device::new(&instance, &device);
+
+    let device = RenderingDevice {
+        instance,
+        device,
+        debug_util_device: None,
+        swapchain_device,
+    };
 
     // Queues
     let graphics_queue = device.get_device_queue(indices.graphics, 0);
     set_object_name(
-        instance,
         &device,
         "Graphics Queue",
         graphics_queue,
@@ -805,7 +828,6 @@ unsafe fn create_logical_device(entry: &Entry, instance: &Instance, data: &mut R
 
     let present_queue = device.get_device_queue(indices.present, 0);
     set_object_name(
-        instance,
         &device,
         "Present Queue",
         graphics_queue,
@@ -857,8 +879,7 @@ unsafe fn get_supported_format(
 }
 
 unsafe fn create_sync_objects(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     data: &mut RendererData,
     image_count: u32,
 ) -> Result<()> {
@@ -868,7 +889,6 @@ unsafe fn create_sync_objects(
     for i in 0..image_count {
         let swapchain_semaphore = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
-            instance,
             device,
             &format!("Image Available Semaphore {}", i),
             swapchain_semaphore,
@@ -878,7 +898,6 @@ unsafe fn create_sync_objects(
 
         let render_semaphore = device.create_semaphore(&semaphore_info, None)?;
         set_object_name(
-            instance,
             device,
             &format!("Render Finished Semaphore {}", i),
             render_semaphore,
@@ -888,7 +907,6 @@ unsafe fn create_sync_objects(
 
         let render_fence = device.create_fence(&fence_info, None)?;
         set_object_name(
-            instance,
             device,
             &format!("In Flight Fence {}", i),
             render_fence,
@@ -1016,19 +1034,17 @@ unsafe extern "system" fn debug_callback(
 }
 
 fn set_object_name(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     name: &str,
     object_handle: impl Handle,
 ) -> Result<()> {
-    if unsafe { VALIDATION_ENABLED } {
+    if let Some(debug_device) = &device.debug_util_device {
         let name_string = name.to_owned() + "\0";
         let name_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(name_string.as_bytes()) };
         let name_info = vk::DebugUtilsObjectNameInfoEXT::default()
             .object_name(name_cstr)
             .object_handle(object_handle);
 
-        let debug_device = debug_utils::Device::new(instance, device);
         unsafe { debug_device.set_debug_utils_object_name(&name_info) }?
     }
 
@@ -1036,27 +1052,27 @@ fn set_object_name(
 }
 
 pub fn begin_command_label(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     command_buffer: vk::CommandBuffer,
     name: &str,
     colour: Vec4,
 ) {
-    if unsafe { VALIDATION_ENABLED } {
+    if let Some(debug_device) = &device.debug_util_device {
         let name_string = name.to_owned() + "\0";
         let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
             .color(colour.to_array());
 
-        let debug_device = debug_utils::Device::new(instance, device);
         unsafe { debug_device.cmd_begin_debug_utils_label(command_buffer, &info) }
     }
 }
 
-pub fn end_command_label(instance: &Instance, device: &Device, command_buffer: vk::CommandBuffer) {
-    if unsafe { VALIDATION_ENABLED } {
-        let debug_device = debug_utils::Device::new(instance, device);
+pub fn end_command_label(
+    device: &RenderingDevice,
+    command_buffer: vk::CommandBuffer
+) {
+    if let Some(debug_device) = &device.debug_util_device {
         unsafe { debug_device.cmd_end_debug_utils_label(command_buffer) }
     }
 }
@@ -1064,20 +1080,17 @@ pub fn end_command_label(instance: &Instance, device: &Device, command_buffer: v
 /// This will place a label for debbuging applications to display at that point
 /// If all the values in the `colour` array are 0.0 the colour wil be ignored
 pub fn insert_command_label(
-    instance: &Instance,
-    device: &Device,
+    device: &RenderingDevice,
     command_buffer: vk::CommandBuffer,
     name: &str,
     colour: Vec4,
 ) {
-    if unsafe { VALIDATION_ENABLED } {
+    if let Some(debug_device) = &device.debug_util_device {
         let name_string = name.to_owned() + "\0";
         let name_cstr = CStr::from_bytes_with_nul(name_string.as_bytes()).unwrap();
         let info = vk::DebugUtilsLabelEXT::default()
             .label_name(name_cstr)
             .color(colour.to_array());
-
-        let debug_device = debug_utils::Device::new(instance, device);
 
         unsafe { debug_device.cmd_insert_debug_utils_label(command_buffer, &info) };
     }

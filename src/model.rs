@@ -3,10 +3,10 @@ pub mod primitives;
 use core::fmt;
 use std::path::Path;
 
-use ash::{Device, Instance, vk};
+use ash::vk;
 use glam::{Vec2, Vec3};
 
-use crate::{RendererData, Vertex, buffer::{Buffer, BufferType}, image::Image, resources::NamedVec};
+use crate::{RendererData, RenderingDevice, Vertex, buffer::{Buffer, BufferType}, image::Image, resources::NamedVec};
 
 #[derive(Debug, Clone, Default)]
 pub struct MeshData {
@@ -64,11 +64,10 @@ impl MeshData {
 
     /// Creates a buffer with [HOST_COHERENT](vk::MemoryPropertyFlags::HOST_COHERENT) and [HOST_VISIBLE](vk::MemoryPropertyFlags::HOST_VISIBLE)
     /// as memory properties and fills it with the [vertices](Self::vertices). \ Recomended only for vertex data that changes often
-    pub fn build_vertex_host<V: Vertex>(&mut self, instance: &Instance, device: &Device, data: &RendererData, vertices: &[V]) {
+    pub fn build_vertex_host<V: Vertex>(&mut self, device: &RenderingDevice, data: &RendererData, vertices: &[V]) {
         self.vertex_len = vertices.len() as u32;
         
         let vertex_buffer = Buffer::create_and_load(
-            instance,
             device,
             data,
             vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -82,11 +81,10 @@ impl MeshData {
 
     /// Creates a buffer with [HOST_COHERENT](vk::MemoryPropertyFlags::HOST_COHERENT) and [HOST_VISIBLE](vk::MemoryPropertyFlags::HOST_VISIBLE)
     /// as memory properties and fills it with the [indices](Self::indices). \ Recomended only for index data that changes often
-    pub fn build_index_host<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
+    pub fn build_index_host<I>(&mut self, device: &RenderingDevice, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
         self.index_len = indices.len() as u32;
         
         self.index_buffer = Some(Buffer::create_and_load(
-            instance,
             device,
             data,
             vk::BufferUsageFlags::INDEX_BUFFER,
@@ -100,11 +98,10 @@ impl MeshData {
 
     /// Creates a buffer with [HOST_COHERENT](vk::MemoryPropertyFlags::HOST_COHERENT) and [HOST_VISIBLE](vk::MemoryPropertyFlags::HOST_VISIBLE)
     /// as memory properties and fills it with the [instances](Self::instances). \ Recomended only for instance data that changes often
-    pub fn build_instance_host<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, instances: &[I]) {
+    pub fn build_instance_host<I>(&mut self, device: &RenderingDevice, data: &RendererData, instances: &[I]) {
         self.instance_len = instances.len() as u32;
         
         self.instance_buffer = Some(Buffer::create_and_load(
-            instance,
             device,
             data,
             vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -116,11 +113,10 @@ impl MeshData {
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
     /// as memory properties and fills it with the [vertices](Self::vertices). \ Recomended only for static vertex data
-    pub fn build_vertex_staged<V: Vertex>(&mut self, instance: &Instance, device: &Device, data: &RendererData, vertices: &[V]) {
+    pub fn build_vertex_staged<V: Vertex>(&mut self, device: &RenderingDevice, data: &RendererData, vertices: &[V]) {
         self.vertex_len = vertices.len() as u32;
 
         self.vertex_buffer = Some(Buffer::create_and_load(
-            instance,
             device,
             data,
             vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -132,11 +128,10 @@ impl MeshData {
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
     /// as memory properties and fills it with the [indices](Self::indices). \ Recomended only for static index data
-    pub fn build_index_staged<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
+    pub fn build_index_staged<I>(&mut self, device: &RenderingDevice, data: &RendererData, indices: &[I], index_type: vk::IndexType) {
         self.index_len = indices.len() as u32;
         
         self.index_buffer = Some(Buffer::create_and_load(
-            instance,
             device,
             data,
             vk::BufferUsageFlags::INDEX_BUFFER,
@@ -150,11 +145,10 @@ impl MeshData {
 
     /// Creates a buffer with [DEVICE_LOCAL](vk::MemoryPropertyFlags::DEVICE_LOCAL)
     /// as memory properties and fills it with the [instances](Self::instances). \ Recomended only for static instance data
-    pub fn build_instance_staged<I>(&mut self, instance: &Instance, device: &Device, data: &RendererData, instances: &[I]) {
+    pub fn build_instance_staged<I>(&mut self, device: &RenderingDevice, data: &RendererData, instances: &[I]) {
         self.instance_len = instances.len() as u32;
         
         self.instance_buffer = Some(Buffer::create_and_load(
-            instance,
             device,
             data,
             vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -166,7 +160,7 @@ impl MeshData {
 
     /// Binds the Vertex, Index, and Instance buffers (if present) \
     /// Does nothing if the buffers have not been built
-    pub fn bind_buffers(&self, device: &Device, command_buffer: vk::CommandBuffer) {
+    pub fn bind_buffers(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer) {
         if let Some(vertex_buffer) = self.vertex_buffer {
             unsafe { device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer.buffer()], &[0]) };
         }
@@ -185,7 +179,7 @@ impl MeshData {
         }
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         if let Some(vertex_buffer) = self.vertex_buffer.as_mut() {
             vertex_buffer.destroy(device);
         }
@@ -207,7 +201,7 @@ impl MeshData {
 }
 
 
-pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device: &Device, data: &RendererData, path: P) -> Vec<MeshData> {
+pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(device: &RenderingDevice, data: &RendererData, path: P) -> Vec<MeshData> {
     let (models, _) = tobj::load_obj(path, &tobj::LoadOptions {
         single_index: true,
         triangulate: false,
@@ -244,8 +238,8 @@ pub fn basic_obj_loader<P: AsRef<Path> + fmt::Debug>(instance: &Instance, device
 
         let mut mesh_data = MeshData::new(&name);
 
-        mesh_data.build_index_staged(instance, device, data, &indices, vk::IndexType::UINT32);
-        mesh_data.build_vertex_staged(instance, device, data, &vertices);
+        mesh_data.build_index_staged(device, data, &indices, vk::IndexType::UINT32);
+        mesh_data.build_vertex_staged(device, data, &vertices);
 
         mesh_data
     }).collect::<Vec<MeshData>>()
@@ -339,9 +333,8 @@ impl<'a> Object<'a> {
         *self.descriptor_sets.get_mut(name).unwrap() = descriptor_set;
     }
 
-    pub fn create_buffer_host(&mut self, instance: &Instance, device: &Device, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
+    pub fn create_buffer_host(&mut self, device: &RenderingDevice, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
         let buffer = Buffer::new(
-            instance,
             device,
             data,
             size,
@@ -353,9 +346,8 @@ impl<'a> Object<'a> {
         self.buffers.push(buffer, name);
     }
 
-    pub fn create_buffer_device(&mut self, instance: &Instance, device: &Device, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
+    pub fn create_buffer_device(&mut self, device: &RenderingDevice, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
         let buffer = Buffer::new(
-            instance,
             device,
             data,
             size,
@@ -367,9 +359,8 @@ impl<'a> Object<'a> {
         self.buffers.push(buffer, name);
     }
 
-    pub fn create_and_load_buffer_host<T>(&mut self, instance: &Instance, device: &Device, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
+    pub fn create_and_load_buffer_host<T>(&mut self, device: &RenderingDevice, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
         let buffer = Buffer::create_and_load(
-            instance,
             device,
             data,
             usage,
@@ -381,9 +372,8 @@ impl<'a> Object<'a> {
         self.buffers.push(buffer, name);
     }
 
-    pub fn create_and_load_buffer_device<T>(&mut self, instance: &Instance, device: &Device, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
+    pub fn create_and_load_buffer_device<T>(&mut self, device: &RenderingDevice, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
         let buffer = Buffer::create_and_load(
-            instance,
             device,
             data,
             usage,
@@ -395,7 +385,7 @@ impl<'a> Object<'a> {
         self.buffers.push(buffer, name);
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         self.mesh_data.destroy(device);
 
         self.buffers.items_mut().iter_mut().for_each(|buffer| buffer.destroy(device));
