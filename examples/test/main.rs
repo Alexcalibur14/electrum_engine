@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::f32::consts::PI;
+use std::ffi::CString;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
@@ -8,6 +9,7 @@ use ash::Instance;
 use ash::vk;
 
 use anyhow::Result;
+use electrum_engine::CreationSettings;
 use electrum_engine::begin_command_label;
 use electrum_engine::buffer::Buffer;
 use electrum_engine::buffer::BufferType;
@@ -88,7 +90,13 @@ impl<'a> ApplicationHandler for App<'a> {
             .with_resizable(true)
         ).unwrap();
 
-        let mut renderer = Renderer::new(&window, true).unwrap();
+        let settings = CreationSettings {
+            name: CString::new("test").unwrap(),
+            version: (0, 0, 1, 0),
+            validation: true,
+        };
+
+        let mut renderer = Renderer::new(&window, &settings).unwrap();
 
         setup_render_graph(&renderer.instance, &renderer.device, &mut renderer.data);
 

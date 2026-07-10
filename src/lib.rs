@@ -16,7 +16,7 @@ use winit::window::Window;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::ffi::{self, CStr};
+use std::ffi::{self, CStr, CString};
 use std::mem::ManuallyDrop;
 use std::ptr;
 use std::time::{Duration, Instant};
@@ -55,6 +55,12 @@ const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME, ash::khr::dynam
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 
+pub struct CreationSettings {
+    pub name: CString,
+    pub version: (u32, u32, u32, u32),
+    pub validation: bool,
+}
+
 pub struct Renderer<'a> {
     _entry: Entry,
     pub instance: Instance,
@@ -69,8 +75,8 @@ pub struct Renderer<'a> {
 
 impl<'a> Renderer<'a> {
     /// Creates the Vulkan Renderer.
-    pub fn new(window: &Window, validation: bool) -> Result<Self> {
-        unsafe { VALIDATION_ENABLED = validation };
+    pub fn new(window: &Window, settings: &CreationSettings) -> Result<Self> {
+        unsafe { VALIDATION_ENABLED = settings.validation };
         
         let entry = unsafe { Entry::load()? };
 
@@ -84,7 +90,8 @@ impl<'a> Renderer<'a> {
             (inner_size.width, inner_size.height)
         };
 
-        let instance = unsafe { create_instance(display_handle.into(), &entry, &mut data)? };
+        let (instance, messenger) = unsafe { create_instance(display_handle.into(), &entry, settings)? };
+        data.messenger = messenger;
         data.surface = unsafe { ash_window::create_surface(
             &entry,
             &instance,
@@ -543,13 +550,13 @@ pub fn align_string(string: &str) -> [i8; 256] {
 unsafe fn create_instance(
     display_handle: raw_window_handle::RawDisplayHandle,
     entry: &Entry,
-    data: &mut RendererData,
-) -> Result<Instance> {
+    settings: &CreationSettings,
+) -> Result<(Instance, vk::DebugUtilsMessengerEXT)> {
     // Application Info
 
     let application_info = vk::ApplicationInfo::default()
-        .application_name(c"Electrum Engine")
-        .application_version(vk::make_api_version(0, 0, 1, 0))
+        .application_name(&settings.name)
+        .application_version(vk::make_api_version(settings.version.0, settings.version.1, settings.version.2, settings.version.3))
         .engine_name(c"Electrum Engine")
         .engine_version(vk::make_api_version(0, 0, 1, 0))
         .api_version(vk::API_VERSION_1_3);
@@ -562,11 +569,11 @@ unsafe fn create_instance(
         .map(|l| l.layer_name)
         .collect::<HashSet<_>>();
 
-    if VALIDATION_ENABLED && !available_layers.contains(&align_string("VK_LAYER_KHRONOS_validation")) {
+    if settings.validation && !available_layers.contains(&align_string("VK_LAYER_KHRONOS_validation")) {
         return Err(anyhow!("Validation layer requested but not supported."));
     }
 
-    let layer_names = if VALIDATION_ENABLED {
+    let layer_names = if settings.validation {
         vec![c"VK_LAYER_KHRONOS_validation"]
     } else {
         Vec::new()
@@ -593,7 +600,7 @@ unsafe fn create_instance(
         vk::InstanceCreateFlags::default()
     };
 
-    if VALIDATION_ENABLED {
+    if settings.validation {
         extensions.push(debug_utils::NAME.as_ptr());
     }
 
@@ -618,7 +625,7 @@ unsafe fn create_instance(
         )
         .pfn_user_callback(Some(debug_callback));
 
-    if VALIDATION_ENABLED {
+    if settings.validation {
         info = info.push_next(&mut debug_info);
     }
 
@@ -626,12 +633,14 @@ unsafe fn create_instance(
 
     // Messenger
 
-    if VALIDATION_ENABLED {
+    let messenger = if settings.validation {
         let debug_utils_loader = debug_utils::Instance::new(&entry, &instance);
-        data.messenger = debug_utils_loader.create_debug_utils_messenger(&debug_info, None)?;
-    }
+        debug_utils_loader.create_debug_utils_messenger(&debug_info, None)?
+    } else {
+        Default::default()
+    };
 
-    Ok(instance)
+    Ok((instance, messenger))
 }
 
 #[derive(Debug, Error)]
