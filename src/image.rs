@@ -1,3 +1,11 @@
+//! This Module contains all structs and functions related to creating [Images](Image)
+//! 
+//! # Safety
+//! All images and related handles must be destroyed before the [device](ash::Device) is.\
+//! If the image is added to the RendererData struct or structs it contains, this will be managed automatically.\
+//! 
+//! Although the [Image] struct impls [Clone] and [Copy] it is neither
+//! and although a double free is not possible on the same struct via the [destroy](Image::destroy()) function, that does hold true for [Clone]d versions
 use std::path::Path;
 
 use ash::vk::{self, Handle};
@@ -8,15 +16,21 @@ use image::ImageReader;
 use crate::buffer::{Buffer, BufferType};
 use crate::{RendererData, RenderingDevice, begin_single_time_commands, end_single_time_commands, get_memory_type_index, set_object_name};
 
+
+/// An enum for choosing mip levels
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum MipLevels {
+    /// One mip level
     #[default]
     One,
+    /// A specific number of mip levels
     Value(u32),
+    /// The maximum number of mip levels until the image becomes 1x1x1 in dimentions
     Maximum,
 }
 
 impl MipLevels {
+    /// Calculates the number of mip levels for a one dimentional image
     pub fn mips_1d(&self, width: u32) -> u32 {
         match self {
             MipLevels::One => 1,
@@ -25,6 +39,7 @@ impl MipLevels {
         }
     }
 
+    /// Calculates the number of mip levels for a two dimentional image
     pub fn mips_2d(&self, width: u32, height: u32) -> u32 {
         match self {
             MipLevels::One => 1,
@@ -33,6 +48,7 @@ impl MipLevels {
         }
     }
 
+    /// Calculates the number of mip levels for a three dimentional image
     pub fn mips_3d(&self, width: u32, height: u32, depth: u32) -> u32 {
         match self {
             MipLevels::One => 1,
@@ -42,6 +58,7 @@ impl MipLevels {
     }
 }
 
+/// A wrapper around the [vk::Image], [vk::DeviceMemory], [vk::ImageView], and [vk::Sampler] types
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Image {
     image: vk::Image,
@@ -53,6 +70,89 @@ pub struct Image {
 }
 
 impl Image {
+    /// Creates an Image
+    pub fn new(
+        device: &RenderingDevice,
+        data: &RendererData,
+        extent: vk::Extent3D,
+        mip_levels: MipLevels,
+        samples: vk::SampleCountFlags,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        view_type: vk::ImageViewType,
+        usage: vk::ImageUsageFlags,
+        layer_count: u32,
+        properties: vk::MemoryPropertyFlags,
+        aspects: vk::ImageAspectFlags,
+        sampler: Option<(Filter, AddressMode)>,
+        name: &str
+    ) -> Result<Self> {
+        let mips = mip_levels.mips_3d(extent.width, extent.height, extent.depth);
+
+        let image_type = match extent {
+            vk::Extent3D { height: _, width: 1, depth: 1 } => vk::ImageType::TYPE_1D,
+            vk::Extent3D { height: _, width: _, depth: 1 } => vk::ImageType::TYPE_2D,
+            _ => vk::ImageType::TYPE_3D,
+        };
+
+        let (image, memory) = create_image(
+            device,
+            data,
+            extent,
+            image_type,
+            mips,
+            layer_count,
+            samples,
+            format,
+            tiling,
+            usage,
+            properties,
+        ).unwrap();
+
+        set_object_name(device, name, image).unwrap();
+        set_object_name(device, &format!("{name}_memory"), memory).unwrap();
+
+        let view = unsafe { create_image_view(
+            device,
+            image,
+            format,
+            aspects,
+            view_type,
+            mips,
+            layer_count,
+        ) }.unwrap();
+
+        set_object_name(device, &format!("{name}_view"), view).unwrap();
+
+        let sampler = match sampler {
+            Some((filter, address_mode)) => {
+                let sampler = unsafe { create_texture_sampler(
+                    device,
+                    &mips,
+                    &filter,
+                    &address_mode,
+                    ""
+                ) }.unwrap();
+                set_object_name(device, &format!("{name}_sampler"), sampler).unwrap();
+                Some(sampler)
+            },
+            None => None,
+        };
+
+        Ok(Image {
+            image,
+            memory,
+            view,
+            mip_level: mips,
+            sampler,
+            extent,
+        })
+    }
+
+    /// Creats an Image with a [View Type](vk::ImageViewType) of one of
+    /// * [TYPE_1D](vk::ImageViewType::TYPE_1D)
+    /// * [TYPE_2D](vk::ImageViewType::TYPE_2D)
+    /// * [TYPE_3D](vk::ImageViewType::TYPE_3D)
     pub fn new_regular(
         device: &RenderingDevice,
         data: &RendererData,
@@ -62,7 +162,6 @@ impl Image {
         format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
-        _view_type: vk::ImageViewType,
         layer_count: u32,
         properties: vk::MemoryPropertyFlags,
         aspects: vk::ImageAspectFlags,
@@ -130,6 +229,8 @@ impl Image {
         }
     }
 
+    /// Creates an Image and loads an image file into it\
+    /// Supports the file types that the Image crate supports
     pub fn load_from_file<P: AsRef<Path>>(
         device: &RenderingDevice,
         data: &RendererData,
@@ -217,10 +318,32 @@ impl Image {
         }
     }
 
+    /// Creates an Image struct
+    /// 
+    /// # Safety
+    /// All of the arguments *must* be properly created
+    pub unsafe fn from_raw(
+        image: vk::Image,
+        memory: vk::DeviceMemory,
+        view: vk::ImageView,
+        mip_level: u32,
+        sampler: Option<vk::Sampler>,
+        extent: vk::Extent3D,
+    ) -> Self {
+        Image {
+            image,
+            memory,
+            view,
+            mip_level,
+            sampler,
+            extent,
+        }
+    }
+
     /// # Warning !!!
     /// This function produces an invalid image where all pointers are null. \
     /// this should only be used as a default and then replaced with a properly created image.
-    pub fn null() -> Self {
+    pub unsafe fn null() -> Self {
         Image {
             image: vk::Image::null(),
             memory: vk::DeviceMemory::null(),
@@ -231,46 +354,57 @@ impl Image {
         }
     }
 
+    /// The Image's vk::Image
     pub fn image(&self) -> vk::Image {
         self.image
     }
 
+    /// The Image's device memory
     pub fn memory(&self) -> vk::DeviceMemory {
         self.memory
     }
 
+    /// The Image's view
     pub fn view(&self) -> vk::ImageView {
         self.view
     }
 
+    /// The Image's number of mip levels
     pub fn mip_level(&self) -> u32 {
         self.mip_level
     }
 
+    /// The Image's sampler
     pub fn sampler(&self) -> Option<vk::Sampler> {
         self.sampler
     }
 
+    /// The Image's width
     pub fn width(&self) -> u32 {
         self.extent.width
     }
 
+    /// The Image's height
     pub fn height(&self) -> u32 {
         self.extent.height
     }
 
+    /// The Image's depth
     pub fn depth(&self) -> u32 {
         self.extent.depth
     }
 
+    /// The Image's 2D extent
     pub fn extent_2d(&self) -> vk::Extent2D {
         vk::Extent2D { width: self.extent.width, height: self.extent.height }
     }
 
+    /// The Image's extent
     pub fn extent_3d(&self) -> vk::Extent3D {
         self.extent
     }
 
+    /// Destroys and deallocates driver memory associated with the image
     pub fn destroy(&mut self, device: &RenderingDevice) {
         if let Some(sampler) = self.sampler {
             if !sampler.is_null() {
@@ -294,6 +428,7 @@ impl Image {
         self.extent = vk::Extent3D::default();
     }
 
+    /// Creates a vk::DescriptorImageInfo for allocating Descriptor Sets
     pub fn descriptor_info(&self, layout: vk::ImageLayout) -> vk::DescriptorImageInfo {
         vk::DescriptorImageInfo::default()
             .image_layout(layout)
@@ -302,7 +437,7 @@ impl Image {
     }
 }
 
-
+/// Creats a [vk::Image] with an [Image Type](vk::ImageType) based on the image extent
 pub fn create_regular_image(
     device: &RenderingDevice,
     data: &RendererData,
@@ -324,6 +459,11 @@ pub fn create_regular_image(
     create_image(device, data, extent, image_type, mip_levels, layers, samples, format, tiling, usage, properties)
 }
 
+/// Creates a [vk::Image]
+/// 
+/// # Safety
+/// The returned [vk::Image] must be destroyed using [destroy_image()](ash::Device::destroy_image())\
+/// The returned [vk::DeviceMemory] must be freed using [free_memory()](ash::Device::free_memory())
 pub fn create_image(
     device: &RenderingDevice,
     data: &RendererData,
@@ -369,11 +509,17 @@ pub fn create_image(
     Ok((image, image_memory))
 }
 
+/// Creates a 2D [vk::Image] that is filled with the bytes.\
+/// The [image usage](vk::ImageUsageFlags) will be [SAMPLED](vk::ImageUsageFlags::SAMPLED), [TRANSFER_DST](vk::ImageUsageFlags::TRANSFER_DST), and [TRANSFER_SRC](vk::ImageUsageFlags::TRANSFER_SRC)
+/// 
+/// # Safety
+/// The returned [vk::Image] must be destroyed using [destroy_image()](ash::Device::destroy_image())\
+/// The returned [vk::DeviceMemory] must be freed using [free_memory()](ash::Device::free_memory())
 pub unsafe fn create_texture_image(
     device: &RenderingDevice,
     data: &RendererData,
     size: vk::DeviceSize,
-    pixels: &[u8],
+    bytes: &[u8],
     width: u32,
     height: u32,
     mip_levels: u32,
@@ -390,7 +536,7 @@ pub unsafe fn create_texture_image(
 
     // Copy (staging)
 
-    staging_buffer.copy_array_into_buffer(device, data, pixels)?;
+    staging_buffer.copy_array_into_buffer(device, data, bytes)?;
 
     // Create (image)
 
@@ -608,6 +754,7 @@ pub fn copy_image_to_image(device: &RenderingDevice, command_buffer: vk::Command
     unsafe { device.cmd_blit_image2(command_buffer, &blit_image_info) };
 }
 
+/// Creates a [vk::ImageView] that covers all layers and layers
 pub unsafe fn create_image_view(
     device: &RenderingDevice,
     image: vk::Image,
@@ -633,6 +780,7 @@ pub unsafe fn create_image_view(
     Ok(device.create_image_view(&info, None)?)
 }
 
+/// Creates a [vk::Sampler]
 pub unsafe fn create_texture_sampler(
     device: &RenderingDevice,
     mip_level: &u32,
@@ -667,13 +815,17 @@ pub unsafe fn create_texture_sampler(
     Ok(texture_sampler)
 }
 
+/// Determins a [sampler](vk::Sampler)'s min and mag [filter](vk::Filter)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Filter {
+    /// The sampler min filter
     pub min: vk::Filter,
+    /// The sampler mag filter
     pub mag: vk::Filter,
 }
 
 impl Filter {
+    /// min and mag Filters will be set to [LINEAR](vk::Filter::LINEAR)
     pub const LINEAR: Self = {
         Filter {
             min: vk::Filter::LINEAR,
@@ -681,6 +833,7 @@ impl Filter {
         }
     };
 
+    /// min and mag Filters will be set to [NEAREST](vk::Filter::NEAREST)
     pub const NEAREST: Self = {
         Filter {
             min: vk::Filter::NEAREST,
@@ -688,6 +841,7 @@ impl Filter {
         }
     };
 
+    /// min Filter will be [LINEAR](vk::Filter::LINEAR) and mag will be [NEAREST](vk::Filter::NEAREST)
     pub const MIN_LINEAR: Self = {
         Filter {
             min: vk::Filter::LINEAR,
@@ -695,6 +849,7 @@ impl Filter {
         }
     };
 
+    /// min Filter will be [NEAREST](vk::Filter::NEAREST) and mag will be [LINEAR](vk::Filter::LINEAR)
     pub const MAG_LINEAR: Self = {
         Filter {
             min: vk::Filter::NEAREST,
@@ -703,15 +858,21 @@ impl Filter {
     };
 }
 
+/// Determins a [sampler](vk::Sampler)'s u, v, and w [address mode](vk::SamplerAddressMode)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AddressMode {
+    /// The sampler u sampler address mode
     pub u: vk::SamplerAddressMode,
+    /// The sampler v sampler address mode
     pub v: vk::SamplerAddressMode,
+    /// The sampler w sampler address mode
     pub w: vk::SamplerAddressMode,
+    /// The sampler border color used in case one of the u, v, or w address modes is [CLAMP_TO_BORDER](vk::SamplerAddressMode::CLAMP_TO_BORDER)
     pub border_color: vk::BorderColor,
 }
 
 impl AddressMode {
+    /// All directions will be [REPEAT](vk::SamplerAddressMode::REPEAT)
     pub const REPEAT: Self = {
         AddressMode {
             u: vk::SamplerAddressMode::REPEAT,
@@ -721,6 +882,7 @@ impl AddressMode {
         }
     };
 
+    /// All directions will be [MIRRORED_REPEAT](vk::SamplerAddressMode::MIRRORED_REPEAT)
     pub const MIRRORED_REPEAT: Self = {
         AddressMode {
             u: vk::SamplerAddressMode::MIRRORED_REPEAT,
@@ -730,6 +892,7 @@ impl AddressMode {
         }
     };
 
+    /// All directions will be [MIRROR_CLAMP_TO_EDGE](vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE)
     pub const MIRROR_CLAMP_TO_EDGE: Self = {
         AddressMode {
             u: vk::SamplerAddressMode::MIRROR_CLAMP_TO_EDGE,
@@ -739,6 +902,7 @@ impl AddressMode {
         }
     };
     
+    /// All directions will be [CLAMP_TO_BORDER](vk::SamplerAddressMode::CLAMP_TO_BORDER) with the specified border color
     pub const fn clamp_to_border(border_color: vk::BorderColor) -> Self {
         AddressMode {
             u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
@@ -748,6 +912,7 @@ impl AddressMode {
         }
     }
     
+    /// All directions will be [CLAMP_TO_EDGE](vk::SamplerAddressMode::CLAMP_TO_EDGE)
     pub const CLAMP_TO_EDGE: Self = {
         AddressMode {
             u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
