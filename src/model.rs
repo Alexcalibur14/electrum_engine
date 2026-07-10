@@ -333,58 +333,6 @@ impl<'a> Object<'a> {
         *self.descriptor_sets.get_mut(name).unwrap() = descriptor_set;
     }
 
-    pub fn create_buffer_host(&mut self, device: &RenderingDevice, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
-        let buffer = Buffer::new(
-            device,
-            data,
-            size,
-            usage,
-            BufferType::HostLocal,
-            name
-        ).unwrap();
-
-        self.buffers.push(buffer, name);
-    }
-
-    pub fn create_buffer_device(&mut self, device: &RenderingDevice, data: &RendererData, size: u64, usage: vk::BufferUsageFlags, name: &'a str) {
-        let buffer = Buffer::new(
-            device,
-            data,
-            size,
-            usage,
-            BufferType::DeviceLocal,
-            name
-        ).unwrap();
-
-        self.buffers.push(buffer, name);
-    }
-
-    pub fn create_and_load_buffer_host<T>(&mut self, device: &RenderingDevice, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
-        let buffer = Buffer::create_and_load(
-            device,
-            data,
-            usage,
-            BufferType::HostLocal,
-            contents,
-            name
-        ).unwrap();
-
-        self.buffers.push(buffer, name);
-    }
-
-    pub fn create_and_load_buffer_device<T>(&mut self, device: &RenderingDevice, data: &RendererData, contents: &[T], usage: vk::BufferUsageFlags, name: &'a str) {
-        let buffer = Buffer::create_and_load(
-            device,
-            data,
-            usage,
-            BufferType::DeviceLocal,
-            contents,
-            name
-        ).unwrap();
-
-        self.buffers.push(buffer, name);
-    }
-
     pub fn destroy(&mut self, device: &RenderingDevice) {
         self.mesh_data.destroy(device);
 

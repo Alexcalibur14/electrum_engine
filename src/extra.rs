@@ -82,15 +82,14 @@ impl SimpleCamera {
             position,
         };
 
-        camera_object.create_and_load_buffer_host(device, data, &[camera_data], vk::BufferUsageFlags::UNIFORM_BUFFER, "camera_data");
-
-        let camera_data_buffer = camera_object.buffers().items()[0];
+        let camera_data_buffer = Buffer::create_and_load(device, data, vk::BufferUsageFlags::UNIFORM_BUFFER, BufferType::DeviceLocalStaged, &[camera_data], "camera_data").unwrap();
 
         let (descriptor_set, layout) = DescriptorBuilder::new()
             .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL_GRAPHICS)
             .build_data(device, data).unwrap();
 
         camera_object.add_descriptor_set(descriptor_set, "camera_data");
+        camera_object.add_buffer(camera_data_buffer, "camera_data");
         data.layouts.push(layout, "main_camera");
 
         let object_handle = data.objects.push(camera_object, &["main_camera"]);
