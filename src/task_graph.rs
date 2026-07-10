@@ -747,11 +747,14 @@ impl<'a> ImageData<'a> {
     pub fn create(&mut self, device: &RenderingDevice, data: &RendererData) {
         let (width, height) = self.size.size(data);
         
-        self.image = Image::new_2d(
+        self.image = Image::new_regular(
             device,
             data,
-            width,
-            height,
+            vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            },
             self.mip_levels,
             self.samples,
             self.format,
