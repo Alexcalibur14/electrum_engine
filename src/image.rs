@@ -288,8 +288,10 @@ impl Image {
         mip_levels: MipLevels,
         sampler: Option<(Filter, AddressMode)>,
     ) -> Image {
-        let img = ImageReader::open(path).unwrap().decode().unwrap();
+        let img = ImageReader::open(&path).unwrap().decode().unwrap();
         let bytes = img.as_bytes();
+
+        let name = path.as_ref().file_prefix().unwrap().to_str().unwrap();
 
         let width = img.width();
         let height = img.height();
@@ -316,7 +318,7 @@ impl Image {
 
         let mips = mip_levels.mips_2d(width, height);
 
-        let (image, image_memory) = unsafe {
+        let (image, memory) = unsafe {
             create_texture_image(
                 device,
                 data,
@@ -328,6 +330,9 @@ impl Image {
                 format
             )
         }.unwrap();
+
+        set_object_name(device, name, image).unwrap();
+        set_object_name(device, &format!("{name}_memory"), memory).unwrap();
 
         let view = unsafe {
             create_image_view(
@@ -341,19 +346,21 @@ impl Image {
             )
         }.unwrap();
 
+        set_object_name(device, &format!("{name}_view"), view).unwrap();
+
         let sampler = sampler.map(|(filter, mode)| unsafe {
             create_texture_sampler(
                 device,
                 &mips,
                 &filter,
                 &mode,
-                "name"
+                name,
             )
         }.unwrap());
 
         Image {
             image,
-            memory: image_memory,
+            memory,
             view,
             mip_level: mips,
             sampler: sampler,
