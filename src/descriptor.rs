@@ -4,9 +4,10 @@ use thiserror::Error;
 
 use ash::vk;
 use ash::Device;
+use tracing::info;
+use anyhow::Result;
 
 use crate::RendererData;
-
 
 const STANDARD_SIZES: [(vk::DescriptorType, u32); 10] = [
     (vk::DescriptorType::SAMPLER, 1),
@@ -28,6 +29,7 @@ pub struct DescriptorAllocator {
     current_pool: Option<vk::DescriptorPool>,
     used_pools: Vec<vk::DescriptorPool>,
     free_pools: Vec<vk::DescriptorPool>,
+    descriptor_layouts: Vec<Vec<(vk::DescriptorSetLayout, vk::DescriptorSet, bool)>>,
 }
 
 impl DescriptorAllocator {
@@ -38,6 +40,7 @@ impl DescriptorAllocator {
             current_pool: None,
             used_pools: vec![],
             free_pools: vec![],
+            descriptor_layouts: vec![],
         }
     }
 
@@ -48,6 +51,7 @@ impl DescriptorAllocator {
             current_pool: None,
             used_pools: vec![],
             free_pools: vec![],
+            descriptor_layouts: vec![]
         }
     }
 
@@ -79,23 +83,42 @@ impl DescriptorAllocator {
     }
 
     pub fn allocate(&mut self, device: &Device, set_layout: &vk::DescriptorSetLayout) -> Result<vk::DescriptorSet, DescriptorAllocateError> {
+        for pool in self.descriptor_layouts.iter_mut() {
+            for (layout, set, allocated) in pool.iter_mut() {
+                if *allocated {
+                    continue;
+                }
+
+                if layout != set_layout {
+                    continue;
+                }
+
+                *allocated = true;
+                return Ok(*set);
+            }
+        }
+        
         if self.current_pool.is_none() {
             let pool = self.get_pool(device).unwrap();
             self.current_pool = Some(pool);
             self.used_pools.push(pool);
+            self.descriptor_layouts.push(vec![]);
         }
 
         let pool = self.current_pool.unwrap();
 
         let layouts = vec![*set_layout];
-        let allocate_info = vk::DescriptorSetAllocateInfo::default()
+        let mut allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(pool)
             .set_layouts(&layouts);
 
         let result = unsafe { device.allocate_descriptor_sets(&allocate_info) };
 
         match result {
-            Ok(sets) => return Ok(sets[0]),
+            Ok(sets) => {
+                self.descriptor_layouts.last_mut().unwrap().push((*set_layout, sets[0], true));
+                return Ok(sets[0])
+            },
             Err(err) => match err {
                 vk::Result::ERROR_FRAGMENTED_POOL => {},
                 vk::Result::ERROR_OUT_OF_POOL_MEMORY => {},
@@ -107,12 +130,20 @@ impl DescriptorAllocator {
         let pool = self.get_pool(device).unwrap();
         self.current_pool = Some(pool);
         self.used_pools.push(pool);
+        self.descriptor_layouts.push(vec![]);
+
+        allocate_info.descriptor_pool = pool;
 
         let result = unsafe { device.allocate_descriptor_sets(&allocate_info) };
 
         match result {
-            Ok(sets) => return Ok(sets[0]),
-            Err(err) => return Err(DescriptorAllocateError::AllocationFailed(err)),
+            Ok(sets) => {
+                self.descriptor_layouts.last_mut().unwrap().push((*set_layout, sets[0], true));
+                return Ok(sets[0])
+            },
+            Err(err) => {
+                return Err(DescriptorAllocateError::AllocationFailed(err))
+            },
         }
     }
 
@@ -122,6 +153,26 @@ impl DescriptorAllocator {
             self.free_pools.push(pool);
         }
         self.used_pools.clear();
+        self.descriptor_layouts.clear();
+    }
+
+    pub fn deallocate_descriptor(&mut self, descriptor_set: vk::DescriptorSet) -> Result<()> {
+        for pool in self.descriptor_layouts.iter_mut().rev() {
+            for (_, set, allocated) in pool.iter_mut() {
+                match allocated {
+                    true => {
+                        if *set != descriptor_set {
+                            continue;
+                        }
+                    },
+                    false => continue,
+                }
+
+                *allocated = false;
+            }
+        }
+        
+        Ok(())
     }
 
     pub fn destroy(&self, device: &Device) {
@@ -132,11 +183,29 @@ impl DescriptorAllocator {
             unsafe { device.destroy_descriptor_pool(*pool, None) };
         }
     }
+
+    pub fn layouts(&self) -> &[Vec<(vk::DescriptorSetLayout, vk::DescriptorSet, bool)>] {
+        &self.descriptor_layouts
+    }
 }
 
 impl Default for DescriptorAllocator {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub fn print_allocations(allocations: &[Vec<(vk::DescriptorSetLayout, vk::DescriptorSet, bool)>]) {
+    for (id, pool) in allocations.iter().enumerate() {
+        info!("pool: {}; {} allocations", id, pool.len());
+        let mut string = String::new();
+        for (layout, _, allocated) in pool {
+            match allocated {
+                true => string.push_str(&format!("\x1B[32m{:?}\x1B[0m,", layout)),
+                false => string.push_str(&format!("\x1B[31m{:?}\x1B[0m,", layout)),
+            }
+        }
+        info!("layouts: {}", string);
     }
 }
 
