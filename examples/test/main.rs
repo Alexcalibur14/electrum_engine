@@ -38,7 +38,7 @@ use electrum_engine::shader::DepthStencilData;
 use electrum_engine::shader::MultisampleData;
 use electrum_engine::shader::RasterizationData;
 use electrum_engine::shader::SlangShader;
-use electrum_engine::shader::create_basic_slang_graphics_pipeline;
+use electrum_engine::shader::create_graphics_pipeline;
 use electrum_engine::task_graph::*;
 use electrum_engine::{RenderStats, Renderer, RendererData};
 use electrum_engine::Vertex;
@@ -297,9 +297,9 @@ impl<'a> ApplicationHandler for App<'a> {
         light_object.add_descriptor_set(light_camera_descriptor, "camera_data");
 
 
-        let pipeline = create_basic_slang_graphics_pipeline::<OBJVertex>(
+        let pipeline = create_graphics_pipeline::<OBJVertex>(
             &renderer.device,
-            &main_shader,
+            main_shader.program(),
             RasterizationData {
                 cull_mode: vk::CullModeFlags::BACK,
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -321,8 +321,10 @@ impl<'a> ApplicationHandler for App<'a> {
             &[vk::Format::R16G16B16A16_SFLOAT],
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
+            main_shader.layout(),
             &[],
-            vk::PrimitiveTopology::TRIANGLE_LIST
+            vk::PrimitiveTopology::TRIANGLE_LIST,
+            main_shader.name(),
         );
 
         renderer.data.slang_shaders.push(main_shader, &["main"]);
@@ -331,9 +333,9 @@ impl<'a> ApplicationHandler for App<'a> {
         let mut shadow_shader = SlangShader::new("shadow", Path::new("examples/test/res/shaders/shadow.slang"));
         shadow_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
-        let (shadow_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
+        let (shadow_pipeline, layout) = create_graphics_pipeline::<OBJVertex>(
             &renderer.device,
-            &shadow_shader,
+            shadow_shader.program(),
             RasterizationData {
                 cull_mode: vk::CullModeFlags::FRONT,
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -355,8 +357,10 @@ impl<'a> ApplicationHandler for App<'a> {
             &[],
             vk::Format::D32_SFLOAT,
             vk::Format::UNDEFINED,
+            shadow_shader.layout(),
             &[],
             vk::PrimitiveTopology::TRIANGLE_LIST,
+            shadow_shader.name(),
         );
 
         renderer.data.slang_shaders.push(shadow_shader, &["shadow"]);
@@ -365,9 +369,9 @@ impl<'a> ApplicationHandler for App<'a> {
         let mut debug_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/debug.slang"));
         debug_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
-        let (debug_pipeline, layout) = create_basic_slang_graphics_pipeline::<OBJVertex>(
+        let (debug_pipeline, layout) = create_graphics_pipeline::<OBJVertex>(
             &renderer.device,
-            &debug_shader,
+            debug_shader.program(),
             RasterizationData {
                 cull_mode: vk::CullModeFlags::NONE,
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -389,8 +393,10 @@ impl<'a> ApplicationHandler for App<'a> {
             &[vk::Format::R16G16B16A16_SFLOAT],
             vk::Format::UNDEFINED,
             vk::Format::UNDEFINED,
+            debug_shader.layout(),
             &[],
             vk::PrimitiveTopology::LINE_LIST,
+            debug_shader.name(),
         );
 
         renderer.data.slang_shaders.push(debug_shader, &["debug"]);
@@ -444,9 +450,9 @@ impl<'a> ApplicationHandler for App<'a> {
 
         cc_object.add_descriptor_set(cc_image_descriptor, "colour_correction_images");
 
-        let (cc_pipeline, layout) = create_basic_slang_graphics_pipeline::<NullVertex>(
+        let (cc_pipeline, layout) = create_graphics_pipeline::<NullVertex>(
             &renderer.device,
-            &cc_shader,
+            cc_shader.program(),
             RasterizationData {
                 cull_mode: vk::CullModeFlags::BACK,
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -468,8 +474,10 @@ impl<'a> ApplicationHandler for App<'a> {
             &[vk::Format::R8G8B8A8_SRGB],
             vk::Format::UNDEFINED,
             vk::Format::UNDEFINED,
+            cc_shader.layout(),
             &[],
             vk::PrimitiveTopology::TRIANGLE_LIST,
+            cc_shader.name(),
         );
 
         renderer.data.objects.push(cc_object, &["colour_correction"]);

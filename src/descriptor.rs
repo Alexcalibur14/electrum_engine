@@ -77,7 +77,7 @@ impl DescriptorAllocator {
 
         match unsafe { device.create_descriptor_pool(&create_info, None) } {
             Ok(pool) => Ok(pool),
-            Err(_) => Err(DescriptorAllocateError::UnableToCreate),
+            Err(_) => Err(DescriptorAllocateError::UnableToCreatePool),
         }
     }
 
@@ -231,7 +231,7 @@ impl Default for DescriptorAllocator {
 #[derive(Debug, Clone, Copy, Error)]
 pub enum DescriptorAllocateError {
     #[error("Unable to create another pool")]
-    UnableToCreate,
+    UnableToCreatePool,
     #[error("Descriptor set allocation failed due to error: {0}")]
     AllocationFailed(vk::Result),
 }

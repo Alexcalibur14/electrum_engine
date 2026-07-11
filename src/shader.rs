@@ -238,99 +238,6 @@ impl<'a> GraphicsProgram<'a> {
     }
 }
 
-pub fn create_basic_graphics_pipeline<'a, V: Vertex>(
-    device: &RenderingDevice,
-    program: &GraphicsProgram,
-    rasterization_data: RasterizationData,
-    multisample_data: MultisampleData,
-    depth_stencil_data: DepthStencilData,
-    patch_control_points: u32,
-    attachment_blends: &[vk::PipelineColorBlendAttachmentState],
-    color_attachment_formats: &[vk::Format],
-    depth_attachment_format: vk::Format,
-    stencil_attachment_format: vk::Format,
-    push_constant_ranges: &[vk::PushConstantRange],
-    set_layouts: &[vk::DescriptorSetLayout],
-    topology: vk::PrimitiveTopology,
-) -> (vk::Pipeline, vk::PipelineLayout) {
-    let attribute_descriptions = V::attribute_descriptions();
-    let binding_descriptions = V::binding_descriptions();
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-        .vertex_attribute_descriptions(&attribute_descriptions)
-        .vertex_binding_descriptions(&binding_descriptions);
-
-    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .primitive_restart_enable(false)
-        .topology(topology);
-
-    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
-
-    let tessellation_state = vk::PipelineTessellationStateCreateInfo::default()
-        .patch_control_points(patch_control_points);
-
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-        .scissor_count(1)
-        .viewport_count(1);
-
-    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
-        .depth_bias_enable(false)
-        .depth_clamp_enable(false)
-        .cull_mode(rasterization_data.cull_mode)
-        .front_face(rasterization_data.front_face)
-        .line_width(rasterization_data.line_width)
-        .polygon_mode(rasterization_data.polygon_mode)
-        .rasterizer_discard_enable(false);
-
-    let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
-        .rasterization_samples(multisample_data.samples)
-        .sample_shading_enable(multisample_data.sample_shading_enable);
-
-    let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
-        .depth_test_enable(depth_stencil_data.depth_test_enable)
-        .depth_write_enable(depth_stencil_data.depth_write_enable)
-        .stencil_test_enable(depth_stencil_data.stencil_test_enable)
-        .depth_compare_op(depth_stencil_data.compare_op);
-
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-        .logic_op_enable(false)
-        .attachments(attachment_blends);
-
-    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
-        .push_constant_ranges(&push_constant_ranges)
-        .set_layouts(&set_layouts);
-
-    let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
-
-    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
-
-    let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
-        .color_attachment_formats(color_attachment_formats)
-        .depth_attachment_format(depth_attachment_format)
-        .stencil_attachment_format(stencil_attachment_format);
-
-    let stages = program.get_stages();
-    let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&stages)
-        .vertex_input_state(&vertex_input_state)
-        .input_assembly_state(&input_assembly_state)
-        .tessellation_state(&tessellation_state)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterization_state)
-        .multisample_state(&multisample_state)
-        .depth_stencil_state(&depth_stencil_state)
-        .color_blend_state(&color_blend_state)
-        .dynamic_state(&dynamic_state)
-        .layout(layout)
-        .push_next(&mut pipeline_info2);
-
-    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
-
-    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
-
-    (pipeline, layout)
-}
-
 pub struct RasterizationData {
     pub cull_mode: vk::CullModeFlags,
     pub front_face: vk::FrontFace,
@@ -394,31 +301,6 @@ impl<'a> ComputeProgram<'a> {
         self.compute_module = Some(compute_module);
     }
 }
-
-pub fn create_compute_pipeline(
-    device: &RenderingDevice,
-    program: &ComputeProgram,
-    push_constant_ranges: &[vk::PushConstantRange],
-    set_layouts: &[vk::DescriptorSetLayout],
-) -> (vk::Pipeline, vk::PipelineLayout) {
-
-    let layout_create_info = vk::PipelineLayoutCreateInfo::default()
-        .set_layouts(set_layouts)
-        .push_constant_ranges(push_constant_ranges);
-
-    let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
-    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
-
-    let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
-        .stage(program.compute_module.unwrap())
-        .layout(layout);
-
-    let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
-    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
-
-    (pipeline, layout)
-}
-
 
 #[derive(Debug, Clone)]
 pub struct SlangShader<'a> {
@@ -613,9 +495,9 @@ impl<'a> SlangShader<'a> {
     }
 }
 
-pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
+pub fn create_graphics_pipeline<'a, V: Vertex>(
     device: &RenderingDevice,
-    program: &SlangShader,
+    stages: &[vk::PipelineShaderStageCreateInfo],
     rasterization_data: RasterizationData,
     multisample_data: MultisampleData,
     depth_stencil_data: DepthStencilData,
@@ -624,100 +506,10 @@ pub fn create_basic_slang_graphics_pipeline<'a, V: Vertex>(
     color_attachment_formats: &[vk::Format],
     depth_attachment_format: vk::Format,
     stencil_attachment_format: vk::Format,
-    push_constant_ranges: &[vk::PushConstantRange],
-    topology: vk::PrimitiveTopology,
-) -> (vk::Pipeline, vk::PipelineLayout) {
-    let attribute_descriptions = V::attribute_descriptions();
-    let binding_descriptions = V::binding_descriptions();
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-        .vertex_attribute_descriptions(&attribute_descriptions)
-        .vertex_binding_descriptions(&binding_descriptions);
-
-    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .primitive_restart_enable(false)
-        .topology(topology);
-
-    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
-
-    let tessellation_state = vk::PipelineTessellationStateCreateInfo::default()
-        .patch_control_points(patch_control_points);
-
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-        .scissor_count(1)
-        .viewport_count(1);
-
-    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
-        .depth_bias_enable(false)
-        .depth_clamp_enable(false)
-        .cull_mode(rasterization_data.cull_mode)
-        .front_face(rasterization_data.front_face)
-        .line_width(rasterization_data.line_width)
-        .polygon_mode(rasterization_data.polygon_mode)
-        .rasterizer_discard_enable(false);
-
-    let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
-        .rasterization_samples(multisample_data.samples)
-        .sample_shading_enable(multisample_data.sample_shading_enable);
-
-    let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
-        .depth_test_enable(depth_stencil_data.depth_test_enable)
-        .depth_write_enable(depth_stencil_data.depth_write_enable)
-        .stencil_test_enable(depth_stencil_data.stencil_test_enable)
-        .depth_compare_op(depth_stencil_data.compare_op);
-
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-        .logic_op_enable(false)
-        .attachments(attachment_blends);
-
-    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
-        .push_constant_ranges(&push_constant_ranges)
-        .set_layouts(program.layout());
-
-    let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
-
-    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
-
-    let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
-        .color_attachment_formats(color_attachment_formats)
-        .depth_attachment_format(depth_attachment_format)
-        .stencil_attachment_format(stencil_attachment_format);
-
-    let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(program.program())
-        .vertex_input_state(&vertex_input_state)
-        .input_assembly_state(&input_assembly_state)
-        .tessellation_state(&tessellation_state)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterization_state)
-        .multisample_state(&multisample_state)
-        .depth_stencil_state(&depth_stencil_state)
-        .color_blend_state(&color_blend_state)
-        .dynamic_state(&dynamic_state)
-        .layout(layout)
-        .push_next(&mut pipeline_info2);
-
-    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
-
-    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
-
-    (pipeline, layout)
-}
-
-pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
-    device: &RenderingDevice,
-    program: &SlangShader,
-    rasterization_data: RasterizationData,
-    multisample_data: MultisampleData,
-    depth_stencil_data: DepthStencilData,
-    patch_control_points: u32,
-    attachment_blends: &[vk::PipelineColorBlendAttachmentState],
-    color_attachment_formats: &[vk::Format],
-    depth_attachment_format: vk::Format,
-    stencil_attachment_format: vk::Format,
-    push_constant_ranges: &[vk::PushConstantRange],
     set_layouts: &[vk::DescriptorSetLayout],
+    push_constant_ranges: &[vk::PushConstantRange],
     topology: vk::PrimitiveTopology,
+    name: &str,
 ) -> (vk::Pipeline, vk::PipelineLayout) {
     let attribute_descriptions = V::attribute_descriptions();
     let binding_descriptions = V::binding_descriptions();
@@ -768,7 +560,7 @@ pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
 
     let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }.unwrap();
 
-    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", name), layout).unwrap();
 
     let mut pipeline_info2 = vk::PipelineRenderingCreateInfo::default()
         .color_attachment_formats(color_attachment_formats)
@@ -776,7 +568,7 @@ pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
         .stencil_attachment_format(stencil_attachment_format);
 
     let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(program.program())
+        .stages(stages)
         .vertex_input_state(&vertex_input_state)
         .input_assembly_state(&input_assembly_state)
         .tessellation_state(&tessellation_state)
@@ -791,16 +583,17 @@ pub fn create_basic_slang_graphics_pipeline_descr<'a, V: Vertex>(
 
     let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None) }.unwrap()[0];
 
-    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", name), pipeline).unwrap();
 
     (pipeline, layout)
 }
 
-pub fn create_slang_compute_pipeline_descr(
+pub fn create_compute_pipeline(
     device: &RenderingDevice,
-    program: &SlangShader,
+    stage: vk::PipelineShaderStageCreateInfo,
     push_constant_ranges: &[vk::PushConstantRange],
     set_layouts: &[vk::DescriptorSetLayout],
+    name: &str,
 ) -> (vk::Pipeline, vk::PipelineLayout) {
 
     let layout_create_info = vk::PipelineLayoutCreateInfo::default()
@@ -808,14 +601,14 @@ pub fn create_slang_compute_pipeline_descr(
         .push_constant_ranges(push_constant_ranges);
 
     let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
-    set_object_name(device, &format!("{} Pipeline Layout", program.name()), layout).unwrap();
+    set_object_name(device, &format!("{} Pipeline Layout", name), layout).unwrap();
 
     let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
-        .stage(program.program()[0])
+        .stage(stage)
         .layout(layout);
 
     let pipeline = unsafe { device.create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None).unwrap()[0] };
-    set_object_name(device, &format!("{} Pipeline", program.name()), pipeline).unwrap();
+    set_object_name(device, &format!("{} Pipeline", name), pipeline).unwrap();
 
     (pipeline, layout)
 }
