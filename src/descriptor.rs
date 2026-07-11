@@ -3,11 +3,10 @@ use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, marker::Pha
 use thiserror::Error;
 
 use ash::vk;
-use ash::Device;
 use tracing::info;
 use anyhow::Result;
 
-use crate::RendererData;
+use crate::{RendererData, RenderingDevice};
 
 const STANDARD_SIZES: [(vk::DescriptorType, u32); 10] = [
     (vk::DescriptorType::SAMPLER, 1),
@@ -55,7 +54,7 @@ impl DescriptorAllocator {
         }
     }
 
-    fn get_pool(&mut self, device: &Device) -> Result<vk::DescriptorPool, DescriptorAllocateError> {
+    fn get_pool(&mut self, device: &RenderingDevice) -> Result<vk::DescriptorPool, DescriptorAllocateError> {
         if self.free_pools.len() > 0 {
             Ok(self.free_pools.pop().unwrap())
         }
@@ -64,7 +63,7 @@ impl DescriptorAllocator {
         }
     }
 
-    fn create_pool(&self, device: &Device) -> Result<vk::DescriptorPool, DescriptorAllocateError> {
+    fn create_pool(&self, device: &RenderingDevice) -> Result<vk::DescriptorPool, DescriptorAllocateError> {
         let sizes = self.sizes.iter().map(|(d_type, amt)| {
             vk::DescriptorPoolSize::default()
                 .ty(*d_type)
@@ -82,7 +81,7 @@ impl DescriptorAllocator {
         }
     }
 
-    pub fn allocate(&mut self, device: &Device, set_layout: &vk::DescriptorSetLayout) -> Result<vk::DescriptorSet, DescriptorAllocateError> {
+    pub fn allocate(&mut self, device: &RenderingDevice, set_layout: &vk::DescriptorSetLayout) -> Result<vk::DescriptorSet, DescriptorAllocateError> {
         for pool in self.descriptor_layouts.iter_mut() {
             for (layout, set, allocated) in pool.iter_mut() {
                 if *allocated {
@@ -147,7 +146,7 @@ impl DescriptorAllocator {
         }
     }
 
-    pub fn reset_pool(&mut self, device: &Device) {
+    pub fn reset_pools(&mut self, device: &RenderingDevice) {
         for pool in self.used_pools.clone() {
             unsafe { device.reset_descriptor_pool(pool, vk::DescriptorPoolResetFlags::empty()) }.unwrap();
             self.free_pools.push(pool);
@@ -156,8 +155,13 @@ impl DescriptorAllocator {
         self.descriptor_layouts.clear();
     }
 
-    pub fn deallocate_descriptor(&mut self, descriptor_set: vk::DescriptorSet) -> Result<()> {
-        for pool in self.descriptor_layouts.iter_mut().rev() {
+    pub fn deallocate_descriptor(&mut self, device: &RenderingDevice, descriptor_set: vk::DescriptorSet) -> Result<()> {
+        let mut freed_pools = vec![];
+        
+        for (id, pool) in self.descriptor_layouts.iter_mut().enumerate() {
+            let total = pool.len();
+            let mut freed: usize = 0;
+            
             for (_, set, allocated) in pool.iter_mut() {
                 match allocated {
                     true => {
@@ -165,17 +169,36 @@ impl DescriptorAllocator {
                             continue;
                         }
                     },
-                    false => continue,
+                    false => {
+                        freed += 1;
+                        continue
+                    },
                 }
 
                 *allocated = false;
+                freed += 1;
+            }
+
+            if freed == total {
+                pool.clear();
+                freed_pools.push(id);
             }
         }
+
+        for id in freed_pools {
+            self.descriptor_layouts.remove(id);
+            let pool = self.used_pools.remove(id);
+
+            unsafe { device.reset_descriptor_pool(pool, vk::DescriptorPoolResetFlags::empty()) }?;
+            self.free_pools.push(pool);
+        }
+
+        self.current_pool = self.used_pools.last().cloned();
         
         Ok(())
     }
 
-    pub fn destroy(&self, device: &Device) {
+    pub fn destroy(&self, device: &RenderingDevice) {
         for pool in &self.used_pools {
             unsafe { device.destroy_descriptor_pool(*pool, None) };
         }
@@ -184,28 +207,24 @@ impl DescriptorAllocator {
         }
     }
 
-    pub fn layouts(&self) -> &[Vec<(vk::DescriptorSetLayout, vk::DescriptorSet, bool)>] {
-        &self.descriptor_layouts
+    pub fn print_allocations(&self) {
+        for (id, pool) in self.descriptor_layouts.iter().enumerate() {
+            info!("pool: {}; {} allocations", id, pool.len());
+            let mut string = String::new();
+            for (layout, _, allocated) in pool {
+                match allocated {
+                    true => string.push_str(&format!("\x1B[32m{:?}\x1B[0m,", layout)),
+                    false => string.push_str(&format!("\x1B[31m{:?}\x1B[0m,", layout)),
+                }
+            }
+            info!("layouts: {}", string);
+        }
     }
 }
 
 impl Default for DescriptorAllocator {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-pub fn print_allocations(allocations: &[Vec<(vk::DescriptorSetLayout, vk::DescriptorSet, bool)>]) {
-    for (id, pool) in allocations.iter().enumerate() {
-        info!("pool: {}; {} allocations", id, pool.len());
-        let mut string = String::new();
-        for (layout, _, allocated) in pool {
-            match allocated {
-                true => string.push_str(&format!("\x1B[32m{:?}\x1B[0m,", layout)),
-                false => string.push_str(&format!("\x1B[31m{:?}\x1B[0m,", layout)),
-            }
-        }
-        info!("layouts: {}", string);
     }
 }
 
@@ -230,7 +249,7 @@ impl DescriptorLayoutCache {
         }
     }
 
-    pub fn create_descriptor_set_layout(&mut self, device: &Device, bindings: &[vk::DescriptorSetLayoutBinding]) -> vk::DescriptorSetLayout {
+    pub fn create_descriptor_set_layout(&mut self, device: &RenderingDevice, bindings: &[vk::DescriptorSetLayoutBinding]) -> vk::DescriptorSetLayout {
         let hash = Self::hash_bindings(bindings);
 
         match self.cache.get(&hash) {
@@ -258,7 +277,7 @@ impl DescriptorLayoutCache {
         hasher.finish()
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &RenderingDevice) {
         self.cache.iter().for_each(|(_, v)| unsafe { device.destroy_descriptor_set_layout(*v, None) });
     }
 }
@@ -324,7 +343,7 @@ impl<'a> DescriptorBuilder<'a> {
         self
     }
 
-    pub fn build(&'a mut self, device: &Device, layout_cache: &mut DescriptorLayoutCache, allocator: &mut DescriptorAllocator) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
+    pub fn build(&'a mut self, device: &RenderingDevice, layout_cache: &mut DescriptorLayoutCache, allocator: &mut DescriptorAllocator) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
         let layout = layout_cache.create_descriptor_set_layout(device, &self.bindings);
         let set = allocator.allocate(device, &layout)?;
 
@@ -337,7 +356,7 @@ impl<'a> DescriptorBuilder<'a> {
         Ok((set, layout))
     }
 
-    pub fn build_data(&'a mut self, device: &Device, data: &mut RendererData) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
+    pub fn build_data(&'a mut self, device: &RenderingDevice, data: &mut RendererData) -> Result<(vk::DescriptorSet, vk::DescriptorSetLayout), DescriptorAllocateError> {
         let layout = data.descriptor_layout_cache.create_descriptor_set_layout(device, &self.bindings);
         let set = data.descriptor_pool.allocate(device, &layout)?;
 
@@ -357,7 +376,7 @@ impl<'a> Default for DescriptorBuilder<'a> {
     }
 }
 
-pub fn update_image_binding(device: &Device, image_info: &[vk::DescriptorImageInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
+pub fn update_image_binding(device: &RenderingDevice, image_info: &[vk::DescriptorImageInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
     let write = vk::WriteDescriptorSet::default()
         .dst_set(set)
         .dst_binding(binding)
@@ -367,7 +386,7 @@ pub fn update_image_binding(device: &Device, image_info: &[vk::DescriptorImageIn
     unsafe { device.update_descriptor_sets(&[write], &[]) };
 }
 
-pub fn update_buffer_binding(device: &Device, buffer_info: &[vk::DescriptorBufferInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
+pub fn update_buffer_binding(device: &RenderingDevice, buffer_info: &[vk::DescriptorBufferInfo; 1], set: vk::DescriptorSet, binding: u32, descriptor_type: vk::DescriptorType) {
     let write = vk::WriteDescriptorSet::default()
         .dst_set(set)
         .dst_binding(binding)
