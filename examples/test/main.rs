@@ -667,35 +667,70 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         task_graph.add_image(cc_image);
 
         let mut shadow_pass_node = Node::new();
-        shadow_pass_node.set_depth("shadow_map", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write() );
+        shadow_pass_node.set_depth(
+            "shadow_map",
+            AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write(),
+            AttachmentLoadStore::CLEAR_STORE,
+            ClearValue::Depth(0.0),
+        );
         shadow_pass_node.set_task(Box::new(ShadowPass));
         task_graph.add_node(shadow_pass_node);
 
         let mut main_node = Node::new();
-        main_node.add_attachment("color_attachment", AccessType::color_attachment_write());
-        main_node.set_depth("depth_attachment", AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write());
+        main_node.add_attachment(
+            "color_attachment",
+            AccessType::color_attachment_write(),
+            AttachmentLoadStore::CLEAR_STORE,
+            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+        );
+        main_node.set_depth(
+            "depth_attachment",
+            AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write(),
+            AttachmentLoadStore::CLEAR_DONT_CARE,
+            ClearValue::Depth(0.0),
+        );
         main_node.add_internal_image("shadow_map", vk::ImageAspectFlags::DEPTH, AccessType::fragment_shader_sampled_read());
         main_node.set_task(Box::new(MainDraw));
         task_graph.add_node(main_node);
 
         let mut debug_node = Node::new();
-        debug_node.add_attachment("color_attachment", AccessType::color_attachment_write());
+        debug_node.add_attachment(
+            "color_attachment",
+            AccessType::color_attachment_write(),
+            AttachmentLoadStore::LOAD_STORE,
+            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+        );
         debug_node.set_task(Box::new(DebugDraw));
         task_graph.add_node(debug_node);
 
         let mut cc_node = Node::new();
         cc_node.add_internal_image("color_attachment", vk::ImageAspectFlags::COLOR, AccessType::fragment_shader_sampled_read());
-        cc_node.add_attachment("color_correction", AccessType::color_attachment_write());
+        cc_node.add_attachment(
+            "color_correction",
+            AccessType::color_attachment_write(),
+            AttachmentLoadStore::DONT_CARE_STORE,
+            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+        );
         cc_node.set_task(Box::new(ColourCorrectionPass));
         task_graph.add_node(cc_node);
 
         let mut egui_node = Node::new();
-        egui_node.add_attachment("color_correction", AccessType::color_attachment_write());
+        egui_node.add_attachment(
+            "color_correction",
+            AccessType::color_attachment_write(),
+            AttachmentLoadStore::LOAD_STORE,
+            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+        );
         egui_node.set_task(Box::new(EguiDraw));
         task_graph.add_node(egui_node);
 
         let mut present_node = Node::new();
-        present_node.add_attachment("color_correction", AccessType::blit_src());
+        present_node.add_attachment(
+            "color_correction",
+            AccessType::blit_src(),
+            AttachmentLoadStore::DONT_CARE_DONT_CARE,
+            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+        );
         present_node.set_task(Box::new(Present));
         task_graph.add_node(present_node);
 
@@ -748,21 +783,6 @@ struct ShadowPass;
 impl Task for ShadowPass {
     fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(device, command_buffer, "Shadow Pass", vec4(0.0, 0.6, 0.2, 1.0));
-        
-        let depth_attachment = vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 }  })
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-            .image_view(draw_data.depth_attachment.unwrap().view());
-
-        let rendering_info = vk::RenderingInfo::default()
-            .layer_count(1)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.depth_attachment.unwrap().extent_2d(),
-            })
-            .depth_attachment(&depth_attachment);
 
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
@@ -779,7 +799,7 @@ impl Task for ShadowPass {
                 .y(0.0)
         ];
 
-        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+        unsafe { device.cmd_begin_rendering(command_buffer, &draw_data.rendering_info) };
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
@@ -816,31 +836,6 @@ impl Task for MainDraw {
     fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(device, command_buffer, "Main Draw", vec4(0.0, 0.6, 0.2, 1.0));
 
-        let attachment_infos = [
-            vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 1.0]}})
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .image_view(draw_data.color_attachments[0].view())
-        ];
-
-        let depth_attachment = vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 }  })
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-            .image_view(draw_data.depth_attachment.unwrap().view());
-
-        let rendering_info = vk::RenderingInfo::default()
-            .layer_count(1)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.color_attachments[0].extent_2d(),
-            })
-            .color_attachments(&attachment_infos)
-            .depth_attachment(&depth_attachment);
-
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: draw_data.color_attachments[0].extent_2d(),
@@ -856,7 +851,7 @@ impl Task for MainDraw {
                 .y(0.0)
         ];
         
-        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+        unsafe { device.cmd_begin_rendering(command_buffer, &draw_data.rendering_info) };
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
@@ -898,23 +893,6 @@ impl Task for ColourCorrectionPass {
     fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(device, command_buffer, "Colour Correction", vec4(0.0, 0.5, 0.5, 1.0));
 
-        let attachment_infos = [
-            vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 1.0]}})
-            .load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .image_view(draw_data.color_attachments[0].view())
-        ];
-
-        let rendering_info = vk::RenderingInfo::default()
-            .layer_count(1)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.color_attachments[0].extent_2d(),
-            })
-            .color_attachments(&attachment_infos);
-
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: draw_data.color_attachments[0].extent_2d(),
@@ -930,7 +908,7 @@ impl Task for ColourCorrectionPass {
                 .y(0.0)
         ];
         
-        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+        unsafe { device.cmd_begin_rendering(command_buffer, &draw_data.rendering_info) };
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
@@ -993,24 +971,7 @@ impl Task for EguiDraw {
 
         begin_command_label(device, command_buffer, "Egui Draw", vec4(0.4, 0.5, 0.7, 1.0));
         
-        let attachment_infos = [
-            vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.05, 0.5, 0.0, 1.0]}})
-            .load_op(vk::AttachmentLoadOp::LOAD)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .image_view(draw_data.color_attachments[0].view())
-        ];
-
-        let rendering_info = vk::RenderingInfo::default()
-            .layer_count(1)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.color_attachments[0].extent_2d(),
-            })
-            .color_attachments(&attachment_infos);
-        
-        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+        unsafe { device.cmd_begin_rendering(command_buffer, &draw_data.rendering_info) };
 
         data.egui_renderer.as_mut().unwrap().cmd_draw(command_buffer, draw_data.color_attachments[0].extent_2d(), data.pixels_per_point, &data.clipped_primitives).unwrap();
 
@@ -1031,23 +992,6 @@ impl Task for DebugDraw {
     fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(device, command_buffer, "Debug Draw", vec4(0.0, 0.6, 0.2, 1.0));
 
-        let attachment_infos = [
-            vk::RenderingAttachmentInfo::default()
-            .clear_value(vk::ClearValue { color: vk::ClearColorValue { float32: [0.01, 0.01, 0.01, 1.0]}})
-            .load_op(vk::AttachmentLoadOp::LOAD)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .image_view(draw_data.color_attachments[0].view())
-        ];
-
-        let rendering_info = vk::RenderingInfo::default()
-            .layer_count(1)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: draw_data.color_attachments[0].extent_2d(),
-            })
-            .color_attachments(&attachment_infos);
-
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: draw_data.color_attachments[0].extent_2d(),
@@ -1063,7 +1007,7 @@ impl Task for DebugDraw {
                 .y(0.0)
         ];
         
-        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
+        unsafe { device.cmd_begin_rendering(command_buffer, &draw_data.rendering_info) };
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
