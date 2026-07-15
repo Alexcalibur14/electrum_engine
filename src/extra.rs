@@ -50,8 +50,7 @@ impl SimpleCamera {
             .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::VERTEX)
             .build_data(device, data).unwrap();
 
-        camera_object.add_buffer(camera_data_buffer, "camera_data");
-        camera_object.add_descriptor_set(descriptor_set, "camera_data");
+        camera_object.add_descriptor_set(descriptor_set, &[(camera_data_buffer, "camera_data")], &[], "camera_data");
         data.layouts.push(layout, "main_camera");
 
         let object_handle = data.objects.push(camera_object, &["main_camera"]);
@@ -88,8 +87,7 @@ impl SimpleCamera {
             .bind_buffer(0, 1, &[camera_data_buffer.descriptor_info()], vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL_GRAPHICS)
             .build_data(device, data).unwrap();
 
-        camera_object.add_descriptor_set(descriptor_set, "camera_data");
-        camera_object.add_buffer(camera_data_buffer, "camera_data");
+        camera_object.add_descriptor_set(descriptor_set, &[(camera_data_buffer, "camera_data")], &[], "camera_data");
         data.layouts.push(layout, "main_camera");
 
         let object_handle = data.objects.push(camera_object, &["main_camera"]);
@@ -179,8 +177,7 @@ impl Light {
             .build_data(device, data).unwrap();
 
         let mut light_object = Object::new("light");
-        light_object.add_buffer(light_buffer, "light_data");
-        light_object.add_descriptor_set(light_descriptor, "light_data");
+        light_object.add_descriptor_set(light_descriptor, &[(light_buffer, "light_data")], &[], "light_data");
 
         data.layouts.push(layout, "light_data");
         let object_handle = data.objects.push(light_object, &["light"]);
@@ -230,8 +227,7 @@ pub fn create_debug_axes_object(device: &RenderingDevice, data: &mut RendererDat
         .build_data(device, data).unwrap();
 
     let mut debug_axes = Object::new("axes");
-    debug_axes.add_buffer(object_buffer, "mvp");
-    debug_axes.add_descriptor_set(object_descriptor, "mvp");
+    debug_axes.add_descriptor_set(object_descriptor, &[(object_buffer, "mvp")], &[], "mvp");
 
     *debug_axes.mesh_data_mut() = MeshData::new("axes");
     debug_axes.mesh_data_mut().build_vertex_staged(device, data, &[

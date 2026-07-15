@@ -325,8 +325,10 @@ impl<'a> Object<'a> {
         self.images.push(image, name);
     }
 
-    pub fn add_descriptor_set(&mut self, descriptor_set: vk::DescriptorSet, name: &'a str) {
+    pub fn add_descriptor_set(&mut self, descriptor_set: vk::DescriptorSet, buffers: &[(Buffer, &'a str)], images: &[(Image, &'a str)], name: &'a str) {
         self.descriptor_sets.push(descriptor_set, name);
+        buffers.iter().for_each(|(buffer, name)| self.buffers.push(*buffer, name));
+        images.iter().for_each(|(image, name)| self.images.push(*image, name));
     }
 
     pub fn replace_descriptor_set(&mut self, descriptor_set: vk::DescriptorSet, name: &'a str) {

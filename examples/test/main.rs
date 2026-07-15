@@ -159,11 +159,8 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let mut monkey = Object::new("monkey");
-        monkey.add_buffer(object_buffer, "mvp");
-        monkey.add_descriptor_set(object_descriptor, "mvp");
-        monkey.add_buffer(material_buffer, "material");
-        monkey.add_image(white_texture, "albedo");
-        monkey.add_descriptor_set(material_descriptor, "material");
+        monkey.add_descriptor_set(object_descriptor, &[(object_buffer, "mvp")], &[], "mvp");
+        monkey.add_descriptor_set(material_descriptor, &[(material_buffer, "material")], &[(white_texture, "albedo")], "material");
 
         *monkey.mesh_data_mut() = basic_obj_loader(&renderer.device, &renderer.data, "examples/test/res/models/MONKEY.obj")[0].clone();
 
@@ -205,11 +202,8 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let plane = Plane::new(&renderer.device, &mut renderer.data, 10.0, 10.0, 10, 10, &["main", "shadow"]);
         let plane_object = renderer.data.objects.get_mut(&plane.object()).unwrap();
-        plane_object.add_buffer(object_buffer, "mvp");
-        plane_object.add_descriptor_set(object_descriptor, "mvp");
-        plane_object.add_buffer(material_buffer, "material");
-        plane_object.add_image(uv_texture, "albedo");
-        plane_object.add_descriptor_set(material_descriptor, "material");
+        plane_object.add_descriptor_set(object_descriptor, &[(object_buffer, "mvp")], &[], "mvp");
+        plane_object.add_descriptor_set(material_descriptor, &[(material_buffer, "material")], &[(uv_texture, "albedo")], "material");
 
 
         let model_matrix = glam::Mat4::from_scale_rotation_translation(vec3(1.0, 1.0, 1.0), Quat::IDENTITY, vec3(-2.0, 2.0, 0.0));
@@ -247,10 +241,8 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let uv_sphere = UVSphere::new(&renderer.device, &mut renderer.data, 1.0, 6, 12, &["main", "shadow"]);
         let uv_sphere_object = renderer.data.objects.get_mut(&uv_sphere.object()).unwrap();
-        uv_sphere_object.add_buffer(object_buffer, "mvp");
-        uv_sphere_object.add_descriptor_set(object_descriptor, "mvp");
-        uv_sphere_object.add_buffer(material_buffer, "material");
-        uv_sphere_object.add_descriptor_set(material_descriptor, "material");
+        uv_sphere_object.add_descriptor_set(object_descriptor, &[(object_buffer, "mvp")], &[], "mvp");
+        uv_sphere_object.add_descriptor_set(material_descriptor, &[(material_buffer, "material")], &[], "material");
 
 
         let light_position = vec3(3.0, 3.0, 0.0);
@@ -272,7 +264,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
-        light_object.add_descriptor_set(shadow_map_descriptor, "shadow_map");
+        light_object.add_descriptor_set(shadow_map_descriptor, &[], &[], "shadow_map");
 
         let light_camera_matrix = Mat4::look_at_rh(light_position, light_target, Vec3::Y);
         let light_camera_data = CameraData {
@@ -293,8 +285,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let light_object = renderer.data.objects.get_mut(self.light.object()).unwrap();
-        light_object.add_buffer(light_camera_buffer, "camera_data");
-        light_object.add_descriptor_set(light_camera_descriptor, "camera_data");
+        light_object.add_descriptor_set(light_camera_descriptor, &[(light_camera_buffer, "light_camera")], &[], "camera_data");
 
 
         let pipeline = create_graphics_pipeline::<OBJVertex>(
@@ -431,8 +422,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
         let mut cc_object = Object::new("colour_correction_data");
-        cc_object.add_buffer(cc_buffer, "colour_correction_data");
-        cc_object.add_descriptor_set(cc_descriptor, "colour_correction_data");
+        cc_object.add_descriptor_set(cc_descriptor, &[(cc_buffer, "colour_correction_data")], &[], "colour_correction_data");
 
         let (main_image, _) = renderer.data.task_graph.images().iter().find(|(image_data, _)| image_data.name() == "color_attachment").unwrap();
 
@@ -448,7 +438,7 @@ impl<'a> ApplicationHandler for App<'a> {
             )
             .build_data(&renderer.device, &mut renderer.data).unwrap();
 
-        cc_object.add_descriptor_set(cc_image_descriptor, "colour_correction_images");
+        cc_object.add_descriptor_set(cc_image_descriptor, &[], &[], "colour_correction_images");
 
         let (cc_pipeline, layout) = create_graphics_pipeline::<NullVertex>(
             &renderer.device,
