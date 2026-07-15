@@ -69,16 +69,16 @@ impl<'a> TaskGraph<'a> {
         self.swapchain_extent = data.swapchain_extent;
         self.nodes.iter_mut().for_each(|node| {
 
-            let color_attachments = node.color_attachments.iter().map(|(name, dst_access, load_store, clear_value)| {
+            let color_attachments = node.color_attachments.iter().map(|(name, dst_access, load_store)| {
                 let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find color attachment with name: {:?}", name));
-                (image_data, src_access, dst_access, load_store, clear_value)
+                (image_data, src_access, dst_access, load_store)
             }).collect::<Vec<_>>();
 
             let depth_attachment = {
                 match node.depth_attachment {
-                    Some((name, dst_access, load_store, clear_value)) => {
+                    Some((name, dst_access, load_store)) => {
                         let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find depth attachment with name: {:?}", name));
-                        Some((image_data, src_access, dst_access, load_store, clear_value))
+                        Some((image_data, src_access, dst_access, load_store))
                     },
                     None => None,
                 }
@@ -86,9 +86,9 @@ impl<'a> TaskGraph<'a> {
 
             let stencil_attachment = {
                 match node.stencil_attachment {
-                    Some((name, dst_access, load_store, clear_value)) => {
+                    Some((name, dst_access, load_store)) => {
                         let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find stencil attachment with name: {:?}", name));
-                        Some((image_data, src_access, dst_access, load_store, clear_value))
+                        Some((image_data, src_access, dst_access, load_store))
                     },
                     None => None,
                 }
@@ -105,31 +105,31 @@ impl<'a> TaskGraph<'a> {
             }).collect::<Vec<_>>();
 
 
-            let color_attachment_infos = color_attachments.iter().map(|(image_data, _, _, load_store, clear_value)| {
+            let color_attachment_infos = color_attachments.iter().map(|(image_data, _, _, load_store)| {
                 vk::RenderingAttachmentInfo::default()
                     .image_view(image_data.image().view())
                     .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .load_op(load_store.load)
-                    .store_op(load_store.store)
-                    .clear_value((**clear_value).into())
+                    .load_op((**load_store).into())
+                    .store_op((**load_store).into())
+                    .clear_value((**load_store).into())
             }).collect::<Vec<_>>();
 
-            let depth_attachment_info = depth_attachment.map(|(image_data, _, _, load_store, clear_value)| {
+            let depth_attachment_info = depth_attachment.map(|(image_data, _, _, load_store)| {
                 vk::RenderingAttachmentInfo::default()
                     .image_view(image_data.image().view())
                     .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-                    .load_op(load_store.load)
-                    .store_op(load_store.store)
-                    .clear_value(clear_value.into())
+                    .load_op(load_store.into())
+                    .store_op(load_store.into())
+                    .clear_value(load_store.into())
             });
 
-            let stencil_attachment_info = stencil_attachment.map(|(image_data, _, _, load_store, clear_value)| {
+            let stencil_attachment_info = stencil_attachment.map(|(image_data, _, _, load_store)| {
                 vk::RenderingAttachmentInfo::default()
                     .image_view(image_data.image().view())
                     .image_layout(vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL)
-                    .load_op(load_store.load)
-                    .store_op(load_store.store)
-                    .clear_value(clear_value.into())
+                    .load_op(load_store.into())
+                    .store_op(load_store.into())
+                    .clear_value(load_store.into())
             });
 
             let color = color_attachment_infos.clone();
@@ -141,7 +141,7 @@ impl<'a> TaskGraph<'a> {
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: match color_attachments.get(0) {
-                        Some((image_data, _, _, _, _)) => image_data.image().extent_2d(),
+                        Some((image_data, _, _, _)) => image_data.image().extent_2d(),
                         None => vk::Extent2D { width: 1, height: 1 },
                     }
                 })
@@ -150,9 +150,9 @@ impl<'a> TaskGraph<'a> {
                 .stencil_attachment(&stencil);
 
             let draw_data = DrawData {
-                color_attachments: color_attachments.iter().map(|(image_data, _, _, _, _)| image_data.image).collect(),
-                depth_attachment: if let Some((image_data, _, _, _, _)) = depth_attachment { Some(image_data.image) } else { None },
-                stencil_attachment: if let Some((image_data, _, _, _, _)) = stencil_attachment { Some(image_data.image) } else { None },
+                color_attachments: color_attachments.iter().map(|(image_data, _, _, _)| image_data.image).collect(),
+                depth_attachment: if let Some((image_data, _, _, _)) = depth_attachment { Some(image_data.image) } else { None },
+                stencil_attachment: if let Some((image_data, _, _, _)) = stencil_attachment { Some(image_data.image) } else { None },
                 internal_images: internal_images.iter().map(|(image_data, _, _, _)| image_data.image).collect(),
                 internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| **buffer).collect(),
                 external_images: vec![],
@@ -171,16 +171,16 @@ impl<'a> TaskGraph<'a> {
 
     pub fn execute(&mut self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, data: &mut RendererData, stats: &mut RenderStats) {
         for node in self.nodes.iter() {
-            let color_attachments = node.color_attachments.iter().map(|(name, dst_access, load_store, clear_value)| {
+            let color_attachments = node.color_attachments.iter().map(|(name, dst_access, load_store)| {
                 let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == *name).expect(&format!("could not find color attachment with name: {:?}", name));
-                (image_data, src_access, dst_access, load_store, clear_value)
+                (image_data, src_access, dst_access, load_store)
             }).collect::<Vec<_>>();
 
             let depth_attachment = {
                 match node.depth_attachment {
-                    Some((name, dst_access, load_store, clear_value)) => {
+                    Some((name, dst_access, load_store)) => {
                         let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find depth attachment with name: {:?}", name));
-                        Some((image_data, src_access, dst_access, load_store, clear_value))
+                        Some((image_data, src_access, dst_access, load_store))
                     },
                     None => None,
                 }
@@ -188,9 +188,9 @@ impl<'a> TaskGraph<'a> {
 
             let stencil_attachment = {
                 match node.stencil_attachment {
-                    Some((name, dst_access, load_store, clear_value)) => {
+                    Some((name, dst_access, load_store)) => {
                         let (image_data, src_access) = self.images.iter().find(|(image_data, _)| image_data.name == name).expect(&format!("could not find stencil attachment with name: {:?}", name));
-                        Some((image_data, src_access, dst_access, load_store, clear_value))
+                        Some((image_data, src_access, dst_access, load_store))
                     },
                     None => None,
                 }
@@ -208,7 +208,7 @@ impl<'a> TaskGraph<'a> {
 
             let mut image_barriers = vec![];
 
-            color_attachments.iter().for_each(|(image_data, src_access, dst_access, _, _)| {
+            color_attachments.iter().for_each(|(image_data, src_access, dst_access, _)| {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
                         .image(image_data.image.image())
@@ -222,7 +222,7 @@ impl<'a> TaskGraph<'a> {
                 );
             });
 
-            if let Some((image_data, src_access, dst_access, _, _)) = depth_attachment {
+            if let Some((image_data, src_access, dst_access, _)) = depth_attachment {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
                         .image(image_data.image.image())
@@ -236,7 +236,7 @@ impl<'a> TaskGraph<'a> {
                 );
             }
 
-            if let Some((image_data, src_access, dst_access, _, _)) = stencil_attachment {
+            if let Some((image_data, src_access, dst_access, _)) = stencil_attachment {
                 image_barriers.push(
                     vk::ImageMemoryBarrier2::default()
                         .image(image_data.image.image())
@@ -285,31 +285,31 @@ impl<'a> TaskGraph<'a> {
             unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
 
 
-            let color_attachment_infos = color_attachments.iter().map(|(image_data, _, _, load_store, clear_value)| {
+            let color_attachment_infos = color_attachments.iter().map(|(image_data, _, _, load_store)| {
                 vk::RenderingAttachmentInfo::default()
                     .image_view(image_data.image().view())
                     .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .load_op(load_store.load)
-                    .store_op(load_store.store)
-                    .clear_value((**clear_value).into())
+                    .load_op((**load_store).into())
+                    .store_op((**load_store).into())
+                    .clear_value((**load_store).into())
             }).collect::<Vec<_>>();
 
-            let depth_attachment_info = depth_attachment.map(|(image_data, _, _, load_store, clear_value)| {
+            let depth_attachment_info = depth_attachment.map(|(image_data, _, _, load_store)| {
                 vk::RenderingAttachmentInfo::default()
                     .image_view(image_data.image().view())
                     .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-                    .load_op(load_store.load)
-                    .store_op(load_store.store)
-                    .clear_value(clear_value.into())
+                    .load_op(load_store.into())
+                    .store_op(load_store.into())
+                    .clear_value(load_store.into())
             });
 
-            let stencil_attachment_info = stencil_attachment.map(|(image_data, _, _, load_store, clear_value)| {
+            let stencil_attachment_info = stencil_attachment.map(|(image_data, _, _, load_store)| {
                 vk::RenderingAttachmentInfo::default()
                     .image_view(image_data.image().view())
                     .image_layout(vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL)
-                    .load_op(load_store.load)
-                    .store_op(load_store.store)
-                    .clear_value(clear_value.into())
+                    .load_op(load_store.into())
+                    .store_op(load_store.into())
+                    .clear_value(load_store.into())
             });
 
             let color = color_attachment_infos.clone();
@@ -321,7 +321,7 @@ impl<'a> TaskGraph<'a> {
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: match color_attachments.get(0) {
-                        Some((image_data, _, _, _, _)) => image_data.image().extent_2d(),
+                        Some((image_data, _, _, _)) => image_data.image().extent_2d(),
                         None => vk::Extent2D { width: 1, height: 1 },
                     }
                 })
@@ -330,9 +330,9 @@ impl<'a> TaskGraph<'a> {
                 .stencil_attachment(&stencil);
 
             let draw_data = DrawData {
-                color_attachments: color_attachments.iter().map(|(image_data, _, _, _, _)| image_data.image).collect(),
-                depth_attachment: if let Some((image_data, _, _, _, _)) = depth_attachment { Some(image_data.image) } else { None },
-                stencil_attachment: if let Some((image_data, _, _, _, _)) = stencil_attachment { Some(image_data.image) } else { None },
+                color_attachments: color_attachments.iter().map(|(image_data, _, _, _)| image_data.image).collect(),
+                depth_attachment: if let Some((image_data, _, _, _)) = depth_attachment { Some(image_data.image) } else { None },
+                stencil_attachment: if let Some((image_data, _, _, _)) = stencil_attachment { Some(image_data.image) } else { None },
                 internal_images: internal_images.iter().map(|(image_data, _, _, _)| image_data.image).collect(),
                 internal_buffers: internal_buffers.iter().map(|(buffer, _, _)| **buffer).collect(),
                 external_images: vec![],
@@ -349,17 +349,17 @@ impl<'a> TaskGraph<'a> {
 
             let mut images_clone = self.images.clone();
             
-            node.color_attachments.iter().for_each(|(name, dst_access, _, _)| {
+            node.color_attachments.iter().for_each(|(name, dst_access, _)| {
                 let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == *name).expect("msg");
                 *latest_access = *dst_access;
             });
 
-            if let Some((name, dst_access, _, _)) = node.depth_attachment {
+            if let Some((name, dst_access, _)) = node.depth_attachment {
                 let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == name).expect("msg");
                 *latest_access = dst_access;
             }
 
-            if let Some((name, dst_access, _, _)) = node.stencil_attachment {
+            if let Some((name, dst_access, _)) = node.stencil_attachment {
                 let (_, latest_access) = images_clone.iter_mut().find(|(image_data, _)| image_data.name == name).expect("msg");
                 *latest_access = dst_access;
             }
@@ -393,9 +393,9 @@ impl<'a> TaskGraph<'a> {
 
 #[derive(Clone)]
 pub struct Node<'a> {
-    color_attachments: Vec<(&'a str, AccessType, AttachmentLoadStore, ClearValue)>,
-    depth_attachment: Option<(&'a str, AccessType, AttachmentLoadStore, ClearValue)>,
-    stencil_attachment: Option<(&'a str, AccessType, AttachmentLoadStore, ClearValue)>,
+    color_attachments: Vec<(&'a str, AccessType, AttachmentLoadStore)>,
+    depth_attachment: Option<(&'a str, AccessType, AttachmentLoadStore)>,
+    stencil_attachment: Option<(&'a str, AccessType, AttachmentLoadStore)>,
     internal_images: Vec<(&'a str, AccessType, vk::ImageAspectFlags)>,
     internal_buffers: Vec<(&'a str, AccessType)>,
     external_images: Vec<(&'a str, AccessType, vk::ImageAspectFlags)>,
@@ -417,16 +417,16 @@ impl<'a> Node<'a> {
         }
     }
 
-    pub fn add_attachment(&mut self, name: &'a str, access_type: AccessType, attachment_load_store: AttachmentLoadStore, clear_value: ClearValue) {
-        self.color_attachments.push((name, access_type, attachment_load_store, clear_value));
+    pub fn add_attachment(&mut self, name: &'a str, access_type: AccessType, attachment_load_store: AttachmentLoadStore) {
+        self.color_attachments.push((name, access_type, attachment_load_store));
     }
 
-    pub fn set_depth(&mut self, name: &'a str, access_type: AccessType, attachment_load_store: AttachmentLoadStore, clear_value: ClearValue) {
-        self.depth_attachment = Some((name, access_type, attachment_load_store, clear_value));
+    pub fn set_depth(&mut self, name: &'a str, access_type: AccessType, attachment_load_store: AttachmentLoadStore) {
+        self.depth_attachment = Some((name, access_type, attachment_load_store));
     }
 
-    pub fn set_stencil(&mut self, name: &'a str, access_type: AccessType, attachment_load_store: AttachmentLoadStore, clear_value: ClearValue) {
-        self.stencil_attachment = Some((name, access_type, attachment_load_store, clear_value));
+    pub fn set_stencil(&mut self, name: &'a str, access_type: AccessType, attachment_load_store: AttachmentLoadStore) {
+        self.stencil_attachment = Some((name, access_type, attachment_load_store));
     }
 
     pub fn add_internal_image(&mut self, name: &'a str, aspect: vk::ImageAspectFlags, access_type: AccessType) {
@@ -952,42 +952,53 @@ pub fn transition_image_access(device: &RenderingDevice, command_buffer: vk::Com
     unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AttachmentLoadStore {
-    pub load: vk::AttachmentLoadOp,
-    pub store: vk::AttachmentStoreOp,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AttachmentLoadStore {
+    LoadStore,
+    LoadDontCare,
+    DontCareStore,
+    ClearStore(ClearValue),
+    ClearDontCare(ClearValue),
+    DontCareDontCare,
 }
 
-impl AttachmentLoadStore {
-    pub const LOAD_STORE: Self = AttachmentLoadStore {
-        load: vk::AttachmentLoadOp::LOAD,
-        store: vk::AttachmentStoreOp::STORE,
-    };
+impl From<AttachmentLoadStore> for vk::AttachmentLoadOp {
+    fn from(value: AttachmentLoadStore) -> Self {
+        match value {
+            AttachmentLoadStore::LoadStore => vk::AttachmentLoadOp::LOAD,
+            AttachmentLoadStore::LoadDontCare => vk::AttachmentLoadOp::LOAD,
+            AttachmentLoadStore::DontCareStore => vk::AttachmentLoadOp::DONT_CARE,
+            AttachmentLoadStore::ClearStore(_) => vk::AttachmentLoadOp::CLEAR,
+            AttachmentLoadStore::ClearDontCare(_) => vk::AttachmentLoadOp::CLEAR,
+            AttachmentLoadStore::DontCareDontCare => vk::AttachmentLoadOp::DONT_CARE,
+        }
+    }
+}
 
-    pub const LOAD_DONT_CARE: Self = AttachmentLoadStore {
-        load: vk::AttachmentLoadOp::LOAD,
-        store: vk::AttachmentStoreOp::DONT_CARE,
-    };
+impl From<AttachmentLoadStore> for vk::AttachmentStoreOp {
+    fn from(value: AttachmentLoadStore) -> Self {
+        match value {
+            AttachmentLoadStore::LoadStore => vk::AttachmentStoreOp::STORE,
+            AttachmentLoadStore::LoadDontCare => vk::AttachmentStoreOp::DONT_CARE,
+            AttachmentLoadStore::DontCareStore => vk::AttachmentStoreOp::STORE,
+            AttachmentLoadStore::ClearStore(_) => vk::AttachmentStoreOp::STORE,
+            AttachmentLoadStore::ClearDontCare(_) => vk::AttachmentStoreOp::DONT_CARE,
+            AttachmentLoadStore::DontCareDontCare => vk::AttachmentStoreOp::DONT_CARE,
+        }
+    }
+}
 
-    pub const DONT_CARE_STORE: Self = AttachmentLoadStore {
-        load: vk::AttachmentLoadOp::DONT_CARE,
-        store: vk::AttachmentStoreOp::STORE,
-    };
-
-    pub const CLEAR_STORE: Self = AttachmentLoadStore {
-        load: vk::AttachmentLoadOp::CLEAR,
-        store: vk::AttachmentStoreOp::STORE,
-    };
-
-    pub const CLEAR_DONT_CARE: Self = AttachmentLoadStore {
-        load: vk::AttachmentLoadOp::CLEAR,
-        store: vk::AttachmentStoreOp::DONT_CARE,
-    };
-
-    pub const DONT_CARE_DONT_CARE: Self = AttachmentLoadStore {
-        load: vk::AttachmentLoadOp::DONT_CARE,
-        store: vk::AttachmentStoreOp::DONT_CARE,
-    };
+impl From<AttachmentLoadStore> for vk::ClearValue {
+    fn from(value: AttachmentLoadStore) -> Self {
+        match value {
+            AttachmentLoadStore::LoadStore => vk::ClearValue::default(),
+            AttachmentLoadStore::LoadDontCare => vk::ClearValue::default(),
+            AttachmentLoadStore::DontCareStore => vk::ClearValue::default(),
+            AttachmentLoadStore::ClearStore(clear_value) => clear_value.into(),
+            AttachmentLoadStore::ClearDontCare(clear_value) => clear_value.into(),
+            AttachmentLoadStore::DontCareDontCare => vk::ClearValue::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

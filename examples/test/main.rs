@@ -670,8 +670,7 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         shadow_pass_node.set_depth(
             "shadow_map",
             AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write(),
-            AttachmentLoadStore::CLEAR_STORE,
-            ClearValue::Depth(0.0),
+            AttachmentLoadStore::ClearStore(ClearValue::Depth(0.0)),
         );
         shadow_pass_node.set_task(Box::new(ShadowPass));
         task_graph.add_node(shadow_pass_node);
@@ -680,14 +679,12 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         main_node.add_attachment(
             "color_attachment",
             AccessType::color_attachment_write(),
-            AttachmentLoadStore::CLEAR_STORE,
-            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+            AttachmentLoadStore::ClearStore(ClearValue::Float([0.0, 0.0, 0.0, 0.0])),
         );
         main_node.set_depth(
             "depth_attachment",
             AccessType::depth_stencil_attachment_read() | AccessType::depth_stencil_attachment_write(),
-            AttachmentLoadStore::CLEAR_DONT_CARE,
-            ClearValue::Depth(0.0),
+            AttachmentLoadStore::ClearDontCare(ClearValue::Depth(0.0)),
         );
         main_node.add_internal_image("shadow_map", vk::ImageAspectFlags::DEPTH, AccessType::fragment_shader_sampled_read());
         main_node.set_task(Box::new(MainDraw));
@@ -697,8 +694,7 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         debug_node.add_attachment(
             "color_attachment",
             AccessType::color_attachment_write(),
-            AttachmentLoadStore::LOAD_STORE,
-            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+            AttachmentLoadStore::LoadStore,
         );
         debug_node.set_task(Box::new(DebugDraw));
         task_graph.add_node(debug_node);
@@ -708,8 +704,7 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         cc_node.add_attachment(
             "color_correction",
             AccessType::color_attachment_write(),
-            AttachmentLoadStore::DONT_CARE_STORE,
-            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+            AttachmentLoadStore::DontCareStore,
         );
         cc_node.set_task(Box::new(ColourCorrectionPass));
         task_graph.add_node(cc_node);
@@ -718,8 +713,7 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         egui_node.add_attachment(
             "color_correction",
             AccessType::color_attachment_write(),
-            AttachmentLoadStore::LOAD_STORE,
-            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+            AttachmentLoadStore::LoadStore,
         );
         egui_node.set_task(Box::new(EguiDraw));
         task_graph.add_node(egui_node);
@@ -728,8 +722,7 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
         present_node.add_attachment(
             "color_correction",
             AccessType::blit_src(),
-            AttachmentLoadStore::DONT_CARE_DONT_CARE,
-            ClearValue::Float([0.0, 0.0, 0.0, 0.0]),
+            AttachmentLoadStore::DontCareDontCare,
         );
         present_node.set_task(Box::new(Present));
         task_graph.add_node(present_node);
@@ -784,6 +777,10 @@ impl Task for ShadowPass {
     fn execute<'a>(&self, device: &RenderingDevice, command_buffer: vk::CommandBuffer, draw_data: &DrawData, data: &mut RendererData, stats: &mut RenderStats) {
         begin_command_label(device, command_buffer, "Shadow Pass", vec4(0.0, 0.6, 0.2, 1.0));
 
+        let mut rendering_info = draw_data.rendering_info;
+
+        rendering_info.render_area = vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent: draw_data.depth_attachment.unwrap().extent_2d() };
+
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: draw_data.depth_attachment.unwrap().extent_2d(),
@@ -799,7 +796,7 @@ impl Task for ShadowPass {
                 .y(0.0)
         ];
 
-        unsafe { device.cmd_begin_rendering(command_buffer, &draw_data.rendering_info) };
+        unsafe { device.cmd_begin_rendering(command_buffer, &rendering_info) };
 
         unsafe { device.cmd_set_viewport(command_buffer, 0, &viewports) };
         unsafe { device.cmd_set_scissor(command_buffer, 0, &scissors) };
