@@ -98,6 +98,7 @@ impl<'a> ApplicationHandler for App<'a> {
         let mut renderer = Renderer::new(&window, &settings).unwrap();
 
         setup_render_graph(&renderer.device, &mut renderer.data);
+        setup_pipelines(&renderer.device, &mut renderer.data);
 
         let white_texture = Image::load_from_file(
             &renderer.device,
@@ -114,9 +115,6 @@ impl<'a> ApplicationHandler for App<'a> {
             MipLevels::One,
             Some((Filter::MIN_LINEAR, AddressMode::REPEAT))
         );
-
-        let mut main_shader = SlangShader::new("lit", Path::new("examples/test/res/shaders/lit.slang"));
-        main_shader.load_and_compile(&renderer.device, &mut renderer.data);
 
         let projection = Projection::new(radians(45.0), renderer.width as f32 / renderer.height as f32, 0.01, 100.0);
 
@@ -288,114 +286,6 @@ impl<'a> ApplicationHandler for App<'a> {
         light_object.add_descriptor_set(light_camera_descriptor, &[(light_camera_buffer, "light_camera")], &[], "camera_data");
 
 
-        let pipeline = create_graphics_pipeline::<OBJVertex>(
-            &renderer.device,
-            main_shader.program(),
-            RasterizationData {
-                cull_mode: vk::CullModeFlags::BACK,
-                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-                polygon_mode: vk::PolygonMode::FILL,
-                line_width: 0.0,
-            },
-            MultisampleData {
-                samples: vk::SampleCountFlags::TYPE_1,
-                sample_shading_enable: false,
-            },
-            DepthStencilData {
-                depth_test_enable: true,
-                depth_write_enable: true,
-                stencil_test_enable: false,
-                compare_op: vk::CompareOp::GREATER,
-            },
-            0,
-            &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
-            &[vk::Format::R16G16B16A16_SFLOAT],
-            vk::Format::D32_SFLOAT,
-            vk::Format::UNDEFINED,
-            main_shader.layout(),
-            &[],
-            vk::PrimitiveTopology::TRIANGLE_LIST,
-            main_shader.name(),
-        );
-
-        renderer.data.slang_shaders.push(main_shader, &["main"]);
-        renderer.data.pipelines.push(pipeline, &["main"]);
-
-        let mut shadow_shader = SlangShader::new("shadow", Path::new("examples/test/res/shaders/shadow.slang"));
-        shadow_shader.load_and_compile(&renderer.device, &mut renderer.data);
-
-        let (shadow_pipeline, layout) = create_graphics_pipeline::<OBJVertex>(
-            &renderer.device,
-            shadow_shader.program(),
-            RasterizationData {
-                cull_mode: vk::CullModeFlags::FRONT,
-                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-                polygon_mode: vk::PolygonMode::FILL,
-                line_width: 0.0,
-            },
-            MultisampleData {
-                samples: vk::SampleCountFlags::TYPE_1,
-                sample_shading_enable: false,
-            },
-            DepthStencilData {
-                depth_test_enable: true,
-                depth_write_enable: true,
-                stencil_test_enable: false,
-                compare_op: vk::CompareOp::GREATER,
-            },
-            0,
-            &[],
-            &[],
-            vk::Format::D32_SFLOAT,
-            vk::Format::UNDEFINED,
-            shadow_shader.layout(),
-            &[],
-            vk::PrimitiveTopology::TRIANGLE_LIST,
-            shadow_shader.name(),
-        );
-
-        renderer.data.slang_shaders.push(shadow_shader, &["shadow"]);
-        renderer.data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
-
-        let mut debug_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/debug.slang"));
-        debug_shader.load_and_compile(&renderer.device, &mut renderer.data);
-
-        let (debug_pipeline, layout) = create_graphics_pipeline::<OBJVertex>(
-            &renderer.device,
-            debug_shader.program(),
-            RasterizationData {
-                cull_mode: vk::CullModeFlags::NONE,
-                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-                polygon_mode: vk::PolygonMode::LINE,
-                line_width: 1.0,
-            },
-            MultisampleData {
-                samples: vk::SampleCountFlags::TYPE_1,
-                sample_shading_enable: false,
-            },
-            DepthStencilData {
-                depth_test_enable: false,
-                depth_write_enable: false,
-                stencil_test_enable: false,
-                compare_op: vk::CompareOp::GREATER,
-            },
-            0,
-            &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
-            &[vk::Format::R16G16B16A16_SFLOAT],
-            vk::Format::UNDEFINED,
-            vk::Format::UNDEFINED,
-            debug_shader.layout(),
-            &[],
-            vk::PrimitiveTopology::LINE_LIST,
-            debug_shader.name(),
-        );
-
-        renderer.data.slang_shaders.push(debug_shader, &["debug"]);
-        renderer.data.pipelines.push((debug_pipeline, layout), &["debug"]);
-
-        let mut cc_shader = SlangShader::new("color_correction", Path::new("examples/test/res/shaders/color_correction.slang"));
-        cc_shader.load_and_compile(&renderer.device, &mut renderer.data);
-
         let levels = Levels {
             in_black: 0.0,
             in_white: 1.0,
@@ -440,39 +330,7 @@ impl<'a> ApplicationHandler for App<'a> {
 
         cc_object.add_descriptor_set(cc_image_descriptor, &[], &[], "colour_correction_images");
 
-        let (cc_pipeline, layout) = create_graphics_pipeline::<NullVertex>(
-            &renderer.device,
-            cc_shader.program(),
-            RasterizationData {
-                cull_mode: vk::CullModeFlags::BACK,
-                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-                polygon_mode: vk::PolygonMode::FILL,
-                line_width: 1.0,
-            },
-            MultisampleData {
-                samples: vk::SampleCountFlags::TYPE_1,
-                sample_shading_enable: false,
-            },
-            DepthStencilData {
-                depth_test_enable: false,
-                depth_write_enable: false,
-                stencil_test_enable: false,
-                compare_op: vk::CompareOp::GREATER,
-            },
-            0,
-            &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
-            &[vk::Format::R8G8B8A8_SRGB],
-            vk::Format::UNDEFINED,
-            vk::Format::UNDEFINED,
-            cc_shader.layout(),
-            &[],
-            vk::PrimitiveTopology::TRIANGLE_LIST,
-            cc_shader.name(),
-        );
-
         renderer.data.objects.push(cc_object, &["colour_correction"]);
-        renderer.data.slang_shaders.push(cc_shader, &["colour_correction"]);
-        renderer.data.pipelines.push((cc_pipeline, layout), &["colour_correction"]);
 
         self.window = Some(window);
         self.renderer = Some(renderer);
@@ -729,6 +587,153 @@ fn setup_render_graph(device: &RenderingDevice, data: &mut RendererData) {
 
         task_graph.create_images(device, data);
         data.task_graph = task_graph;
+}
+
+fn setup_pipelines(device: &RenderingDevice, data: &mut RendererData) {
+    let mut shadow_shader = SlangShader::new("shadow", Path::new("examples/test/res/shaders/shadow.slang"));
+    shadow_shader.load_and_compile(device, data);
+
+    let (shadow_pipeline, layout) = create_graphics_pipeline::<OBJVertex>(
+        device,
+        shadow_shader.program(),
+        RasterizationData {
+            cull_mode: vk::CullModeFlags::FRONT,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            polygon_mode: vk::PolygonMode::FILL,
+            line_width: 0.0,
+        },
+        MultisampleData {
+            samples: vk::SampleCountFlags::TYPE_1,
+            sample_shading_enable: false,
+        },
+        DepthStencilData {
+            depth_test_enable: true,
+            depth_write_enable: true,
+            stencil_test_enable: false,
+            compare_op: vk::CompareOp::GREATER,
+        },
+        0,
+        &[],
+        &[],
+        vk::Format::D32_SFLOAT,
+        vk::Format::UNDEFINED,
+        shadow_shader.layout(),
+        &[],
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+        shadow_shader.name(),
+    );
+
+    data.slang_shaders.push(shadow_shader, &["shadow"]);
+    data.pipelines.push((shadow_pipeline, layout), &["shadow"]);
+
+    let mut main_shader = SlangShader::new("lit", Path::new("examples/test/res/shaders/lit.slang"));
+    main_shader.load_and_compile(device, data);
+    
+    let pipeline = create_graphics_pipeline::<OBJVertex>(
+        device,
+        main_shader.program(),
+        RasterizationData {
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            polygon_mode: vk::PolygonMode::FILL,
+            line_width: 0.0,
+        },
+        MultisampleData {
+            samples: vk::SampleCountFlags::TYPE_1,
+            sample_shading_enable: false,
+        },
+        DepthStencilData {
+            depth_test_enable: true,
+            depth_write_enable: true,
+            stencil_test_enable: false,
+            compare_op: vk::CompareOp::GREATER,
+        },
+        0,
+        &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
+        &[vk::Format::R16G16B16A16_SFLOAT],
+        vk::Format::D32_SFLOAT,
+        vk::Format::UNDEFINED,
+        main_shader.layout(),
+        &[],
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+        main_shader.name(),
+    );
+
+    data.slang_shaders.push(main_shader, &["main"]);
+    data.pipelines.push(pipeline, &["main"]);
+
+    let mut debug_shader = SlangShader::new("debug", Path::new("examples/test/res/shaders/debug.slang"));
+    debug_shader.load_and_compile(device, data);
+
+    let (debug_pipeline, layout) = create_graphics_pipeline::<OBJVertex>(
+        device,
+        debug_shader.program(),
+        RasterizationData {
+            cull_mode: vk::CullModeFlags::NONE,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            polygon_mode: vk::PolygonMode::LINE,
+            line_width: 1.0,
+        },
+        MultisampleData {
+            samples: vk::SampleCountFlags::TYPE_1,
+            sample_shading_enable: false,
+        },
+        DepthStencilData {
+            depth_test_enable: false,
+            depth_write_enable: false,
+            stencil_test_enable: false,
+            compare_op: vk::CompareOp::GREATER,
+        },
+        0,
+        &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
+        &[vk::Format::R16G16B16A16_SFLOAT],
+        vk::Format::UNDEFINED,
+        vk::Format::UNDEFINED,
+        debug_shader.layout(),
+        &[],
+        vk::PrimitiveTopology::LINE_LIST,
+        debug_shader.name(),
+    );
+
+    data.slang_shaders.push(debug_shader, &["debug"]);
+    data.pipelines.push((debug_pipeline, layout), &["debug"]);
+
+    let mut cc_shader = SlangShader::new("color_correction", Path::new("examples/test/res/shaders/color_correction.slang"));
+    cc_shader.load_and_compile(device, data);
+
+    let (cc_pipeline, layout) = create_graphics_pipeline::<NullVertex>(
+        device,
+        cc_shader.program(),
+        RasterizationData {
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            polygon_mode: vk::PolygonMode::FILL,
+            line_width: 1.0,
+        },
+        MultisampleData {
+            samples: vk::SampleCountFlags::TYPE_1,
+            sample_shading_enable: false,
+        },
+        DepthStencilData {
+            depth_test_enable: false,
+            depth_write_enable: false,
+            stencil_test_enable: false,
+            compare_op: vk::CompareOp::GREATER,
+        },
+        0,
+        &[vk::PipelineColorBlendAttachmentState::default().blend_enable(false).color_write_mask(vk::ColorComponentFlags::RGBA)],
+        &[vk::Format::R8G8B8A8_SRGB],
+        vk::Format::UNDEFINED,
+        vk::Format::UNDEFINED,
+        cc_shader.layout(),
+        &[],
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+        cc_shader.name(),
+    );
+
+
+    data.slang_shaders.push(cc_shader, &["colour_correction"]);
+    data.pipelines.push((cc_pipeline, layout), &["colour_correction"]);
 }
 
 #[derive(Debug, Default)]
