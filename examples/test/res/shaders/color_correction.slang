@@ -37,9 +37,11 @@ float4 frag(
 
     float3 oklch = oklab_to_oklch(rgb_to_oklab(mapped));
     oklch.b += color_correction_data.hue_shift;
-    float3 final = oklab_to_rbg(oklch_to_oklab(oklch));
+    float3 levels_out = oklab_to_rbg(oklch_to_oklab(oklch));
 
-    return float4(final, 1.0);
+    float3 exposed = float3(1.0) - exp(-levels_out * color_correction_data.exposure);
+
+    return float4(exposed, 1.0);
 }
 
 float3 claculate_levels(float3 in_color, Levels levels) {

@@ -297,6 +297,7 @@ impl<'a> ApplicationHandler for App<'a> {
         let colour_correction_data = ColourCorrection {
             levels,
             hue_shift: 0.0,
+            exposure: 1.0,
         };
         self.colour_correction = colour_correction_data;
         let cc_buffer = Buffer::create_and_load(
@@ -409,6 +410,10 @@ impl<'a> ApplicationHandler for App<'a> {
                             });
                             ui.label("Hue Shift");
                             ui.add(egui::Slider::new(&mut self.colour_correction.hue_shift, RangeInclusive::new(0.0, 2.0 * PI)));
+                            ui.end_row();
+
+                            ui.label("Exposure");
+                            ui.add(egui::Slider::new(&mut self.colour_correction.exposure, RangeInclusive::new(0.1, 5.0)));
                             ui.end_row();
                         });
                     })
@@ -1068,6 +1073,7 @@ struct MaterialData {
 struct ColourCorrection {
     levels: Levels,
     hue_shift: f32,
+    exposure: f32,
 }
 
 #[repr(C)]

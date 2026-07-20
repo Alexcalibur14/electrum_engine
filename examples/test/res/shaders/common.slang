@@ -41,6 +41,7 @@ public struct Levels {
 public struct ColorCorrectionData {
     public Levels levels;
     public float hue_shift;
+    public float exposure;
 }
 
 public float3 rgb_to_oklab(float3 rgb) {
